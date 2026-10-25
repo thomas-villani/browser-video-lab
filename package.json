@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "bench": "node scripts/bench.mjs",
     "eval:track": "node scripts/eval-track.ts",
+    "cuts": "node scripts/scene-cuts.mjs",
     "test": "node --test \"tests/**/*.test.ts\""
   },
   "dependencies": {

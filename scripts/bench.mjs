@@ -21,11 +21,12 @@
 //   --browser  msedge | chrome                      (default msedge)
 //   --headed   show the browser window
 //   --screenshot  save results/<config>.png of the first-frame detections
-//   --dump     write every processed frame's detections to results/<name>.dets.json
+//   --dump     write every processed frame's detections to results/<video>-<name>.dets.json
 //   --score    override the model's detection threshold (e.g. 0.3 to keep weak boxes for ByteTrack)
 //   --no-build reuse the existing dist/
 import { execSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { basename, extname } from 'node:path';
 import { parseArgs } from 'node:util';
 import { chromium } from 'playwright-core';
 import { preview } from 'vite';
@@ -108,8 +109,9 @@ try {
       result.screenshot = `results/${name}.png`;
     }
     if (result.frameDetections) {
-      // Per-frame detections go to their own file; the JSONL line points at it.
-      const file = `results/${name}.dets.json`;
+      // Per-frame detections go to their own file (named by video, so dumps of different
+      // clips never overwrite each other); the JSONL line points at it.
+      const file = `results/${basename(a.video, extname(a.video))}-${name}.dets.json`;
       const { frameDetections, ...meta } = result;
       writeFileSync(file, JSON.stringify({ ...meta, frameDetections }));
       delete result.frameDetections;

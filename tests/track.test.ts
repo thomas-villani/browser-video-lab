@@ -91,6 +91,21 @@ test('adaptive: stable scenes stay sparse, changes get subdivided', () => {
   assert.ok(r.sampled.includes(40) || r.sampled.includes(39), 'bisection should find the entrance');
 });
 
+test('adaptive extendOneSided: entrances are held instead of bisected, still fully covered', () => {
+  // A stable face plus a new face entering at frame 40 (same setup as above).
+  const dets = Array.from({ length: 64 }, (_, f) => {
+    const ds = [{ box: [f, 0, 80, 80] as Box, score: 0.9 }];
+    if (f >= 40) ds.push({ box: [500, 500, 60, 60], score: 0.9 });
+    return ds;
+  });
+  const gt = dets.map((ds) => ds.map((d) => d.box));
+  const opts = { maxStride: 16, minIou: 0.3, minScore: 0.5 };
+  const bisect = adaptiveBoxes(64, (f) => dets[f], opts);
+  const extend = adaptiveBoxes(64, (f) => dets[f], { ...opts, extendOneSided: true });
+  assert.equal(coverage(gt, extend.boxes).missRate, 0);
+  assert.ok(extend.sampled.length < bisect.sampled.length, `${extend.sampled.length} vs ${bisect.sampled.length}`);
+});
+
 test('sparse offline: never drops detections even when association breaks', () => {
   // 12 px/frame at stride 10 = 120 px jumps: no IoU overlap, tracks never confirm.
   const { dets, gt } = mover(12);

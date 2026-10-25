@@ -44,11 +44,10 @@ several runs.
 ```bash
 # 1. Dump every frame's detections (low threshold keeps weak boxes for ByteTrack/hysteresis)
 npm run bench -- --model yunet --path gpu --outloc batch --depth 2 --frames 0 --dump --score 0.3 --video /media/<clip>.mp4
-# 2. Optional: scene cuts (one frame index per line)
-ffmpeg -i public/media/<clip>.mp4 -an -vf "scale=320:-2,select='gt(scene,0.3)',showinfo" -f null - 2>&1 \
-  | grep -o "pts_time:[0-9.]*" | cut -d: -f2 | awk '{printf "%d\n", $1*<fps>+0.5}' > results/<clip>.cuts.txt
+# 2. Optional: scene cuts via ffmpeg (writes results/<clip>.cuts.txt, one frame index per line)
+npm run cuts -- public/media/<clip>.mp4
 # 3. Evaluate strategies against the dense pass (JSONL on stdout, table on stderr)
-npm run eval:track -- --dump results/<name>.dets.json --cuts results/<clip>.cuts.txt --modes hold,offline,adaptive
+npm run eval:track -- --dump results/<clip>-<name>.dets.json --cuts results/<clip>.cuts.txt --modes hold,offline,adaptive
 npm test   # tracker unit tests (node:test)
 ```
 

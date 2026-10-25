@@ -13,6 +13,8 @@
 // --modes adaptive: divide-and-conquer scheduler; there, stride = the coarsest keyframe
 // spacing, --min-iou sets when endpoint detections "agree", and --low-score sets the
 // hysteresis threshold for pairing a confident box with a weak one (dump must include it).
+// --extend holds one-sided (entering/leaving) faces across an interval instead of
+// subdividing. --min-iou and --extend are single values, not matrix lists.
 //
 // stdout: JSONL (one row per stride x mode x pad). stderr: summary table.
 import { readFileSync } from 'node:fs';
@@ -33,6 +35,7 @@ const { values: a } = parseArgs({
     scene: { type: 'string', default: '0,1' },
     'min-iou': { type: 'string', default: '0.3' },
     'low-score': { type: 'string', default: '0.5' },
+    extend: { type: 'boolean', default: false },
   },
 });
 if (!a.dump) {
@@ -62,6 +65,11 @@ console.error(
 const cuts = a.cuts
   ? readFileSync(a.cuts, 'utf8').split(/\s+/).filter(Boolean).map(Number).sort((x, y) => x - y)
   : [];
+const minIou = Number(a['min-iou']);
+if (!(minIou > 0 && minIou <= 1)) {
+  console.error(`--min-iou must be a single number in (0, 1], got '${a['min-iou']}'`);
+  process.exit(2);
+}
 if (cuts.length) console.error(`cuts: ${cuts.length} (mean scene ${Math.round(n / (cuts.length + 1))} frames)`);
 
 /** GT restricted to frames within `radius` of a cut (or everything else). */
@@ -80,8 +88,9 @@ function run(stride: number, mode: SparseMode | 'adaptive', scene: number, pad: 
   const { boxes, sampled } = adaptiveBoxes(n, (f) => frames[f], {
     ...DEFAULT_ADAPTIVE,
     maxStride: stride,
-    minIou: Number(a['min-iou']),
+    minIou,
     lowScore: lowScore,
+    extendOneSided: a.extend,
     cuts: sceneCuts,
   });
   return { boxes: pad ? boxes.map((bs) => bs.map((b) => padBox(b, pad))) : boxes, detectorCalls: sampled.length };

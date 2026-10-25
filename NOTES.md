@@ -86,6 +86,45 @@ Lessons:
 5. Adaptive needs no ByteTrack at all — just endpoint matching. ByteTrack remains useful for
    stable IDs (e.g. "this person" in the redaction review UI, unblur-one-person workflows).
 
+## Three-genre corroboration (2026-10-25, session 3)
+
+The music video is near worst case for cuts, so two more clips (1080p H.264, 30 fps,
+local-only via yt-dlp):
+
+| Clip | Frames | Cuts | GT faces (≥0.6) | Character |
+|---|---:|---:|---:|---|
+| Rick Astley music video | 5,326 | 68 | 4,809 | fast cuts, dancing, ~1 face |
+| Amsterdam street walk (POV) | 11,684 | 2 | 42,052 | continuous take, moving camera, ~3.6 faces/frame, constant entries/exits |
+| AP White House briefing | 25,893 | 0 | 27,091 | fixed camera, podium speaker |
+
+Full-video YuNet pass ran at 56–63 fps on all three. Results (15% padding, scene-aware):
+
+| Clip | Fixed stride 5 | Fixed stride 10 | Adaptive max 8 | Adaptive max 32 |
+|---|---|---|---|---|
+| Music video | 22% calls, 5.6% miss | 12%, 15.8% | 30%, 1.2% | 24%, 5.0% |
+| Street walk | 20%, **24.4%** | 10%, **49.6%** | 91%, 0.12% | 91%, 0.14% |
+| Briefing | 20%, 0.6% | 10%, 1.7% | 14%, 0.06% | **5.3%, 0.11%** |
+
+Lessons:
+
+1. **Content dominates.** The same adaptive scheduler uses 5% of frames on a briefing and
+   91% on a crowded street walk, while keeping misses ≤ 0.15% on both. Fixed strides fail
+   unpredictably: fine on the briefing, catastrophic on the walk (24–50% misses).
+2. **Adaptive is the right default for redaction**: it degrades *gracefully* toward
+   dense detection when content demands it, instead of silently leaking faces.
+3. **Crowds with a moving camera are the hard case.** With several faces per frame and
+   constant entries/exits, interval endpoints almost never agree, so bisection runs down
+   toward every frame. Loosening the matching (min IoU 0.1 + hysteresis 0.3) gets to ~73%
+   of frames with 0.5% misses — a modest saving.
+4. **Holding one-sided (entering/leaving) faces instead of bisecting** (`extendOneSided`)
+   moves along the calls/misses trade-off curve rather than improving it (walk: 77% calls,
+   0.65% miss — dominated by looser matching). Held boxes are static while pedestrians walk
+   toward the camera. Kept as an option, off by default.
+5. **Implication**: for crowd footage, savings must come from cheaper detector calls, not
+   fewer. Ideas: ROI re-detection around known faces + frame borders (where entries
+   happen), a smaller input size for "is anything new?" checks, full-frame detection only
+   at intervals. That keeps the scheduler but changes the cost of each call.
+
 ## Design input (from prior video-search work)
 
 These shape the scheduler — the runtime's core idea is *spend compute where information is*:
@@ -142,8 +181,9 @@ Every tool here should be as usable by agents as by humans:
 - [x] Real test footage (Rick Astley, via yt-dlp; gitignored).
 - [x] TS ByteTrack port + offline/online sparse modes + coverage eval (`npm run eval:track`).
 - [x] Adaptive bisection scheduler (`src/track/adaptive.ts`).
-- [ ] Second test video of a different genre (talking head / bodycam-like walking) to
-      measure content dependence of adaptive sampling.
+- [x] Second/third genre (street walk, press briefing): content dependence measured.
+- [ ] Cheaper detector calls for crowd footage: ROI re-detection around tracked faces +
+      frame-border strips, reduced-resolution "anything new?" probes.
 - [ ] Wire the adaptive scheduler into the live browser pipeline (async `detect(frame)` via
       `VideoSampleSink.getSample`/`samplesAtTimestamps`; decode is cheap enough to seek).
 - [ ] GPU frame-difference shader → scene cuts, replacing ffmpeg's scene score (design input #2);
