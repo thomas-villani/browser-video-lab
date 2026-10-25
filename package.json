@@ -2,6 +2,7 @@
   "name": "browser-video-lab",
   "version": "0.0.1",
   "private": true,
+  "license": "MIT",
   "description": "Spike: zero-copy WebCodecs -> WebGPU -> ONNX Runtime Web video analysis benchmarks",
   "type": "module",
   "scripts": {

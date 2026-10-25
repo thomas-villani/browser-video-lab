@@ -65,3 +65,8 @@ npm test   # tracker unit tests (node:test)
   (divide-and-conquer scheduler), `coverage.ts` (redaction coverage metrics)
 - `scripts/eval-track.ts` — strategy evaluation against a dense detection dump
 - `tests/` — `node:test` unit tests
+
+## License
+
+[MIT](LICENSE). Models and test media are not distributed with this repo; they keep their
+own licenses (see the table under Setup).
