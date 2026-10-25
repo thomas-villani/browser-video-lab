@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Video Lab Bench</title>
+    <style>
+      body { font: 14px system-ui, sans-serif; margin: 16px; background: #111; color: #eee; }
+      a { color: #8ab4f8; }
+      canvas { max-width: 100%; border: 1px solid #333; }
+      pre { background: #1b1b1b; padding: 12px; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>Video Lab Bench</h1>
+    <p>
+      Presets:
+      <a href="?model=yunet&path=gpu">yunet / gpu</a> ·
+      <a href="?model=yunet&path=cpu">yunet / cpu</a> ·
+      <a href="?model=rfdetr16&path=gpu">rfdetr16 / gpu</a> ·
+      <a href="?model=rfdetr&path=gpu">rfdetr / gpu</a> ·
+      <a href="?path=decode">decode only</a> ·
+      <a href="?model=yunet&ep=wasm&path=cpu&frames=60">yunet / wasm</a>
+    </p>
+    <p id="status">starting...</p>
+    <canvas id="preview"></canvas>
+    <pre id="result"></pre>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

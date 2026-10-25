@@ -1,0 +1,26 @@
+{
+  "name": "browser-video-lab",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Spike: zero-copy WebCodecs -> WebGPU -> ONNX Runtime Web video analysis benchmarks",
+  "type": "module",
+  "scripts": {
+    "postinstall": "node scripts/copy-ort.mjs",
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "bench": "node scripts/bench.mjs",
+    "eval:track": "node scripts/eval-track.ts",
+    "test": "node --test \"tests/**/*.test.ts\""
+  },
+  "dependencies": {
+    "mediabunny": "^1.62.1",
+    "onnxruntime-web": "^1.30.0"
+  },
+  "devDependencies": {
+    "@webgpu/types": "^0.1.74",
+    "playwright-core": "^1.64.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5"
+  }
+}
