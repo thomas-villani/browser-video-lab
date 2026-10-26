@@ -267,6 +267,21 @@ covered.
 - RetinaFace numbers are optimistic: it seeded most candidates, so its misses only count where
   the reviewer added the face by hand.
 
+**Resolution sweep** (walk, adaptive pipeline, YuNet ≥ 0.5, pad 0.15, AC power):
+
+| Detector input | Miss | Precision | <20 px | 20–40 | 40–80 | ≥80 | Calls | Speed |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 640×384 | 50.8% | 85% | 94% | 52% | 13% | 7.5% | 90% | 72 fps |
+| 960×544 | 27.5% | 83% | 64% | 20% | 9% | 4.5% | 97% | 46 fps |
+| 1280×736 | 15.7% | 80% | 31% | 14% | 6% | 4.5% | 98% | 27 fps |
+| 1920×1088 (native) | **7.9%** | 72% | 11% | 9% | 4% | 6% | 99% | 12.5 fps |
+
+- Resolution alone closes most of the gap: native-resolution YuNet beats RetinaFace at 1080p
+  (no padding) on these labels, at ~0.4x real time on Iris Xe.
+- Cost scales with input pixels, and the scheduler saves almost nothing here (more small faces
+  found → more disagreement → more calls). Next: spend resolution only where it is needed
+  (tiles on crowd regions, or full-res only on frames the low-res pass flags as crowded).
+
 ## Design input (from prior video-search work)
 
 These shape the scheduler — the runtime's core idea is *spend compute where information is*:
