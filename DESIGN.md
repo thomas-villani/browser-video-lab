@@ -202,7 +202,9 @@ and outputs. Also the regression harness's UI.
 
 ## Open questions
 
-- Package name and scope.
+- Package name and scope. Candidates (2026-10-26; free on npm unless noted): framebase,
+  videodoc, framespace, vidtype, videostruct; unframe is taken. Leaning toward naming it after
+  the data type; the CLI name should be short to type.
 - Track storage: sampled + interpolated (compact) vs. per-frame (simpler consumers). Leaning
   sampled, with a `boxesAt(frame)` helper.
 - Sidecar format for embeddings: raw float16 + offsets, or a small Parquet/Arrow file.
