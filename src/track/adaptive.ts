@@ -53,20 +53,24 @@ export interface Sampled {
   weak: { box: Box; strong: boolean }[];
 }
 
-interface Agreement {
+export interface Agreement {
   /** Matched endpoint pairs to interpolate. */
   pairs: [Box, Box][];
   /** One-sided (entering/leaving) boxes to hold across the interval (extendOneSided only). */
   held: Box[];
+  /** Unmatched strong boxes at each end. */
+  loneA: Box[];
+  loneB: Box[];
 }
 
 /**
  * Match endpoint boxes one-to-one over the weak sets (IoU >= minIou). The endpoints agree
  * when every strong box on either side is matched — or, with `extendOneSided`, when the
- * unmatched strong boxes are all on one side. Returns null on disagreement.
+ * unmatched strong boxes are all on one side. Returns null on disagreement, unless `always`
+ * (then the caller handles the unmatched boxes itself).
  */
-function agree(a: Sampled, b: Sampled, minIou: number, extendOneSided: boolean): Agreement | null {
-  if (!a.strong.length && !b.strong.length) return { pairs: [], held: [] };
+export function agree(a: Sampled, b: Sampled, minIou: number, extendOneSided: boolean, always = false): Agreement | null {
+  if (!a.strong.length && !b.strong.length) return { pairs: [], held: [], loneA: [], loneB: [] };
   const cost = a.weak.map((x) => b.weak.map((y) => 1 - iou(x.box, y.box)));
   const { matches } = linearAssignment(cost, 1 - minIou, b.weak.length);
   const ma = new Set(matches.map((m) => m[0]));
@@ -74,12 +78,12 @@ function agree(a: Sampled, b: Sampled, minIou: number, extendOneSided: boolean):
   const loneA = a.weak.filter((x, i) => x.strong && !ma.has(i)).map((x) => x.box);
   const loneB = b.weak.filter((y, j) => y.strong && !mb.has(j)).map((y) => y.box);
   if (loneA.length || loneB.length) {
-    if (!extendOneSided || (loneA.length && loneB.length)) return null;
+    if (!always && (!extendOneSided || (loneA.length && loneB.length))) return null;
   }
   const pairs = matches
     .filter(([i, j]) => a.weak[i].strong || b.weak[j].strong)
     .map(([i, j]) => [a.weak[i].box, b.weak[j].box] as [Box, Box]);
-  return { pairs, held: [...loneA, ...loneB] };
+  return { pairs, held: [...loneA, ...loneB], loneA, loneB };
 }
 
 export interface AdaptiveResult {
@@ -89,7 +93,7 @@ export interface AdaptiveResult {
 }
 
 /** Detections reduced to what the scheduler compares. */
-export function toSampled(dets: Detection[], opts: AdaptiveOptions): Sampled {
+export function toSampled(dets: Detection[], opts: Pick<AdaptiveOptions, 'minScore' | 'lowScore'>): Sampled {
   const low = Math.min(opts.lowScore ?? opts.minScore, opts.minScore);
   const weak = dets.filter((d) => d.score >= low).map((d) => ({ box: d.box, strong: d.score >= opts.minScore }));
   return { weak, strong: weak.filter((w) => w.strong).map((w) => w.box) };

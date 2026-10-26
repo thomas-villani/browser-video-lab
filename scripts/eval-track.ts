@@ -11,6 +11,9 @@
 //
 // --cuts adds near-cut vs elsewhere miss rates; --scene 1 runs scene-aware sparse detection
 // (tracker reset per scene, detector always on each scene's first and last frame).
+// --modes roi: windowed bidirectional ROI tracking (src/track/roi.ts) with an oracle ROI
+// detector (dense detections inside the crop); stride = window, --expand = ROI size factor,
+// --group = windows packed per mosaic, --tile = ROI tile px. mpxPerFrame = model-input cost.
 // --modes adaptive: divide-and-conquer scheduler; there, stride = the coarsest keyframe
 // spacing, --min-iou sets when endpoint detections "agree", and --low-score sets the
 // hysteresis threshold for pairing a confident box with a weak one (dump must include it).
@@ -23,6 +26,7 @@ import { parseArgs } from 'node:util';
 import type { Box, Detection } from '../src/track/bytetrack.ts';
 import { coverage } from '../src/track/coverage.ts';
 import { adaptiveBoxes, DEFAULT_ADAPTIVE } from '../src/track/adaptive.ts';
+import { roiBoxes, DEFAULT_ROI } from '../src/track/roi.ts';
 import { padBox, sparse, type SparseMode } from '../src/track/sparse.ts';
 
 const { values: a } = parseArgs({
@@ -38,6 +42,9 @@ const { values: a } = parseArgs({
     'low-score': { type: 'string', default: '0.5' },
     extend: { type: 'boolean', default: false },
     pred: { type: 'string' },
+    expand: { type: 'string', default: '2.5' },
+    group: { type: 'string', default: '4' },
+    tile: { type: 'string', default: '96' },
   },
 });
 if (!a.dump) {
@@ -46,6 +53,7 @@ if (!a.dump) {
 }
 
 interface Dump {
+  video?: { width: number; height: number };
   fps_video?: number;
   decodedFrames: number;
   frameDetections: { frame: number; t: number; boxes: number[][] }[];
@@ -103,9 +111,39 @@ function nearCuts(radius: number, near: boolean): Box[][] {
 
 const scenes = cuts.length ? nums(a.scene) : [0];
 
-function run(stride: number, mode: SparseMode | 'adaptive', scene: number, pad: number, lowScore: number) {
+// Cost model in model-input pixels: a full-frame call at 640 long side (rounded up to 32), or
+// one ROI tile of --tile px per crop (what a mosaic packs).
+const [W, H] = [dump.video?.width ?? 1920, dump.video?.height ?? 1080];
+const fullPx = 640 * Math.ceil((640 * Math.min(W, H)) / Math.max(W, H) / 32) * 32;
+const tilePx = Number(a.tile) ** 2;
+
+/** Oracle ROI detector for replay: the dense pass's detections lying mostly inside the crop. */
+function oracle(f: number, crop?: Box): Detection[] {
+  if (!crop) return frames[f];
+  const [cx, cy, cw, ch] = crop;
+  return frames[f].filter(({ box: [x, y, w, h] }) => {
+    const iw = Math.min(x + w, cx + cw) - Math.max(x, cx);
+    const ih = Math.min(y + h, cy + ch) - Math.max(y, cy);
+    return iw > 0 && ih > 0 && (iw * ih) / (w * h) >= 0.6;
+  });
+}
+
+type Mode = SparseMode | 'adaptive' | 'roi';
+
+function run(stride: number, mode: Mode, scene: number, pad: number, lowScore: number, expand: number) {
   const sceneCuts = scene ? cuts : undefined;
-  if (mode !== 'adaptive') return sparse(frames, { stride, mode, fps, pad, cuts: sceneCuts });
+  const padded = (boxes: Box[][]) => (pad ? boxes.map((bs) => bs.map((b) => padBox(b, pad))) : boxes);
+  if (mode === 'roi') {
+    const r = roiBoxes(n, (q) => oracle(q.frame, q.crop), {
+      ...DEFAULT_ROI, window: stride, expand, minIou, lowScore, cuts: sceneCuts, frameW: W, frameH: H,
+    }, Number(a.group));
+    // Model invocations: full-frame calls plus one mosaic per batch of crops.
+    return { boxes: padded(r.boxes), detectorCalls: r.fullCalls + r.roiBatches, px: r.fullCalls * fullPx + r.roiCrops * tilePx, crops: r.roiCrops };
+  }
+  if (mode !== 'adaptive') {
+    const r = sparse(frames, { stride, mode, fps, pad, cuts: sceneCuts });
+    return { ...r, px: r.detectorCalls * fullPx, crops: 0 };
+  }
   const { boxes, sampled } = adaptiveBoxes(n, (f) => frames[f], {
     ...DEFAULT_ADAPTIVE,
     maxStride: stride,
@@ -114,17 +152,18 @@ function run(stride: number, mode: SparseMode | 'adaptive', scene: number, pad: 
     extendOneSided: a.extend,
     cuts: sceneCuts,
   });
-  return { boxes: pad ? boxes.map((bs) => bs.map((b) => padBox(b, pad))) : boxes, detectorCalls: sampled.length };
+  return { boxes: padded(boxes), detectorCalls: sampled.length, px: sampled.length * fullPx, crops: 0 };
 }
 
 const rows = [];
 for (const stride of nums(a.strides))
-  for (const mode of a.modes.split(',') as (SparseMode | 'adaptive')[])
+  for (const mode of a.modes.split(',') as Mode[])
     for (const scene of scenes)
       for (const pad of nums(a.pads))
-      for (const low of mode === 'adaptive' ? nums(a['low-score']) : [0.5]) {
+      for (const low of mode === 'adaptive' || mode === 'roi' ? nums(a['low-score']) : [0.5])
+      for (const expand of mode === 'roi' ? nums(a.expand) : [0]) {
         const t0 = performance.now();
-        const { boxes: pred, detectorCalls } = run(stride, mode, scene, pad, low);
+        const { boxes: pred, detectorCalls, px, crops } = run(stride, mode, scene, pad, low, expand);
         const ms = Math.round(performance.now() - t0);
         const row = {
           stride,
@@ -132,8 +171,11 @@ for (const stride of nums(a.strides))
           scene,
           pad,
           low,
+          expand,
           detectorCalls,
           callsPct: Math.round((1000 * detectorCalls) / n) / 10,
+          cropsPerFrame: Math.round((100 * crops) / n) / 100,
+          mpxPerFrame: Math.round(px / n / 1000) / 1000,
           trackMs: ms,
           ...coverage(gt, pred),
           // Where do misses happen? Near cuts = within one stride of a scene change.
@@ -147,7 +189,7 @@ for (const stride of nums(a.strides))
       }
 
 const cols = [
-  'stride', 'mode', 'scene', 'pad', 'low', 'callsPct', 'meanCoverage', 'missRate', 'fullRate', 'areaRatio',
+  'stride', 'mode', 'scene', 'pad', 'low', 'expand', 'callsPct', 'mpxPerFrame', 'meanCoverage', 'missRate', 'fullRate', 'areaRatio',
   ...(cuts.length ? (['missNearCut', 'missElsewhere'] as const) : []),
 ] as const;
 console.error(cols.map((c) => c.padStart(12)).join(''));

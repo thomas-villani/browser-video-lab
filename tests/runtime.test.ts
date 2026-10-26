@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { geometryFor, yunetFace } from '../src/models.ts';
 import { SceneScorer } from '../src/scene.ts';
 import { bisect, intervals, type AdaptiveOptions, type Sampled } from '../src/track/adaptive.ts';
+import { DEFAULT_ROI, roiBoxes } from '../src/track/roi.ts';
 import type { Box, Detection } from '../src/track/bytetrack.ts';
 
 test('intervals: stride grid, both sides of each cut, nothing spans a cut', () => {
@@ -71,4 +72,19 @@ test('geometry: dynamic input fits 16:9 tightly, crops map back to the frame', (
   const [d] = yunetFace.decode(out, roi);
   const k = 300 / 160;
   assert.deepEqual([d.x, d.y, d.w, d.h].map((v) => Math.round(v * 100) / 100), [1000 - 4 * k, 200 - 4 * k, 8 * k, 8 * k].map((v) => Math.round(v * 100) / 100));
+});
+
+test('roi: an entering face is tracked backward with crops, without full-frame calls', () => {
+  // A static face throughout; a second face enters at frame 5 and walks right 10 px/frame.
+  const dets = (f: number): Detection[] => {
+    const ds: Detection[] = [{ box: [100, 100, 50, 50], score: 0.9 }];
+    if (f >= 5) ds.push({ box: [500 + 10 * f, 300, 60, 60], score: 0.9 });
+    return ds;
+  };
+  const inCrop = (f: number, c?: Box) =>
+    dets(f).filter(({ box: [x, y, w, h] }) => !c || (x >= c[0] && y >= c[1] && x + w <= c[0] + c[2] && y + h <= c[1] + c[3]));
+  const r = roiBoxes(9, (q) => inCrop(q.frame, q.crop), { ...DEFAULT_ROI, window: 8, frameW: 1920, frameH: 1080 });
+  assert.equal(r.fullCalls, 2);
+  assert.ok(r.roiCrops >= 3 && r.roiCrops <= 4, `crops ${r.roiCrops}`);
+  for (let f = 0; f < 9; f++) assert.equal(r.boxes[f].length, f >= 5 ? 2 : 1, `frame ${f}`);
 });

@@ -160,6 +160,37 @@ Lessons:
 5. At low call rates the pipeline is now bounded by decode + ingest, not the model; next
    win there is overlapping the next window's decode with the current window's detection.
 
+## Crowds: ROI tracking simulated, not adopted (2026-10-26, session 4)
+
+`src/track/roi.ts`: full-frame detection only at window endpoints; faces that agree are
+interpolated; the rest are followed with ROI crops (forward from the start, *backward* from
+the end for entering faces — the window is retained on the GPU), with crops packed into
+mosaic calls. Simulated with an **oracle** ROI detector (dense detections ≥60% inside the
+crop), i.e. an upper bound. `eval-track --modes roi`, cost in model-input Mpx/frame.
+
+| Walk (15% pad) | Mpx/frame | Miss | Area ratio |
+|---|---:|---:|---:|
+| Adaptive (default) | 0.226 | 0.10% | 1.94 |
+| ROI, window 4, seeds ≥0.5 | 0.133 | 2.82% | 1.88 |
+| ROI, window 4, seeds ≥0.3 | 0.159 | 0.59% | 2.80 |
+| ROI, window 8, seeds ≥0.3 | 0.111 | 1.83% | 2.63 |
+
+On the music video and briefing ROI tracking loses outright (adaptive is already sparse).
+
+Lessons:
+
+1. **Misses are score flicker, not lost tracks.** 76% of ROI-mode misses (window 4) were
+   small faces (median 37 px tall) that score ≥0.6 mid-window but <0.5 at both endpoints.
+   ROI size (expand 2–3) made no difference. Seeding from weak detections halves misses
+   but over-blurs.
+2. Even with a perfect ROI detector the saving is ~30% input pixels at ~6x the misses —
+   the same frontier as loosening adaptive matching. Not worth the mosaic GPU path now.
+3. **Crowds are already fast enough for files**: adaptive at 640×384 ran the walk at
+   64 fps on battery (~2x real time). Graceful degradation to dense is acceptable.
+4. **The metric's limit shows here.** GT is the dense detector itself; when it flickers on
+   a small face, dense leaks that face too. Track gap-filling could beat "dense" against
+   human labels — which makes human-labeled GT the prerequisite for further crowd work.
+
 ## Design input (from prior video-search work)
 
 These shape the scheduler — the runtime's core idea is *spend compute where information is*:
@@ -217,16 +248,16 @@ Every tool here should be as usable by agents as by humans:
 - [x] TS ByteTrack port + offline/online sparse modes + coverage eval (`npm run eval:track`).
 - [x] Adaptive bisection scheduler (`src/track/adaptive.ts`).
 - [x] Second/third genre (street walk, press briefing): content dependence measured.
-- [ ] Cheaper detector calls for crowd footage: ROI re-detection around tracked faces +
-      frame-border strips, reduced-resolution "anything new?" probes.
+- [x] Cheaper detector calls for crowds: ROI tracking simulated (oracle); ~30% saving at 6x
+      misses, not adopted. Crowd work now waits on human GT (score flicker, see above).
 - [x] Live single-pass adaptive pipeline (`src/runtime/stream.ts`, `npm run pipeline`).
 - [x] GPU thumbnail scene cuts (`src/runtime/ingest.ts`, `src/scene.ts`); F1 0.96 vs ffmpeg.
 - [ ] Use the scene score as an extra bisection trigger (sub-threshold content change).
 - [ ] Overlap next-window decode with current-window detection (double-buffered ingest).
 - [ ] Transcript building block (Whisper via transformers.js/WebGPU) on the briefing clip.
 - [ ] GPU-side YuNet decode + compaction (score threshold → atomic append) to shrink readback.
-- [ ] Human-labeled GT for a few hundred frames, to measure the detector itself, not just
-      agreement with it.
+- [ ] **Human-labeled GT** for a few hundred frames (walk first), to measure the detector
+      itself and track gap-filling, not just agreement with the dense pass.
 - [ ] Plate model (YuNet LPD, prior-box decoding).
 - [ ] Run the bench in a Worker (OffscreenCanvas) to keep the UI thread free.
 - [ ] Re-test on a discrete GPU, a phone, and Firefox/Safari.
