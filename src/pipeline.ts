@@ -5,10 +5,13 @@
 //   ?video=/media/rickroll.mp4  &model=yunet  &maxstride=16  &miniou=0.3  &minscore=0.5
 //   &lowscore=0.5  &extend=0|1  &cut=0.15 (scene threshold, 0 = off)  &longside=640 (0 = model size)
 //   &frames=0 (0 = all)  &depth=2  &maxside=1920  &dump=0|1
+//   &refine=0|1  &tile=640x384  &overlap=32  &trigger=0.3  &grow=0  &every=2
+//     (native-resolution tiles where the reduced pass sees faces; see runtime/refine.ts)
 //
 // With dump=1 the result also holds per-frame boxes, the sampled frames, and scene scores.
 import { Detector } from './runtime/detector';
 import { VideoSource } from './runtime/source';
+import { DEFAULT_REFINE, type RefineOptions } from './runtime/refine';
 import { adaptiveStream } from './runtime/stream';
 
 declare global {
@@ -35,7 +38,14 @@ function readConfig() {
     depth: num('depth', 2),
     maxSide: num('maxside', 1920),
     dump: q.get('dump') === '1',
+    refine: q.get('refine') === '1' ? readRefine(q, num) : undefined,
   };
+}
+
+function readRefine(q: URLSearchParams, num: (k: string, d: number) => number): RefineOptions {
+  const [tileW, tileH] = (q.get('tile') || `${DEFAULT_REFINE.tileW}x${DEFAULT_REFINE.tileH}`).split('x').map(Number);
+  const d = DEFAULT_REFINE;
+  return { tileW, tileH, overlap: num('overlap', d.overlap), trigger: num('trigger', d.trigger), grow: num('grow', d.grow), every: num('every', d.every) };
 }
 
 const r1 = (v: number) => Math.round(v * 10) / 10;
@@ -44,12 +54,15 @@ async function run(cfg: ReturnType<typeof readConfig>) {
   const status = document.getElementById('status')!;
   const wall0 = performance.now();
   // The detector keeps boxes down to the hysteresis threshold; the scheduler sorts strong from weak.
-  const detector = await Detector.create({ model: cfg.model, depth: cfg.depth, score: Math.min(cfg.lowScore, cfg.minScore) });
+  // With refinement, weaker boxes still mark where to look at native resolution.
+  const score = Math.min(cfg.lowScore, cfg.minScore, cfg.refine?.trigger ?? 1);
+  const detector = await Detector.create({ model: cfg.model, depth: cfg.depth, score });
   const sessionMs = performance.now() - wall0;
   const source = await VideoSource.open(cfg.video);
 
   const boxes: number[][][] = [];
   const sampled: number[] = [];
+  let tiles = 0;
   const cuts: number[] = [];
   const sceneScores: number[] = [];
   const t0 = performance.now();
@@ -61,6 +74,7 @@ async function run(cfg: ReturnType<typeof readConfig>) {
     limit: cfg.frames,
   })) {
     if (r.sampled) sampled.push(r.frame);
+    tiles += r.tiles;
     if (r.cut) cuts.push(r.frame);
     if (cfg.dump) {
       boxes.push(r.boxes.map((b) => b.map(r1)));
@@ -78,7 +92,10 @@ async function run(cfg: ReturnType<typeof readConfig>) {
     sessionMs: r1(sessionMs),
     frames: n,
     detectorCalls: calls,
-    callsPct: r1((100 * calls) / n),
+    // Frames the reduced (full-frame) pass ran on; tile calls are counted separately.
+    callsPct: r1((100 * sampled.length) / n),
+    tileCalls: tiles,
+    tilesPerFrame: Math.round((tiles / n) * 100) / 100,
     // Model-input megapixels per video frame: a cost proxy comparable across input sizes.
     inputMpxPerFrame: Math.round((inputPixels / n / 1e6) * 1000) / 1000,
     cuts,

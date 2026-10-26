@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { geometryFor, yunetFace } from '../src/models.ts';
+import { activeTiles, mergeBoxes, ownBoxes, refinedFor, tileGrid } from '../src/runtime/refine.ts';
 import { SceneScorer } from '../src/scene.ts';
 import { bisect, intervals, type AdaptiveOptions, type Sampled } from '../src/track/adaptive.ts';
 import { DEFAULT_ROI, roiBoxes } from '../src/track/roi.ts';
@@ -87,4 +88,31 @@ test('roi: an entering face is tracked backward with crops, without full-frame c
   assert.equal(r.fullCalls, 2);
   assert.ok(r.roiCrops >= 3 && r.roiCrops <= 4, `crops ${r.roiCrops}`);
   for (let f = 0; f < 9; f++) assert.equal(r.boxes[f].length, f >= 5 ? 2 : 1, `frame ${f}`);
+});
+
+test('refine: tile grid covers the frame with the requested overlap', () => {
+  const tiles = tileGrid(1920, 1080, 640, 384, 32);
+  assert.equal(tiles.length, 12); // 4 columns x 3 rows
+  const xs = [...new Set(tiles.map((t) => t[0]))];
+  const ys = [...new Set(tiles.map((t) => t[1]))];
+  assert.deepEqual([xs[0], xs.at(-1)! + 640, ys[0], ys.at(-1)! + 384], [0, 1920, 0, 1080]);
+  for (let i = 1; i < xs.length; i++) assert.ok(xs[i - 1] + 640 - xs[i] >= 32);
+  for (let i = 1; i < ys.length; i++) assert.ok(ys[i - 1] + 384 - ys[i] >= 32);
+  assert.deepEqual(tileGrid(640, 360, 640, 384, 32), [[0, 0, 640, 360]]);
+});
+
+test('refine: active tiles, owned boxes, merging, and reuse across frames', () => {
+  const tiles = tileGrid(1920, 1080, 640, 384, 32);
+  const face: Box = [100, 100, 20, 20];
+  assert.equal(activeTiles(tiles, [face], 0).length, 1);
+  assert.ok(activeTiles(tiles, [face], 600).length > 1);
+  // A box centered in the tile is kept; one centered outside (cut by the edge) is not.
+  assert.deepEqual(ownBoxes([0, 0, 640, 384], [face, [630, 100, 30, 30]]), [face]);
+  assert.deepEqual(mergeBoxes([face], [[101, 101, 20, 20], [300, 300, 20, 20]]), [face, [300, 300, 20, 20]]);
+  const noCut = () => false;
+  assert.deepEqual(refinedFor(8, 2, 16, noCut), [8]);
+  assert.deepEqual(refinedFor(9, 2, 16, noCut), [8, 10]);
+  assert.deepEqual(refinedFor(15, 2, 15, noCut), [14]);
+  // A cut at frame 10 separates frame 9 from refined frame 10.
+  assert.deepEqual(refinedFor(9, 2, 16, (a, b) => a < 10 && 10 <= b), [8]);
 });

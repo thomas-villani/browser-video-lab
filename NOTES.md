@@ -282,6 +282,27 @@ covered.
   found → more disagreement → more calls). Next: spend resolution only where it is needed
   (tiles on crowd regions, or full-res only on frames the low-res pass flags as crowded).
 
+**Tile refinement** (`src/runtime/refine.ts`, `--refine`): the 640 pass runs as before; every
+Nth frame, native-resolution 640×384 tiles (12-tile grid, 32 px overlap) are detected wherever
+the 640 pass saw a face (score ≥ 0.3, below the scheduler's 0.5), and those boxes are merged into
+the frames in between (never across a cut). Simulated first with `npm run eval:refine`
+(oracle: the native run's boxes inside active tiles); the real runs land within ~0.5 points.
+
+| Walk, vs labels | Miss | <20 px | 20–40 | Precision | Tiles/frame | Mpx/frame | Speed |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 640 only | 50.8% | 94% | 52% | 85% | 0 | 0.23 | 72 fps |
+| Native 1920 | 7.9% | 11% | 8.6% | 72% | 0 | 2.07 | 12.5 fps |
+| 640 + tiles every frame | 8.8% | 13% | 9.4% | 70% | 3.65 | 1.14 | 19.2 fps |
+| 640 + tiles every 2nd | **8.0%** | 12% | 7.8% | 68% | 1.83 | 0.68 | **30.3 fps** |
+| 640 + tiles every 4th | 8.5% | 13% | 8.8% | 63% | 0.91 | 0.45 | **44.8 fps** |
+
+- Every 2nd frame matches native recall at 2.4x the speed; every 4th costs 0.6 points of recall
+  for 3.6x. Held boxes drift, so precision falls with N (extra blur, not missed faces).
+- Trigger threshold matters: tiles chosen from scores ≥ 0.5 only (simulated) miss 13–14%.
+- 960×544 tiles cost more than the whole frame (overlap); grow > 0 buys nothing for its cost.
+- Not yet measured on the music video / briefing (no labels there yet); on sparse content
+  few tiles activate, so the cost should approach the 640 pass.
+
 ## Design input (from prior video-search work)
 
 These shape the scheduler — the runtime's core idea is *spend compute where information is*:
@@ -352,8 +373,10 @@ Every tool here should be as usable by agents as by humans:
 - [ ] GPU-side YuNet decode + compaction (score threshold → atomic append) to shrink readback.
 - [~] **Human-labeled GT**: 100/309 frames (walk random). Remaining: music video, briefing,
       and the dense walk stretches (track gap-filling).
-- [ ] Small-face recall in crowds: higher detector resolution, tiling, or a second pass on
-      crowd regions (YuNet at 640 misses 50% of walk faces).
+- [x] Small-face recall in crowds: native tiles where the 640 pass sees faces, every 2nd
+      frame — 50.8% → 8.0% misses at 30 fps on the walk.
+- [ ] Batch a frame's tiles into one detector call (dynamic batch dim or a tile mosaic).
+- [ ] Library shape: see DESIGN.md (VideoDoc, planner, modules, CLI + MCP).
 - [ ] Plate model (YuNet LPD, prior-box decoding).
 - [ ] Run the bench in a Worker (OffscreenCanvas) to keep the UI thread free.
 - [ ] Re-test on a discrete GPU, a phone, and Firefox/Safari.

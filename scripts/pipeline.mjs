@@ -14,6 +14,8 @@
 //   --model      (default yunet)   --frames  0 = all (default 0)   --depth (default 2)
 //   --dump       write per-frame boxes, sampled frames and scene scores to
 //                results/<video>-pipeline-<name>.json (the JSONL line points at it)
+//   --refine     native-resolution tiles where the reduced pass sees faces (runtime/refine.ts);
+//                with it, matrix knobs --tile 640x384 --every 2 --grow 0 --trigger 0.3
 //   --browser msedge|chrome   --headed   --no-build
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { basename, extname } from 'node:path';
@@ -34,6 +36,11 @@ const { values: a } = parseArgs({
     frames: { type: 'string', default: '0' },
     depth: { type: 'string', default: '2' },
     dump: { type: 'boolean', default: false },
+    refine: { type: 'boolean', default: false },
+    tile: { type: 'string', default: '640x384' },
+    every: { type: 'string', default: '2' },
+    grow: { type: 'string', default: '0' },
+    trigger: { type: 'string', default: '0.3' },
     browser: { type: 'string', default: 'msedge' },
     headed: { type: 'boolean', default: false },
     'no-build': { type: 'boolean', default: false },
@@ -46,7 +53,8 @@ if (!a.video) {
 
 const list = (s) => (s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
 let combos = [{}];
-for (const k of ['maxstride', 'longside', 'cut']) {
+const knobs = ['maxstride', 'longside', 'cut', ...(a.refine ? ['tile', 'every', 'grow', 'trigger'] : [])];
+for (const k of knobs) {
   if (list(a[k]).length) combos = combos.flatMap((c) => list(a[k]).map((v) => ({ ...c, [k]: v })));
 }
 const clip = basename(a.video, extname(a.video));
@@ -54,11 +62,13 @@ const fixed = { video: a.video, model: a.model, frames: a.frames, depth: a.depth
 for (const k of ['miniou', 'minscore', 'lowscore']) if (a[k]) fixed[k] = a[k];
 if (a.extend) fixed.extend = '1';
 if (a.dump) fixed.dump = '1';
+if (a.refine) fixed.refine = '1';
 
 const rows = [];
 await withBrowser({ build: !a['no-build'], browser: a.browser, headed: a.headed }, async (open) => {
   for (const c of combos) {
-    const name = `${a.model}-m${c.maxstride}-l${c.longside}-c${c.cut}`;
+    const refine = a.refine ? `-r${c.tile}e${c.every}g${c.grow}t${c.trigger}` : '';
+    const name = `${a.model}-m${c.maxstride}-l${c.longside}-c${c.cut}${refine}`;
     console.error(`running ${clip} ${name}...`);
     const { result, page } = await open('/pipeline.html', { ...fixed, ...c });
     await page.close();
@@ -75,9 +85,10 @@ await withBrowser({ build: !a['no-build'], browser: a.browser, headed: a.headed 
   }
 });
 
-const cols = ['frames', 'detectorCalls', 'callsPct', 'inputMpxPerFrame', 'fps', 'ms'];
-console.error(`\n${'name'.padEnd(28)}${cols.map((c) => c.padStart(17)).join('')}  cuts`);
+const cols = ['frames', 'callsPct', 'tilesPerFrame', 'inputMpxPerFrame', 'fps', 'ms'];
+const w = Math.max(28, ...rows.map((r) => r.name.length + 2));
+console.error(`\n${'name'.padEnd(w)}${cols.map((c) => c.padStart(17)).join('')}  cuts`);
 for (const r of rows) {
-  if (r.error) console.error(`${r.name.padEnd(28)} ERROR ${r.error}`);
-  else console.error(`${r.name.padEnd(28)}${cols.map((c) => String(r[c]).padStart(17)).join('')}  ${r.cuts.length}`);
+  if (r.error) console.error(`${r.name.padEnd(w)} ERROR ${r.error}`);
+  else console.error(`${r.name.padEnd(w)}${cols.map((c) => String(r[c]).padStart(17)).join('')}  ${r.cuts.length}`);
 }
