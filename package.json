@@ -13,6 +13,10 @@
     "bench": "node scripts/bench.mjs",
     "pipeline": "node scripts/pipeline.mjs",
     "transcribe": "node scripts/transcribe.mjs",
+    "label:select": "node scripts/label-select.mjs",
+    "label:bootstrap": "uv run --python 3.12 --with batch-face --with torch --with opencv-python-headless --with \"numpy<2.4\" python -I tools/bootstrap_faces.py public/label",
+    "label:tasks": "node scripts/label-tasks.mjs",
+    "eval:labels": "node scripts/eval-labels.ts",
     "eval:track": "node scripts/eval-track.ts",
     "cuts": "node scripts/scene-cuts.mjs",
     "test": "node --test \"tests/**/*.test.ts\""

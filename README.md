@@ -81,6 +81,24 @@ auto-captions via `yt-dlp --write-auto-subs --sub-format vtt --skip-download`):
 node scripts/eval-transcript.ts --pred results/<clip>-transcript-<name>.json --ref results/ref/<clip>.en.vtt
 ```
 
+### Face labels (human ground truth)
+
+Model-proposed, human-verified labels, so detectors and strategies can be scored against
+people rather than against the dense YuNet pass:
+
+```bash
+npm run label:select      # choose ~300 frames (seeded) and extract JPEGs to public/label/
+npm run label:bootstrap   # RetinaFace-R50 at native resolution + flip (Python via uv, CPU)
+npm run label:tasks       # merge RetinaFace + YuNet candidates, most uncertain frames first
+npm run dev               # then open http://localhost:5173/label.html
+npm run eval:labels       # score YuNet / RetinaFace / --pred pipeline runs against the labels
+```
+
+The review page saves every frame to `results/labels/faces.jsonl` (append-only; last line
+per frame wins) through a dev-server endpoint, and resumes at the first unlabeled frame.
+Label definition: any visible face, including profile and angled; not the back of a head;
+faces under ~10 px tall are marked uncertain (ignored in scoring).
+
 ### Tracking / sparse-detection evaluation
 
 ```bash
@@ -114,6 +132,8 @@ npm test   # tracker unit tests (node:test)
 - `scripts/bench.mjs` — headless matrix runner for the bench page; `scripts/lib/harness.mjs` — shared build/serve/browser harness
 - `scripts/eval-cuts.ts` — scene-cut precision/recall vs reference cuts
 - `tools/dynamic_yunet.py` — make YuNet's input size dynamic
+- Labeling kit: `scripts/label-select.mjs`, `tools/bootstrap_faces.py`, `scripts/label-tasks.mjs`,
+  `label.html` + `src/label.ts` (review page; label store in `vite.config.ts`), `scripts/eval-labels.ts`
 - `src/track/` — dependency-free TS (runs in browser, worker, and Node):
   `bytetrack.ts` (ByteTrack port), `kalman.ts`, `assignment.ts` (Hungarian),
   `sparse.ts` (hold/online/offline sparse detection, scene-aware), `adaptive.ts`

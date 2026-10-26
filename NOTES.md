@@ -223,6 +223,26 @@ Lessons:
    briefing costs 4–8 minutes, i.e. about as much as dense face detection.
 5. Speaker changes in YouTube captions are `&gt;&gt;`; scorers must strip WebVTT entities.
 
+## Re-timing on AC power (2026-10-26)
+
+Iris Xe (gen-12lp), Edge headless, AC + "Best performance" overlay. Raw output in
+`results/retime-2026-10-26/` (local only). Same call counts and coverage as before.
+
+| Run | 640×640 input | 640×384 input | (battery, 640×384) |
+|---|---:|---:|---:|
+| Dense YuNet, every frame (bench) | 55.3 fps | 88.4 fps | — |
+| Pipeline: music video (27.5% calls) | 146 fps | **201 fps** | 142 |
+| Pipeline: street walk (90% calls) | 56 fps | **72 fps** | 64 |
+| Pipeline: briefing (8.3% calls) | 295 fps | **353 fps** | 213 |
+
+| Transcript, full briefing (863 s) | Speed | (battery) |
+|---|---:|---:|
+| VAD + whisper-base | **5.3x** real time | 3.7x |
+| VAD + whisper-small | **2.1x** real time | 1.7x |
+
+So on an integrated laptop GPU: face redaction of a 30 fps file runs at 2.4–12x real time
+depending on content (crowds slowest), and a full transcript at 2–5x real time.
+
 ## Design input (from prior video-search work)
 
 These shape the scheduler — the runtime's core idea is *spend compute where information is*:
