@@ -10,5 +10,8 @@ export default defineConfig({
   server: { headers: isolation },
   preview: { headers: isolation },
   optimizeDeps: { exclude: ['onnxruntime-web'] },
-  build: { target: 'esnext' },
+  build: {
+    target: 'esnext',
+    rollupOptions: { input: { bench: 'index.html', pipeline: 'pipeline.html' } },
+  },
 });

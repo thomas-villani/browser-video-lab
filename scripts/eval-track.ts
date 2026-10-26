@@ -7,6 +7,7 @@
 //   node scripts/eval-track.ts --dump results/<name>.dets.json
 //   node scripts/eval-track.ts --dump ... --strides 1,5,10 --modes hold,offline --pads 0,0.15
 //   node scripts/eval-track.ts --dump ... --cuts results/<video>.cuts.txt --scene 0,1
+//   node scripts/eval-track.ts --dump ... --pred results/<clip>-pipeline-<name>.json   (score a live run)
 //
 // --cuts adds near-cut vs elsewhere miss rates; --scene 1 runs scene-aware sparse detection
 // (tracker reset per scene, detector always on each scene's first and last frame).
@@ -36,6 +37,7 @@ const { values: a } = parseArgs({
     'min-iou': { type: 'string', default: '0.3' },
     'low-score': { type: 'string', default: '0.5' },
     extend: { type: 'boolean', default: false },
+    pred: { type: 'string' },
   },
 });
 if (!a.dump) {
@@ -61,6 +63,26 @@ console.error(
   `dump: ${n} frames @ ${fps} fps, ${gt.flat().length} GT boxes (score >= ${gtScore}) in ${gt.filter((g) => g.length).length} frames`,
 );
 
+const nums = (s: string) => s.split(',').map(Number);
+
+// --pred: score the boxes a live pipeline run produced (pipeline.mjs --dump) instead of
+// replaying strategies over the dump.
+if (a.pred) {
+  const cols = ['pad', 'callsPct', 'meanCoverage', 'missRate', 'fullRate', 'areaRatio'] as const;
+  console.error(`${'pred'.padEnd(44)}${cols.map((c) => c.padStart(13)).join('')}`);
+  for (const file of a.pred.split(',')) {
+    const run: { boxes: Box[][]; frames: number; callsPct: number } = JSON.parse(readFileSync(file, 'utf8'));
+    if (run.frames !== n) console.error(`warning: ${file} has ${run.frames} frames, dump has ${n}`);
+    for (const pad of nums(a.pads)) {
+      const pred = run.boxes.map((bs) => bs.map((b) => padBox(b, pad)));
+      const row = { pred: file, pad, callsPct: run.callsPct, ...coverage(gt, pred) };
+      process.stdout.write(JSON.stringify(row) + '\n');
+      console.error(`${file.slice(-44).padEnd(44)}${cols.map((c) => String(row[c]).padStart(13)).join('')}`);
+    }
+  }
+  process.exit(0);
+}
+
 // Optional scene cuts: one frame index per line (first frame of each new scene).
 const cuts = a.cuts
   ? readFileSync(a.cuts, 'utf8').split(/\s+/).filter(Boolean).map(Number).sort((x, y) => x - y)
@@ -79,7 +101,6 @@ function nearCuts(radius: number, near: boolean): Box[][] {
   return gt.map((boxes, f) => (mask[f] === near ? boxes : []));
 }
 
-const nums = (s: string) => s.split(',').map(Number);
 const scenes = cuts.length ? nums(a.scene) : [0];
 
 function run(stride: number, mode: SparseMode | 'adaptive', scene: number, pad: number, lowScore: number) {

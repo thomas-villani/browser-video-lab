@@ -125,6 +125,41 @@ Lessons:
    happen), a smaller input size for "is anything new?" checks, full-frame detection only
    at intervals. That keeps the scheduler but changes the cost of each call.
 
+## Runtime building blocks: single-pass pipeline (2026-10-26, session 4)
+
+The adaptive scheduler now runs live in the browser (`npm run pipeline`, `src/runtime/`):
+decode every frame once → GPU ingest (retain the frame for one keyframe window + 64 px
+thumbnail) → per-window thumbnail readback → scene-cut scoring → bisection over retained
+frames → detector only where needed. Laptop was **on battery**: fps values are lower bounds.
+
+| Clip | Input | Calls | Miss (15% pad) | Cuts (ffmpeg) | Pipeline fps |
+|---|---|---:|---:|---:|---:|
+| Music video | 640×640 | 27.5% | 1.31% | 69 (68) | 104 |
+| Music video | 640×384 | 27.5% | 1.31% | 69 | 142 |
+| Street walk | 640×640 | 90.6% | 0.14% | 2 (2) | 44 |
+| Street walk | 640×384 | 90.4% | 0.15% | 2 | 64 |
+| Briefing | 640×640 | 8.3% | 0.06% | 0 (0) | — |
+| Briefing | 640×384 | 8.3% | 0.16% | 0 | 213 |
+
+Lessons:
+
+1. **Live == offline.** Replaying the scheduler over the dense dump with the live run's cuts
+   selects the same frames to within 0.1% (rickroll 1,466 shared of 1,467 / 1,469). The
+   residue is the detector reading an 8-bit retained copy instead of the VideoFrame.
+2. **GPU thumbnail cuts match ffmpeg.** ffmpeg's scene formula on area-averaged 64×36
+   thumbnails needs threshold 0.15 (averaging lowers mafd vs ffmpeg's 0.3 on 320 px frames):
+   F1 0.964 on the music video (66/68, same frames), 2/2 on the walk with no false cuts from
+   camera motion, 0 on the briefing. Cost: one tiny dispatch per frame, one map per window.
+3. **Dynamic input size is a free ~1.4x.** Relaxing YuNet's fixed 640×640 input
+   (`tools/dynamic_yunet.py`, identical outputs at 640) lets 16:9 frames run at 640×384.
+   Same calls and coverage on two clips; the briefing loses a little (0.06% → 0.16% misses),
+   likely small distant faces.
+4. **Decode once, detect anywhere in the window.** Retaining a window of frames on the GPU
+   (17 × 1080p RGBA ≈ 140 MB) avoids re-decoding per bisection level, which would cost
+   more than detection itself at ~5–10% call rates.
+5. At low call rates the pipeline is now bounded by decode + ingest, not the model; next
+   win there is overlapping the next window's decode with the current window's detection.
+
 ## Design input (from prior video-search work)
 
 These shape the scheduler — the runtime's core idea is *spend compute where information is*:
@@ -184,10 +219,11 @@ Every tool here should be as usable by agents as by humans:
 - [x] Second/third genre (street walk, press briefing): content dependence measured.
 - [ ] Cheaper detector calls for crowd footage: ROI re-detection around tracked faces +
       frame-border strips, reduced-resolution "anything new?" probes.
-- [ ] Wire the adaptive scheduler into the live browser pipeline (async `detect(frame)` via
-      `VideoSampleSink.getSample`/`samplesAtTimestamps`; decode is cheap enough to seek).
-- [ ] GPU frame-difference shader → scene cuts, replacing ffmpeg's scene score (design input #2);
-      also usable as an extra "disagreement" trigger for bisection.
+- [x] Live single-pass adaptive pipeline (`src/runtime/stream.ts`, `npm run pipeline`).
+- [x] GPU thumbnail scene cuts (`src/runtime/ingest.ts`, `src/scene.ts`); F1 0.96 vs ffmpeg.
+- [ ] Use the scene score as an extra bisection trigger (sub-threshold content change).
+- [ ] Overlap next-window decode with current-window detection (double-buffered ingest).
+- [ ] Transcript building block (Whisper via transformers.js/WebGPU) on the briefing clip.
 - [ ] GPU-side YuNet decode + compaction (score threshold → atomic append) to shrink readback.
 - [ ] Human-labeled GT for a few hundred frames, to measure the detector itself, not just
       agreement with it.

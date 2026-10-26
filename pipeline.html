@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Video Lab Pipeline</title>
+    <style>
+      body { font: 14px system-ui, sans-serif; margin: 16px; background: #111; color: #eee; }
+      a { color: #8ab4f8; }
+      pre { background: #1b1b1b; padding: 12px; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>Video Lab Pipeline</h1>
+    <p>
+      Single-pass adaptive detection. Presets:
+      <a href="?video=/media/rickroll.mp4">rickroll</a> ·
+      <a href="?video=/media/briefing-full.mp4&maxstride=32">briefing</a> ·
+      <a href="?video=/media/walk.mp4&maxstride=8">walk</a> ·
+      <a href="?video=/media/rickroll.mp4&longside=640">rickroll, 640 long side</a>
+    </p>
+    <p id="status">starting...</p>
+    <pre id="result"></pre>
+    <script type="module" src="/src/pipeline.ts"></script>
+  </body>
+</html>

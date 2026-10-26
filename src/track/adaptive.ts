@@ -7,8 +7,8 @@
 // concentrate where things change (motion, entrances/exits, flicker) and stay sparse
 // where the scene is stable.
 //
-// `detect(frame)` is the only contact with the detector, so the same scheduler drives a live
-// pipeline (async detector in the browser) or a replay of recorded detections (evaluation).
+// Decisions live in the `bisect` generator, which only asks for detections and never calls a
+// detector itself, so the same logic drives a live async pipeline and an offline replay.
 
 import { linearAssignment } from './assignment.ts';
 import type { Box, Detection } from './bytetrack.ts';
@@ -46,7 +46,7 @@ function iou(a: Box, b: Box): number {
   return inter / (a[2] * a[3] + b[2] * b[3] - inter || 1);
 }
 
-interface Sampled {
+export interface Sampled {
   /** Boxes scoring at least minScore. */
   strong: Box[];
   /** Boxes scoring at least lowScore (a superset of strong). */
@@ -88,53 +88,89 @@ export interface AdaptiveResult {
   sampled: number[];
 }
 
-/** Synchronous version for replaying recorded detections (evaluation, tests). */
-export function adaptiveBoxes(n: number, detect: (frame: number) => Detection[], opts: AdaptiveOptions): AdaptiveResult {
+/** Detections reduced to what the scheduler compares. */
+export function toSampled(dets: Detection[], opts: AdaptiveOptions): Sampled {
   const low = Math.min(opts.lowScore ?? opts.minScore, opts.minScore);
-  const cache = new Map<number, Sampled>();
-  const sample = (f: number): Sampled => {
-    let s = cache.get(f);
-    if (!s) {
-      const weak = detect(f)
-        .filter((d) => d.score >= low)
-        .map((d) => ({ box: d.box, strong: d.score >= opts.minScore }));
-      s = { weak, strong: weak.filter((w) => w.strong).map((w) => w.box) };
-      cache.set(f, s);
-    }
-    return s;
-  };
-  const out: Box[][] = Array.from({ length: n }, () => []);
+  const weak = dets.filter((d) => d.score >= low).map((d) => ({ box: d.box, strong: d.score >= opts.minScore }));
+  return { weak, strong: weak.filter((w) => w.strong).map((w) => w.box) };
+}
 
-  // Scene boundaries split the video into independent spans; each span gets a coarse grid.
-  const bounds = [0, ...(opts.cuts ?? []).filter((c) => c > 0 && c < n), n];
+/**
+ * The coarse keyframe grid as intervals to solve: keyframes at multiples of `maxStride`, the
+ * last frame, and both sides of every cut; nothing spans a cut. A scene of one frame becomes
+ * the degenerate interval [f, f]. Depends only on frame indices, so a streaming pipeline that
+ * discovers cuts as it decodes builds the same grid as an offline replay.
+ */
+export function intervals(n: number, opts: Pick<AdaptiveOptions, 'maxStride' | 'cuts'>): [number, number][] {
+  const cuts = [...new Set(opts.cuts ?? [])].filter((c) => c > 0 && c < n).sort((x, y) => x - y);
+  const bounds = [0, ...cuts, n];
+  const out: [number, number][] = [];
   for (let s = 0; s + 1 < bounds.length; s++) {
     const [start, end] = [bounds[s], bounds[s + 1] - 1];
-    if (end < start) continue;
-    const grid: number[] = [];
-    for (let f = start; f < end; f += opts.maxStride) grid.push(f);
-    grid.push(end);
+    const keys = [start];
+    for (let f = Math.ceil((start + 1) / opts.maxStride) * opts.maxStride; f < end; f += opts.maxStride) keys.push(f);
+    if (end > start) keys.push(end);
+    if (keys.length === 1) out.push([start, start]);
+    for (let i = 0; i + 1 < keys.length; i++) out.push([keys[i], keys[i + 1]]);
+  }
+  return out;
+}
 
-    const solve = (a: number, b: number) => {
-      const A = sample(a);
-      const B = sample(b);
-      out[a] = A.strong;
-      out[b] = B.strong;
-      if (b - a <= 1) return;
-      const agreement = agree(A, B, opts.minIou, opts.extendOneSided ?? false);
+/**
+ * Solve one interval [a, b] by bisection. A generator, so the same decision logic serves a
+ * synchronous replay and the async browser pipeline: it yields the frames it needs detected
+ * (one batch per bisection level, which a live detector can pipeline), receives their
+ * detections in the same order, and returns boxes for frames a..b. `cache` is shared across
+ * intervals so a keyframe shared by two neighbors is detected once.
+ */
+export function* bisect(
+  a: number,
+  b: number,
+  opts: AdaptiveOptions,
+  cache: Map<number, Sampled>,
+): Generator<number[], Box[][], Detection[][]> {
+  const out: Box[][] = Array.from({ length: b - a + 1 }, () => []);
+  let pending: [number, number][] = [[a, b]];
+  let need = [...new Set([a, b])].filter((f) => !cache.has(f));
+  for (;;) {
+    if (need.length) {
+      const dets = yield need;
+      need.forEach((f, i) => cache.set(f, toSampled(dets[i], opts)));
+    }
+    const next: [number, number][] = [];
+    for (const [x, y] of pending) {
+      const X = cache.get(x)!;
+      const Y = cache.get(y)!;
+      out[x - a] = X.strong;
+      out[y - a] = Y.strong;
+      if (y - x <= 1) continue;
+      const agreement = agree(X, Y, opts.minIou, opts.extendOneSided ?? false);
       if (agreement) {
-        for (let f = a + 1; f < b; f++) {
-          const t = (f - a) / (b - a);
-          out[f] = agreement.pairs.map(([p, q]) => p.map((v, i) => v + (q[i] - v) * t) as Box);
-          out[f].push(...agreement.held);
+        for (let f = x + 1; f < y; f++) {
+          const t = (f - x) / (y - x);
+          out[f - a] = agreement.pairs.map(([p, q]) => p.map((v, i) => v + (q[i] - v) * t) as Box);
+          out[f - a].push(...agreement.held);
         }
-        return;
+      } else {
+        const mid = (x + y) >> 1;
+        next.push([x, mid], [mid, y]);
       }
-      const mid = (a + b) >> 1;
-      solve(a, mid);
-      solve(mid, b);
-    };
-    for (let i = 0; i + 1 < grid.length; i++) solve(grid[i], grid[i + 1]);
-    if (grid.length === 1) out[start] = sample(start).strong;
+    }
+    if (!next.length) return out;
+    pending = next;
+    need = [...new Set(next.flat())].filter((f) => !cache.has(f));
+  }
+}
+
+/** Synchronous driver for replaying recorded detections (evaluation, tests). */
+export function adaptiveBoxes(n: number, detect: (frame: number) => Detection[], opts: AdaptiveOptions): AdaptiveResult {
+  const cache = new Map<number, Sampled>();
+  const out: Box[][] = Array.from({ length: n }, () => []);
+  for (const [a, b] of intervals(n, opts)) {
+    const gen = bisect(a, b, opts, cache);
+    let step = gen.next();
+    while (!step.done) step = gen.next(step.value.map(detect));
+    step.value.forEach((boxes, i) => (out[a + i] = boxes));
   }
   return { boxes: out, sampled: [...cache.keys()].sort((x, y) => x - y) };
 }

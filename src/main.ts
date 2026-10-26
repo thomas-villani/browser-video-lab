@@ -4,6 +4,7 @@
 //
 //   ?model=yunet|rfdetr|rfdetr16  &ep=webgpu|wasm  &path=gpu|cpu|decode
 //   &frames=300  &stride=1  &video=/media/pan1080.mp4  &outloc=cpu|gpu|batch  &capture=0|1  &depth=1
+//   &longside=640 (dynamic-size models: input scaled to this long side, e.g. 640x384 for 16:9)
 import * as ort from 'onnxruntime-web/webgpu';
 import { ALL_FORMATS, Input, UrlSource, VideoSampleSink } from 'mediabunny';
 import { MODELS, geometryFor, type Detection } from './models';
@@ -39,6 +40,8 @@ interface Config {
   dump: boolean;
   /** Override the model's detection score threshold (lower keeps weak boxes for ByteTrack). */
   score?: number;
+  /** Dynamic-size models: scale the frame so its longer side is this many pixels. */
+  longside?: number;
 }
 
 /** Per-frame detections in the compact dump format: box = [x, y, w, h, score]. */
@@ -63,6 +66,7 @@ function readConfig(): Config {
     depth: Math.max(1, Number(q.get('depth') ?? 1)),
     dump: q.get('dump') === '1',
     score: q.has('score') ? Number(q.get('score')) : undefined,
+    longside: q.has('longside') ? Number(q.get('longside')) : undefined,
   };
 }
 
@@ -117,7 +121,7 @@ async function run(cfg: Config) {
       const device = await ort.env.webgpu.device;
       const info = device.adapterInfo;
       adapter = { vendor: info.vendor, architecture: info.architecture, description: info.description };
-      pre = cfg.path === 'gpu' ? new GpuPreprocessor(device, spec, cfg.depth) : new CpuPreprocessor(spec);
+      pre = cfg.path === 'gpu' ? new GpuPreprocessor(device, spec) : new CpuPreprocessor(spec);
       if (cfg.outloc === 'batch') readers = Array.from({ length: cfg.depth }, () => new BatchedReadback(device));
     } else {
       pre = new CpuPreprocessor(spec);
@@ -162,7 +166,7 @@ async function run(cfg: Config) {
         const slot = processed % cfg.depth;
         const frameIndex = decoded;
         const timestamp = sample.timestamp;
-        const geo = geometryFor(spec, frame.displayWidth, frame.displayHeight);
+        const geo = geometryFor(spec, frame.displayWidth, frame.displayHeight, { longSide: cfg.longside });
         const t1 = performance.now();
         const tensor = pre.run(frame, geo, slot);
         const t2 = performance.now();
