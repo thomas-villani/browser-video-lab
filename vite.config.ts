@@ -12,6 +12,6 @@ export default defineConfig({
   optimizeDeps: { exclude: ['onnxruntime-web'] },
   build: {
     target: 'esnext',
-    rollupOptions: { input: { bench: 'index.html', pipeline: 'pipeline.html' } },
+    rollupOptions: { input: { bench: 'index.html', pipeline: 'pipeline.html', transcribe: 'transcribe.html' } },
   },
 });

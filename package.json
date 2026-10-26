@@ -12,11 +12,13 @@
     "typecheck": "tsc --noEmit",
     "bench": "node scripts/bench.mjs",
     "pipeline": "node scripts/pipeline.mjs",
+    "transcribe": "node scripts/transcribe.mjs",
     "eval:track": "node scripts/eval-track.ts",
     "cuts": "node scripts/scene-cuts.mjs",
     "test": "node --test \"tests/**/*.test.ts\""
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.3.1",
     "mediabunny": "^1.62.1",
     "onnxruntime-web": "^1.30.0"
   },

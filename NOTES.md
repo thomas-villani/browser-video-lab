@@ -191,6 +191,38 @@ Lessons:
    a small face, dense leaks that face too. Track gap-filling could beat "dense" against
    human labels — which makes human-labeled GT the prerequisite for further crowd work.
 
+## Transcript building block: Whisper + VAD in the browser (2026-10-26, session 4)
+
+`npm run transcribe`: mediabunny audio decode → 16 kHz mono (OfflineAudioContext resampler)
+→ Silero VAD v5 (wasm, ~40x real time) → speech spans packed into ≤28 s chunks → Whisper via
+transformers.js on WebGPU, one call per chunk. Reference: YouTube auto-captions (also ASR,
+so WER is relative, not absolute). Briefing clip, 14.4 min, laptop **on battery**.
+
+| Run | Speed | WER |
+|---|---:|---:|
+| whisper-base, whole file (no VAD), first 2 min | 2.2x | 85.6% |
+| whisper-base + VAD, first 2 min | 3.8x | 3.7% |
+| whisper-small + VAD, first 2 min | 1.9x | 2.8% |
+| whisper-base (q4 decoder) + VAD, full | 3.7x | 9.4% |
+| whisper-base (fp32 decoder) + VAD, full | 3.5x | 8.6% |
+| whisper-small (q4 decoder) + VAD, full | 1.7x | 6.8% |
+
+Lessons:
+
+1. **Never show Whisper silence.** Without VAD, base looped "Good morning" ~100 times over
+   the 6.5 s silent lead-in, swallowed the next sentence, and its timestamps stretched across
+   silences (99% "speech"). VAD gating: 85.6% → 3.7% WER *and* faster (no wasted decoding).
+2. **VAD is the speech-coverage signal** (design input #1): speech onset 6.46 s vs captions
+   6.56 s; 93.8% speech and 3 silent gaps ≥2 s on the briefing. Whisper's own timestamps
+   are not usable for this.
+3. Base has a residual failure: a chunk returned in exact 3 s segments with truncated words
+   (fp32 decoder too); small transcribes the same audio cleanly. A `dropRepeats` guard
+   removes the remaining repetition loops (10.3% → 9.4%).
+4. Quality/speed knob: base ≈3.6x real time at ~9% WER, small ≈1.7x at ~7%, on an
+   integrated GPU on battery. Both are fine for files; the transcript of a 15-minute
+   briefing costs 4–8 minutes, i.e. about as much as dense face detection.
+5. Speaker changes in YouTube captions are `&gt;&gt;`; scorers must strip WebVTT entities.
+
 ## Design input (from prior video-search work)
 
 These shape the scheduler — the runtime's core idea is *spend compute where information is*:
@@ -254,7 +286,10 @@ Every tool here should be as usable by agents as by humans:
 - [x] GPU thumbnail scene cuts (`src/runtime/ingest.ts`, `src/scene.ts`); F1 0.96 vs ffmpeg.
 - [ ] Use the scene score as an extra bisection trigger (sub-threshold content change).
 - [ ] Overlap next-window decode with current-window detection (double-buffered ingest).
-- [ ] Transcript building block (Whisper via transformers.js/WebGPU) on the briefing clip.
+- [x] Transcript building block: Silero VAD + Whisper (transformers.js/WebGPU), speech coverage.
+- [ ] Transcript-guided sampling: feed VAD gaps + scene cuts into keyframe selection for captioning.
+- [ ] One GPU device for detector + Whisper (transformers.js bundles its own onnxruntime-web).
+- [ ] Word-level timestamps (Whisper cross-attention models) for precise search hits.
 - [ ] GPU-side YuNet decode + compaction (score threshold → atomic append) to shrink readback.
 - [ ] **Human-labeled GT** for a few hundred frames (walk first), to measure the detector
       itself and track gap-filling, not just agreement with the dense pass.

@@ -17,6 +17,8 @@ Models and media are not committed. Fetch them into `public/`:
 | `public/models/yunet_face.onnx` | huggingface.co/opencv/face_detection_yunet (`face_detection_yunet_2023mar.onnx`) | MIT |
 | `public/models/yunet_plate.onnx` | huggingface.co/opencv/license_plate_detection_yunet | see repo LICENSE |
 | `public/models/rfdetr_nano.onnx`, `rfdetr_nano_fp16.onnx` | huggingface.co/onnx-community/rfdetr_nano-ONNX | Apache-2.0 |
+| `public/models/silero_vad.onnx` | github.com/snakers4/silero-vad (`src/silero_vad/data/silero_vad.onnx`) | MIT |
+| `public/models/onnx-community/whisper-*/` | `node scripts/fetch-model.mjs onnx-community/whisper-base encoder_model decoder_model_merged_q4` | Apache-2.0 (OpenAI Whisper: MIT) |
 | `public/media/pan1080.mp4` | any 1080p H.264 clip | — |
 
 Then relax YuNet's fixed 640x640 input so it runs at any multiple of 32 (outputs are
@@ -63,6 +65,22 @@ node scripts/eval-track.ts --dump results/<clip>.dets.json --pred results/<clip>
 node scripts/eval-cuts.ts --pred results/<clip>-pipeline-<name>.json --ref results/<clip>.cuts.txt
 ```
 
+### Transcript (Whisper + VAD in the browser)
+
+```bash
+npm run transcribe -- --video /media/<clip>.mp4 [--seconds 120] [--model onnx-community/whisper-small]
+```
+
+Decodes the audio track (16 kHz mono), finds speech with Silero VAD, and transcribes only
+the speech spans with Whisper on WebGPU (transformers.js). stdout: one JSON summary per run
+(speed vs real time, words, speech coverage %, silent gaps); segments and speech spans go to
+`results/<clip>-transcript-<name>.json`. Score against reference captions (e.g. YouTube
+auto-captions via `yt-dlp --write-auto-subs --sub-format vtt --skip-download`):
+
+```bash
+node scripts/eval-transcript.ts --pred results/<clip>-transcript-<name>.json --ref results/ref/<clip>.en.vtt
+```
+
 ### Tracking / sparse-detection evaluation
 
 ```bash
@@ -85,6 +103,11 @@ npm test   # tracker unit tests (node:test)
   `ingest.ts` (`FrameIngest`: GPU frame retention + thumbnails, one readback per window),
   `stream.ts` (`adaptiveStream`: decode once, cut-aware adaptive detection)
 - `src/scene.ts` — ffmpeg-style scene score from thumbnails
+- `src/runtime/audio.ts` (`decodeAudio`: mono PCM at 16 kHz), `vad.ts` (Silero VAD), `transcribe.ts`
+  (`Transcriber`: Whisper via transformers.js, whole-file or per speech span)
+- `src/transcript.ts` — VAD spans, Whisper chunk packing, speech coverage and silent gaps (pure TS)
+- `src/transcribe-page.ts` + `scripts/transcribe.mjs` — transcript page and its headless runner
+- `scripts/eval-transcript.ts` — WER against a reference WebVTT; `scripts/fetch-model.mjs` — local HF model download
 - `src/preprocess.ts` — `GpuPreprocessor` (VideoFrame or GPUTexture, crop, any input size) and `CpuPreprocessor` baseline
 - `src/readback.ts` — per-tensor vs batched single-map GPU readback
 - `src/models.ts` — model specs + output decoders (YuNet, RF-DETR), NMS

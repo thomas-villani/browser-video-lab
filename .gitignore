@@ -2,7 +2,9 @@ node_modules/
 dist/
 results/
 public/ort/
+public/ort-hf/
 public/models/*.onnx
+public/models/*/
 public/media/*.mp4
 public/media/*.jpg
 *.log
