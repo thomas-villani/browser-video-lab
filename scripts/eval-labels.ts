@@ -103,7 +103,7 @@ for (const src of sources) {
           correct += pred.filter((b) => known.some((g) => iou(b, g) >= 0.3 || covers(b, g))).length;
         }
       }
-      if (!faces && bucket !== 'all') continue;
+      if (!frames || (!faces && bucket !== 'all')) continue;
       const r = (v: number) => Math.round(v * 1000) / 10;
       const row = {
         source: src.name, clip, bucket, frames, faces, missed,

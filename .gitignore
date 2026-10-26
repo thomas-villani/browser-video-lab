@@ -1,6 +1,8 @@
 node_modules/
 dist/
-results/
+results/*
+# Human face labels are expensive to redo; keep them (and the bootstrap they were reviewed against).
+!results/labels/
 public/ort/
 public/ort-hf/
 public/models/*.onnx
@@ -9,4 +11,7 @@ public/media/*.mp4
 public/media/*.jpg
 *.log
 *.jsonl
-public/label/
+public/label/*
+!public/label/frames.json
+!public/label/retina.json
+!results/labels/*.jsonl

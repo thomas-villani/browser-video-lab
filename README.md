@@ -99,6 +99,10 @@ per frame wins) through a dev-server endpoint, and resumes at the first unlabele
 Label definition: any visible face, including profile and angled; not the back of a head;
 faces under ~10 px tall are marked uncertain (ignored in scoring).
 
+The labels, the frame list (`public/label/frames.json`) and the RetinaFace bootstrap
+(`public/label/retina.json`) are committed; with the clips in place, `label:select` re-extracts
+the same JPEGs and you can skip `label:bootstrap`.
+
 ### Tracking / sparse-detection evaluation
 
 ```bash

@@ -243,6 +243,30 @@ Iris Xe (gen-12lp), Edge headless, AC + "Best performance" overlay. Raw output i
 So on an integrated laptop GPU: face redaction of a 30 fps file runs at 2.4–12x real time
 depending on content (crowds slowest), and a full transcript at 2–5x real time.
 
+## Human face labels: first 100 frames (2026-10-26)
+
+Kit: `label:select` → `label:bootstrap` (RetinaFace-R50, native 1080p + flip, CPU, 37 min) →
+`label:tasks` (merge with YuNet dense) → `label.html` review → `eval:labels`. "Face" = any
+visible face incl. profile; not the back of a head; <~10 px, mannequins, posters → uncertain
+(ignored in scoring). Labels: `results/labels/faces.jsonl` (tracked).
+
+First session: the 100 hardest random **walk** frames (861 faces; 74 added by hand that neither
+model proposed; 246 proposals rejected). 54 min, median 21 s/frame. Miss = <50% of the face
+covered.
+
+| Source | Miss | Precision | <20 px | 20–40 | 40–80 | ≥80 |
+|---|---:|---:|---:|---:|---:|---:|
+| YuNet 640, score ≥ 0.5 (pipeline setting) | **50%** | 85% | 94% | 51% | 12% | 7.5% |
+| YuNet 640, score ≥ 0.3 | 35% | 59% | 80% | 27% | 8% | 4.5% |
+| RetinaFace 1080p, ≥ 0.5 | **17%** | 94% | 37% | 12% | 8% | 3% |
+| Adaptive pipeline (YuNet, pad 0.15) | 51% | 85% | 94% | 52% | 13% | 7.5% |
+
+- The earlier walk "0.15% misses" measured the scheduler against YuNet's own dense pass, not
+  recall. The scheduler itself costs <1 point (50.1 → 50.8%); **the detector is the gap**.
+- Downscaling 1080p → 640 wide shrinks a 30 px face to ~18 px, below YuNet's useful range.
+- RetinaFace numbers are optimistic: it seeded most candidates, so its misses only count where
+  the reviewer added the face by hand.
+
 ## Design input (from prior video-search work)
 
 These shape the scheduler — the runtime's core idea is *spend compute where information is*:
@@ -311,8 +335,10 @@ Every tool here should be as usable by agents as by humans:
 - [ ] One GPU device for detector + Whisper (transformers.js bundles its own onnxruntime-web).
 - [ ] Word-level timestamps (Whisper cross-attention models) for precise search hits.
 - [ ] GPU-side YuNet decode + compaction (score threshold → atomic append) to shrink readback.
-- [ ] **Human-labeled GT** for a few hundred frames (walk first), to measure the detector
-      itself and track gap-filling, not just agreement with the dense pass.
+- [~] **Human-labeled GT**: 100/309 frames (walk random). Remaining: music video, briefing,
+      and the dense walk stretches (track gap-filling).
+- [ ] Small-face recall in crowds: higher detector resolution, tiling, or a second pass on
+      crowd regions (YuNet at 640 misses 50% of walk faces).
 - [ ] Plate model (YuNet LPD, prior-box decoding).
 - [ ] Run the bench in a Worker (OffscreenCanvas) to keep the UI thread free.
 - [ ] Re-test on a discrete GPU, a phone, and Firefox/Safari.
