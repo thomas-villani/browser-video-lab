@@ -28,6 +28,28 @@ identical at 640x640; smaller inputs enable 640x384 for 16:9 frames and small RO
 uv run --with onnx --with onnxruntime python tools/dynamic_yunet.py public/models/yunet_face.onnx public/models/yunet_face_dyn.onnx
 ```
 
+## videodoc CLI
+
+The library taking shape (see [DESIGN.md](DESIGN.md)): analyze a video once into a saved
+document of time-indexed layers, then query it. Compute runs in a local headless Edge/Chrome
+(WebGPU); the video is served to it from disk, never uploaded.
+
+```bash
+npm run videodoc -- check                                  # browser, WebGPU adapter, decoders, models
+npm run videodoc -- analyze talk.mp4                       # speech, transcript, scenes -> talk.mp4.videodoc.json
+npm run videodoc -- analyze talk.mp4 --layers faces --set faces.every=4
+npm run videodoc -- info talk.mp4                          # summarize a saved doc (no browser)
+npm run videodoc -- layers                                 # layers, dependencies, settings + defaults (JSON)
+```
+
+- Layers: `speech` (Silero VAD), `transcript` (Whisper), `scenes` (shots), `faces` (tracks).
+  Dependencies are added automatically; layers already in the doc with the same settings are
+  reused, and with nothing left to compute no browser starts. `--dry-run` prints the plan.
+- stdout: one JSON object per command (agents); stderr: progress and a summary (people).
+  Exit codes: 0 ok, 1 failure, 2 usage error.
+- The doc's format is `src/doc/schema.ts`; one layer item per line. `src/doc` is dependency-free
+  and runs in Node; `analyze()` in `src/analyze.ts` is the same pipeline as a browser API.
+
 ## Run
 
 Interactive: `npm run dev`, then open the printed URL. Preset links are on the page; every
@@ -117,6 +139,9 @@ npm test   # tracker unit tests (node:test)
 
 ## Layout
 
+- `cli/videodoc.ts` — the videodoc CLI; `analyze.html` + `src/analyze-page.ts` — the compute page it drives
+- `src/doc/` — the VideoDoc: schema, planner (`PRODUCERS`), track linking/compression, hashing, load/save (pure TS)
+- `src/analyze.ts` — `computeLayers` (one audio pass, one shared video decode) and the browser `analyze()`
 - `src/main.ts` — benchmark loop (decode → preprocess → infer → readback → decode outputs), in-flight ring
 - `src/pipeline.ts` + `scripts/pipeline.mjs` — single-pass adaptive pipeline page and its headless runner
 - `src/runtime/` — reusable building blocks:

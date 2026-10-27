@@ -86,7 +86,7 @@ export async function* adaptiveStream(
   const refine = async (f: number, current: Box[]) => {
     if (!r || refined.has(f)) return;
     if (!raw.has(f)) await detect(f);
-    const triggers = [...current, ...raw.get(f)!.filter((d) => d.score >= r.trigger).map((d) => d.box)];
+    const triggers = [...current, ...raw.get(f)!.filter((d) => d.score >= r.trigger).map((d) => d.box)].filter((b) => !r.small || b[3] < r.small);
     const active = activeTiles(tiles, triggers, r.grow);
     const found = await Promise.all(
       active.map(async (t) => {

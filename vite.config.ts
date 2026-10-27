@@ -48,8 +48,10 @@ export default defineConfig({
   optimizeDeps: { exclude: ['onnxruntime-web'] },
   build: {
     target: 'esnext',
+    // ORT and transformers.js are large by nature; the warning is noise here.
+    chunkSizeWarningLimit: 4096,
     rollupOptions: {
-      input: { bench: 'index.html', pipeline: 'pipeline.html', transcribe: 'transcribe.html', label: 'label.html' },
+      input: { bench: 'index.html', pipeline: 'pipeline.html', transcribe: 'transcribe.html', label: 'label.html', analyze: 'analyze.html' },
     },
   },
 });

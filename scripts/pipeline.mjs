@@ -15,7 +15,7 @@
 //   --dump       write per-frame boxes, sampled frames and scene scores to
 //                results/<video>-pipeline-<name>.json (the JSONL line points at it)
 //   --refine     native-resolution tiles where the reduced pass sees faces (runtime/refine.ts);
-//                with it, matrix knobs --tile 640x384 --every 2 --grow 0 --trigger 0.3
+//                with it, matrix knobs --tile 640x384 --every 2 --grow 0 --trigger 0.3 --small 120
 //   --browser msedge|chrome   --headed   --no-build
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { basename, extname } from 'node:path';
@@ -41,6 +41,7 @@ const { values: a } = parseArgs({
     every: { type: 'string', default: '2' },
     grow: { type: 'string', default: '0' },
     trigger: { type: 'string', default: '0.3' },
+    small: { type: 'string', default: '120' },
     browser: { type: 'string', default: 'msedge' },
     headed: { type: 'boolean', default: false },
     'no-build': { type: 'boolean', default: false },
@@ -53,7 +54,7 @@ if (!a.video) {
 
 const list = (s) => (s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
 let combos = [{}];
-const knobs = ['maxstride', 'longside', 'cut', ...(a.refine ? ['tile', 'every', 'grow', 'trigger'] : [])];
+const knobs = ['maxstride', 'longside', 'cut', ...(a.refine ? ['tile', 'every', 'grow', 'trigger', 'small'] : [])];
 for (const k of knobs) {
   if (list(a[k]).length) combos = combos.flatMap((c) => list(a[k]).map((v) => ({ ...c, [k]: v })));
 }
@@ -67,7 +68,7 @@ if (a.refine) fixed.refine = '1';
 const rows = [];
 await withBrowser({ build: !a['no-build'], browser: a.browser, headed: a.headed }, async (open) => {
   for (const c of combos) {
-    const refine = a.refine ? `-r${c.tile}e${c.every}g${c.grow}t${c.trigger}` : '';
+    const refine = a.refine ? `-r${c.tile}e${c.every}g${c.grow}t${c.trigger}s${c.small}` : '';
     const name = `${a.model}-m${c.maxstride}-l${c.longside}-c${c.cut}${refine}`;
     console.error(`running ${clip} ${name}...`);
     const { result, page } = await open('/pipeline.html', { ...fixed, ...c });

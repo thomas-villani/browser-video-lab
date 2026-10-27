@@ -1,38 +1,108 @@
 // Shared headless harness: build the pages, serve them with `vite preview`, and drive
 // Edge/Chrome via playwright-core. A page signals completion by setting window.__BENCH_RESULT__.
 import { execSync } from 'node:child_process';
+import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { chromium } from 'playwright-core';
 import { preview } from 'vite';
 
+/** Build sources: anything newer than the last build means the build is stale. */
+const SOURCES = ['src', 'index.html', 'pipeline.html', 'transcribe.html', 'label.html', 'analyze.html', 'vite.config.ts'];
+
+function newest(path) {
+  const s = statSync(path);
+  if (!s.isDirectory()) return s.mtimeMs;
+  return Math.max(0, ...readdirSync(path).map((f) => newest(join(path, f))));
+}
+
+export function buildIsStale() {
+  if (!existsSync('dist/analyze.html')) return true;
+  const built = statSync('dist/analyze.html').mtimeMs;
+  return SOURCES.some((p) => existsSync(p) && newest(p) > built);
+}
+
 /**
- * Run `fn(open)` with a served build and a browser. `open(page, params)` loads e.g.
- * `pipeline.html?<params>` and resolves with { result, page } once the page reports a result.
+ * Serve local files to the page at `/@file/<key>`, with range requests (mediabunny reads
+ * videos in ranges, so large files are never loaded whole).
  */
-export async function withBrowser({ build = true, browser = 'msedge', headed = false }, fn) {
-  if (build) {
+function serveFiles(files) {
+  return {
+    name: 'serve-local-files',
+    configurePreviewServer(server) {
+      server.middlewares.use('/@file/', (req, res) => {
+        const key = decodeURIComponent((req.url ?? '').replace(/^\//, '').split('?')[0]);
+        const path = files[key];
+        if (!path) {
+          res.statusCode = 404;
+          return res.end();
+        }
+        const size = statSync(path).size;
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Content-Type', 'application/octet-stream');
+        const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
+        let [start, end] = [0, size - 1];
+        if (m) {
+          start = m[1] ? Number(m[1]) : Math.max(0, size - Number(m[2]));
+          end = m[1] && m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;
+          if (start >= size || start > end) {
+            res.statusCode = 416;
+            res.setHeader('Content-Range', `bytes */${size}`);
+            return res.end();
+          }
+          res.statusCode = 206;
+          res.setHeader('Content-Range', `bytes ${start}-${end}/${size}`);
+        }
+        res.setHeader('Content-Length', end - start + 1);
+        if (req.method === 'HEAD') return res.end();
+        createReadStream(path, { start, end }).pipe(res);
+      });
+    },
+  };
+}
+
+/** A page whose first few browser errors (first line each) are relayed to stderr. */
+export async function newPage(browser) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  let relayed = 0;
+  const relay = (kind, text) => relayed++ < 5 && console.error(`  [${kind}] ${text.split('\n')[0].slice(0, 200)}`);
+  page.on('pageerror', (e) => relay('pageerror', e.message));
+  page.on('console', (m) => m.type() === 'error' && relay('console', m.text()));
+  return page;
+}
+
+/**
+ * Run `fn(open, ctx)` with a served build and a browser. `open(page, params)` loads e.g.
+ * `pipeline.html?<params>` and resolves with { result, page } once the page reports a result.
+ * `ctx` = { browser, base } for drivers that talk to a page directly. `files` maps keys to
+ * local paths served at `${base}@file/<key>`. `build`: true, false, or 'auto' (when stale).
+ */
+export async function withBrowser({ build = true, browser = 'msedge', headed = false, files = {} }, fn) {
+  if (build === true || (build === 'auto' && buildIsStale())) {
     console.error('building...');
     execSync('npx vite build --logLevel warn', { stdio: ['ignore', 'ignore', 'inherit'] });
   }
-  const server = await preview({ preview: { port: 4317, strictPort: false }, logLevel: 'warn' });
+  const server = await preview({ preview: { port: 4317, strictPort: false }, logLevel: 'warn', plugins: [serveFiles(files)] });
   const base = server.resolvedUrls.local[0];
-  const b = await chromium.launch({
-    channel: browser,
-    headless: !headed,
-    args: ['--enable-unsafe-webgpu', '--ignore-gpu-blocklist'],
-  });
+  let b;
+  try {
+    b = await chromium.launch({
+      channel: browser,
+      headless: !headed,
+      args: ['--enable-unsafe-webgpu', '--ignore-gpu-blocklist'],
+    });
+  } catch (e) {
+    await server.close();
+    const other = browser === 'msedge' ? 'chrome' : 'msedge';
+    throw new Error(`could not launch ${browser} (${e.message.split('\n')[0]}); install it or pass --browser ${other}`);
+  }
   const open = async (path, params, { timeoutMs = 30 * 60_000 } = {}) => {
-    const page = await b.newPage({ viewport: { width: 1280, height: 900 } });
-    // Relay only the first few browser errors (first line each) so a failing shader can't flood the output.
-    let relayed = 0;
-    const relay = (kind, text) => relayed++ < 5 && console.error(`  [${kind}] ${text.split('\n')[0].slice(0, 200)}`);
-    page.on('pageerror', (e) => relay('pageerror', e.message));
-    page.on('console', (m) => m.type() === 'error' && relay('console', m.text()));
+    const page = await newPage(b);
     await page.goto(`${base}${path}?${new URLSearchParams(params)}`);
     await page.waitForFunction(() => window.__BENCH_RESULT__, null, { timeout: timeoutMs, polling: 250 });
     return { result: await page.evaluate(() => window.__BENCH_RESULT__), page };
   };
   try {
-    return await fn(open);
+    return await fn(open, { browser: b, base });
   } finally {
     await b.close();
     await server.close();

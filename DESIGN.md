@@ -1,7 +1,8 @@
 # Library design (draft)
 
-How the spike's building blocks become a library. Status: proposal; names are placeholders
-(`videolab`). Decisions so far:
+How the spike's building blocks become a library, **videodoc** (named after its data type;
+decided 2026-10-26). Status: roadmap step 1 is built (`src/doc`, `src/analyze.ts`,
+`cli/videodoc.ts`); the rest is proposal. Decisions so far:
 
 - **Analyze once, query many times.** Analysis produces a saved, versioned document; every
   feature (markdown, search, summaries, counting, redaction) reads from it.
@@ -13,8 +14,8 @@ How the spike's building blocks become a library. Status: proposal; names are pl
 ## Layers
 
 ```
-@videolab/core     decode, ingest, detector, adaptive scheduler, scenes, VAD, ASR, model registry
-@videolab/doc      VideoDoc schema (versioned JSON Schema), planner, load/save, refs
+videodoc/core      decode, ingest, detector, adaptive scheduler, scenes, VAD, ASR, model registry
+videodoc/doc       VideoDoc schema (versioned JSON Schema), planner, load/save, refs
 modules            markdown · search · redact · count · summarize
 surfaces           JS API (worker by default) · CLI · MCP server · demo web app
 ```
@@ -32,18 +33,19 @@ surfaces           JS API (worker by default) · CLI · MCP server · demo web a
 ## The VideoDoc
 
 One JSON document per video: time-indexed **layers** on a common timeline (seconds, plus frame
-indices where frames matter). Saved next to the video as `<video>.videolab.json`, with large
-binary data (embeddings) in a sidecar `<video>.videolab.bin`.
+indices where frames matter). Saved next to the video as `<video>.videodoc.json`, with large
+binary data (embeddings) in a sidecar `<video>.videodoc.bin`. Types: `src/doc/schema.ts`.
+Serialized with one layer item per line (`formatDoc`), so docs stay greppable and diffs small.
 
 ```ts
 interface VideoDoc {
-  schema: 'videolab.doc/0';
+  schema: 'videodoc/0';
   source: {
     name: string;
-    /** Cheap identity: size + SHA-256 of the first and last MiB + duration. Lets a doc be
-     *  matched to its video without hashing gigabytes in the browser. */
+    /** Cheap identity: "v0:<size>:<SHA-256 of the first and last MiB>". Lets a doc be matched
+     *  to its video without decoding it or hashing gigabytes (Node and browser compute it alike). */
     fingerprint: string;
-    duration: number; width: number; height: number; fps: number;
+    size: number; duration: number; width: number; height: number; fps: number; frames: number;
     video: { codec: string }; audio?: { codec: string; sampleRate: number; channels: number };
   };
   layers: Partial<{
@@ -66,8 +68,8 @@ interface Layer<T> {
   items: T[];
 }
 
-/** A tracked object: sampled boxes (frame, x, y, w, h, score); boxes between samples are
- *  linearly interpolated. Compact for long videos; per-frame boxes are derived on demand. */
+/** A tracked object: sampled boxes [frame, x, y, w, h]; boxes between samples are linearly
+ *  interpolated (`boxesAt`), within max(1 px, 2%) of the boxes the pipeline produced. */
 interface Track { id: number; f0: number; f1: number; samples: number[][] }
 
 /** Pointer to an item in another layer, e.g. "transcript/12", "keyframes/3". */
@@ -77,7 +79,9 @@ type Ref = `${string}/${number}`;
 Rules:
 
 - **Layers are append/replace, never edited in place.** Re-running with the same config is a
-  no-op (`configHash` match); a different config replaces the layer.
+  no-op (`configHash` match); a different config replaces the layer. A layer's hash covers its
+  config and the hashes of the layers it was computed from, so changing the scene threshold
+  also recomputes faces (its cuts came from scenes).
 - **Provenance is mandatory.** Every layer says what produced it, with what settings, on what
   device, and what it covered. Silent fallbacks (wasm instead of WebGPU, a smaller model) show up
   here and in the CLI summary.
@@ -100,7 +104,9 @@ Each producer declares `needs` and `produces`:
 | captions (small VLM) | keyframes | seek (selected frames only) |
 | embeddings (text + image encoders) | transcript, keyframes, captions | seek + text |
 
-`video.analyze(['faces', 'scenes', 'transcript'])` resolves dependencies, skips layers already
+Built: `src/doc/plan.ts` (`PRODUCERS` holds each layer's needs, pass, defaults and help;
+the CLI's `layers` command and `--help` are generated from it).
+`analyze(file, ['faces', 'scenes', 'transcript'])` resolves dependencies, skips layers already
 present with a matching config, and **groups every frame consumer into one decode pass** (decode
 and transfer are a large share of browser cost). Audio is decoded separately (cheap). Selected-
 frame consumers seek instead of decoding everything — the "cheap screening, expensive
@@ -125,7 +131,7 @@ Markdown shape (sketch):
 
 ```markdown
 # briefing.mp4 — 14:23, 1920×1080, 30 fps
-<!-- videolab.doc/0 · transcript: whisper-small · scenes: 3 · faces: 2 tracks -->
+<!-- videodoc/0 · transcript: whisper-small · scenes: 3 · faces: 2 tracks -->
 
 ## Scene 1 · 00:00–06:12
 ![00:00:04](briefing.keyframes/0001.jpg) *A man at a podium in front of two flags.*
@@ -141,8 +147,8 @@ Markdown shape (sketch):
 **JS API.** One-line happy path; every knob reachable; heavy work in a worker by default.
 
 ```ts
-import { open } from 'videolab';
-import { toMarkdown } from 'videolab/markdown';
+import { open } from 'videodoc';
+import { toMarkdown } from 'videodoc/markdown';
 
 const video = await open(file);                      // File | URL | ReadableStream
 const doc = await video.analyze(['transcript', 'scenes', 'faces'], { onProgress, signal });
@@ -155,13 +161,15 @@ harness, generalized). Video files are served to the page by a local range-reque
 uploaded. stdout: results (JSON / JSONL / Markdown); stderr: progress and human summaries.
 
 ```
-videolab check                                   # WebGPU? adapter, browsers, model cache
-videolab analyze talk.mp4 --layers transcript,scenes,faces   # writes talk.mp4.videolab.json
-videolab estimate talk.mp4 --layers captions
-videolab markdown talk.mp4 > talk.md             # analyzes missing layers first
-videolab search talk.mp4 "budget cuts" --top 5
-videolab redact bodycam.mp4 -o redacted.mp4 --log redactions.json
-videolab models list|pull|clear
+videodoc check                                   # WebGPU? adapter, browsers, model cache
+videodoc analyze talk.mp4 --layers transcript,scenes,faces   # writes talk.mp4.videodoc.json
+videodoc info talk.mp4                           # summarize a saved doc, no browser
+videodoc layers                                  # layers, needs, settings + defaults (JSON)
+videodoc estimate talk.mp4 --layers captions
+videodoc markdown talk.mp4 > talk.md             # analyzes missing layers first
+videodoc search talk.mp4 "budget cuts" --top 5
+videodoc redact bodycam.mp4 -o redacted.mp4 --log redactions.json
+videodoc models list|pull|clear
 ```
 
 Commands that only read a doc (`markdown` from complete layers, `search` over cached
@@ -191,8 +199,9 @@ and outputs. Also the regression harness's UI.
 
 ## Roadmap
 
-1. **Doc + planner** wrapping today's blocks (speech, transcript, scenes, faces) into
-   `analyze()`; save/load; CLI `analyze` / `check` on the existing harness.
+1. ~~**Doc + planner** wrapping today's blocks (speech, transcript, scenes, faces) into
+   `analyze()`; save/load; CLI `analyze` / `check` on the existing harness.~~ Done
+   2026-10-26 (plus `info`, `layers`, `--set`, `--dry-run`).
 2. **Keyframes + markdown module**: transcript-guided keyframe selection (scene starts, silent
    gaps, coverage), markdown without captions; then captions with a small VLM.
 3. **MCP server** with a warm browser.
@@ -202,11 +211,12 @@ and outputs. Also the regression harness's UI.
 
 ## Open questions
 
-- Package name and scope. Candidates (2026-10-26; free on npm unless noted): framebase,
-  videodoc, framespace, vidtype, videostruct; unframe is taken. Leaning toward naming it after
-  the data type; the CLI name should be short to type.
-- Track storage: sampled + interpolated (compact) vs. per-frame (simpler consumers). Leaning
-  sampled, with a `boxesAt(frame)` helper.
+- Package scope: `videodoc` was free on npm on 2026-10-26 (alternative considered: framebase).
+- Track storage: sampled + interpolated, with `boxesAt(frame)` (built). Open: tracks are linked
+  from per-frame boxes by IoU only, so fast motion fragments them (music video: median track
+  13 frames); good enough for redaction and counting per frame, not yet for "who is this".
+- Speech gating: Silero VAD finds no speech in sung vocals (music video: 0 spans), so the
+  transcript is empty there. Needs a lyrics mode (lower threshold or no gating).
 - Sidecar format for embeddings: raw float16 + offsets, or a small Parquet/Arrow file.
 - Long-video incremental analysis: resume a partially covered layer after an interrupted run.
 - Which captioning VLM fits in-browser budgets (Florence-2 / SmolVLM class via transformers.js).

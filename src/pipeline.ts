@@ -5,7 +5,7 @@
 //   ?video=/media/rickroll.mp4  &model=yunet  &maxstride=16  &miniou=0.3  &minscore=0.5
 //   &lowscore=0.5  &extend=0|1  &cut=0.15 (scene threshold, 0 = off)  &longside=640 (0 = model size)
 //   &frames=0 (0 = all)  &depth=2  &maxside=1920  &dump=0|1
-//   &refine=0|1  &tile=640x384  &overlap=32  &trigger=0.3  &grow=0  &every=2
+//   &refine=0|1  &tile=640x384  &overlap=32  &trigger=0.3  &grow=0  &every=2  &small=120
 //     (native-resolution tiles where the reduced pass sees faces; see runtime/refine.ts)
 //
 // With dump=1 the result also holds per-frame boxes, the sampled frames, and scene scores.
@@ -45,7 +45,7 @@ function readConfig() {
 function readRefine(q: URLSearchParams, num: (k: string, d: number) => number): RefineOptions {
   const [tileW, tileH] = (q.get('tile') || `${DEFAULT_REFINE.tileW}x${DEFAULT_REFINE.tileH}`).split('x').map(Number);
   const d = DEFAULT_REFINE;
-  return { tileW, tileH, overlap: num('overlap', d.overlap), trigger: num('trigger', d.trigger), grow: num('grow', d.grow), every: num('every', d.every) };
+  return { tileW, tileH, overlap: num('overlap', d.overlap), trigger: num('trigger', d.trigger), grow: num('grow', d.grow), every: num('every', d.every), small: num('small', d.small) };
 }
 
 const r1 = (v: number) => Math.round(v * 10) / 10;

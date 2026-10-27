@@ -1,5 +1,6 @@
 // Decode a file's audio track to mono PCM at a target rate (16 kHz for speech models).
-import { ALL_FORMATS, AudioSampleSink, Input, UrlSource } from 'mediabunny';
+import { AudioSampleSink } from 'mediabunny';
+import { openInput, type MediaInput } from './source';
 
 export interface Pcm {
   samples: Float32Array;
@@ -11,11 +12,10 @@ export interface Pcm {
 }
 
 /** Decode [start, end) seconds of the primary audio track, downmixed and resampled. */
-export async function decodeAudio(url: string, opts: { rate?: number; start?: number; end?: number } = {}): Promise<Pcm> {
+export async function decodeAudio(input: MediaInput, opts: { rate?: number; start?: number; end?: number } = {}): Promise<Pcm> {
   const rate = opts.rate ?? 16000;
-  const input = new Input({ source: new UrlSource(url), formats: ALL_FORMATS });
-  const track = await input.getPrimaryAudioTrack();
-  if (!track) throw new Error(`no audio track in ${url}`);
+  const track = await openInput(input).getPrimaryAudioTrack();
+  if (!track) throw new Error(`no audio track in ${typeof input === 'string' ? input : 'the file'}`);
   const sink = new AudioSampleSink(track);
 
   const chunks: Float32Array[] = [];

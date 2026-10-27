@@ -1,5 +1,40 @@
 // Sequential frame access with frame indices, over mediabunny.
-import { ALL_FORMATS, Input, UrlSource, VideoSampleSink, type InputVideoTrack } from 'mediabunny';
+import { ALL_FORMATS, BlobSource, Input, UrlSource, VideoSampleSink, type InputVideoTrack } from 'mediabunny';
+
+/** A video by URL (range requests) or as a File/Blob. */
+export type MediaInput = string | Blob;
+
+export function openInput(input: MediaInput): Input {
+  return new Input({ source: typeof input === 'string' ? new UrlSource(input) : new BlobSource(input), formats: ALL_FORMATS });
+}
+
+export interface Probe {
+  duration: number;
+  width: number;
+  height: number;
+  fps: number;
+  frames: number;
+  video: { codec: string };
+  audio?: { codec: string; sampleRate: number; channels: number };
+}
+
+/** Container-level facts about a video, without decoding it. */
+export async function probe(input: MediaInput): Promise<Probe> {
+  const media = openInput(input);
+  const video = await media.getPrimaryVideoTrack();
+  if (!video) throw new Error('no video track');
+  const audio = await media.getPrimaryAudioTrack();
+  const stats = await video.computePacketStats();
+  return {
+    duration: Math.round((await media.computeDuration()) * 1000) / 1000,
+    width: video.displayWidth,
+    height: video.displayHeight,
+    fps: Math.round(stats.averagePacketRate * 1000) / 1000,
+    frames: stats.packetCount,
+    video: { codec: await video.getCodecParameterString() ?? video.codec ?? 'unknown' },
+    ...(audio && { audio: { codec: (await audio.getCodecParameterString()) ?? audio.codec ?? 'unknown', sampleRate: audio.sampleRate, channels: audio.numberOfChannels } }),
+  };
+}
 
 export interface SourceFrame {
   index: number;
@@ -17,9 +52,9 @@ export class VideoSource {
     readonly duration: number,
   ) {}
 
-  static async open(url: string): Promise<VideoSource> {
-    const input = new Input({ source: new UrlSource(url), formats: ALL_FORMATS });
-    const track = await input.getPrimaryVideoTrack();
+  static async open(input: MediaInput): Promise<VideoSource> {
+    const url = typeof input === 'string' ? input : 'name' in input ? (input as File).name : 'blob';
+    const track = await openInput(input).getPrimaryVideoTrack();
     if (!track) throw new Error(`no video track in ${url}`);
     const stats = await track.computePacketStats(100);
     return new VideoSource(url, track, stats.averagePacketRate, await track.computeDuration());

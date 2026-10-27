@@ -13,11 +13,14 @@ export interface RefineOptions {
   trigger: number;
   /** A face activates every tile within this many pixels of its center. */
   grow: number;
+  /** Only faces shorter than this (source px) activate tiles; 0 = any. Large faces are found
+   *  by the reduced pass, and a close-up larger than a tile would only be cut by it. */
+  small: number;
   /** Refine every Nth frame; frames in between reuse the nearest refined frames' tile boxes. */
   every: number;
 }
 
-export const DEFAULT_REFINE: RefineOptions = { tileW: 640, tileH: 384, overlap: 32, trigger: 0.3, grow: 0, every: 2 };
+export const DEFAULT_REFINE: RefineOptions = { tileW: 640, tileH: 384, overlap: 32, trigger: 0.3, grow: 0, every: 2, small: 120 };
 
 /** Evenly spaced tiles of size tw x th covering a w x h frame, overlapping by at least `overlap`. */
 export function tileGrid(w: number, h: number, tw: number, th: number, overlap: number): Box[] {
@@ -50,10 +53,20 @@ function iou(a: Box, b: Box): number {
   return inter / (a[2] * a[3] + b[2] * b[3] - inter || 1);
 }
 
-/** `base` plus each extra box that does not duplicate one already kept (IoU >= minIou). */
+/** Fraction of b's area inside a. */
+function inside(a: Box, b: Box): number {
+  const w = Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0]);
+  const h = Math.min(a[1] + a[3], b[1] + b[3]) - Math.max(a[1], b[1]);
+  return w > 0 && h > 0 ? (w * h) / (b[2] * b[3] || 1) : 0;
+}
+
+/**
+ * `base` plus each extra box that does not duplicate one already kept: IoU >= minIou, or
+ * mostly inside a kept box (a tile that cuts a large face sees part of it as a smaller face).
+ */
 export function mergeBoxes(base: Box[], extra: Box[], minIou = 0.5): Box[] {
   const out = [...base];
-  for (const b of extra) if (!out.some((o) => iou(o, b) >= minIou)) out.push(b);
+  for (const b of extra) if (!out.some((o) => iou(o, b) >= minIou || inside(o, b) >= 0.5)) out.push(b);
   return out;
 }
 

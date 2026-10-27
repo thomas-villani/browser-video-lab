@@ -109,6 +109,8 @@ test('refine: active tiles, owned boxes, merging, and reuse across frames', () =
   // A box centered in the tile is kept; one centered outside (cut by the edge) is not.
   assert.deepEqual(ownBoxes([0, 0, 640, 384], [face, [630, 100, 30, 30]]), [face]);
   assert.deepEqual(mergeBoxes([face], [[101, 101, 20, 20], [300, 300, 20, 20]]), [face, [300, 300, 20, 20]]);
+  // A tile that cuts a close-up sees part of it as a smaller face: not a new face.
+  assert.deepEqual(mergeBoxes([[800, 100, 560, 740]], [[900, 200, 300, 280]]), [[800, 100, 560, 740]]);
   const noCut = () => false;
   assert.deepEqual(refinedFor(8, 2, 16, noCut), [8]);
   assert.deepEqual(refinedFor(9, 2, 16, noCut), [8, 10]);

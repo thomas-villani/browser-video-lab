@@ -376,7 +376,33 @@ Every tool here should be as usable by agents as by humans:
 - [x] Small-face recall in crowds: native tiles where the 640 pass sees faces, every 2nd
       frame — 50.8% → 8.0% misses at 30 fps on the walk.
 - [ ] Batch a frame's tiles into one detector call (dynamic batch dim or a tile mosaic).
-- [ ] Library shape: see DESIGN.md (VideoDoc, planner, modules, CLI + MCP).
+- [~] Library shape: see DESIGN.md (VideoDoc, planner, modules, CLI + MCP). Step 1 (doc + planner + CLI `analyze`/`check`) done 2026-10-26; next: keyframes + markdown.
 - [ ] Plate model (YuNet LPD, prior-box decoding).
 - [ ] Run the bench in a Worker (OffscreenCanvas) to keep the UI thread free.
 - [ ] Re-test on a discrete GPU, a phone, and Firefox/Safari.
+
+## videodoc step 1: doc + planner + CLI (2026-10-26)
+
+`npm run videodoc -- analyze <video>` end to end (Iris Xe, Edge headless, AC):
+
+| Run | Result | Time |
+|---|---|---|
+| Briefing (14:23): speech + scenes | 113 spans (92.9% speech), 1 shot | 66 s (scenes-only pass ≈530 fps) |
+| Briefing: same again | all cached, no browser | 0.1 s |
+| Briefing: + transcript (cached speech reused) | 192 segments, 1,960 words | 161 s (5.4x real time) |
+| Music video (3:33): all four layers | 0 speech spans, 70 shots, faces | 123 s |
+
+Findings:
+
+1. **Refinement cut close-ups into extra faces.** A 640×384 tile sees part of a 560×744 face
+   as a smaller face that failed the IoU ≥ 0.5 dedupe: on the music video face-frames doubled
+   (4,947 → 9,846) and the frame pass took 3x as long (34.5 → 107.6 s). Fixes: only faces
+   shorter than 120 px trigger tiles (`small`, default 120; simulated on walk: 8.2% misses at
+   any size vs 8.2% at h < 120, 11.0% at h < 40), and a tile box mostly inside a kept box is a
+   duplicate. After: music video 67 s, 5,845 face-frames (the rest are plausibly real small
+   background faces; no labels there). Walk vs labels, real run: **8.1% missed** (was 8.0%),
+   precision 65.3% (was 68%), 29.8 fps (was 30.3).
+2. **Silero VAD finds no speech in sung vocals** (music video: 0 spans), so the transcript is
+   empty. Needs a lyrics mode (lower threshold or no gating).
+3. **Tracks fragment under fast motion**: linking per-frame boxes by IoU gives a median track of
+   13 frames on the music video without refinement. Fine for redaction and per-frame counts.
