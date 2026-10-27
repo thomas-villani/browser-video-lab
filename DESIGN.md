@@ -2,8 +2,8 @@
 
 How the spike's building blocks become a library, **videodoc** (named after its data type;
 decided 2026-10-26). Status: roadmap step 1 is built (`src/doc`, `src/analyze.ts`,
-`cli/videodoc.ts`), and step 2 up to captions (`keyframes` layer, `markdown` module and command);
-the rest is proposal. Decisions so far:
+`cli/videodoc.ts`), step 2 up to captions (`keyframes` layer, `markdown` module and command),
+and step 3 (`cli/mcp.ts`); the rest is proposal. Decisions so far:
 
 - **Analyze once, query many times.** Analysis produces a saved, versioned document; every
   feature (markdown, search, summaries, counting, redaction) reads from it.
@@ -177,10 +177,13 @@ videodoc models list|pull|clear
 Commands that only read a doc (`markdown` from complete layers, `search` over cached
 embeddings except the query vector) never need the GPU and return instantly.
 
-**MCP server.** stdio, same implementation as the CLI, one tool per command (`analyze`,
-`markdown`, `search`, `redact`, `estimate`, `check`). Long runs report MCP progress
-notifications and return the doc path; the browser stays warm between calls (persistent
-profile, models loaded once) so an agent's second query is fast.
+**MCP server.** stdio, same implementation as the CLI (`cli/lib.ts`), one tool per command
+(built: `markdown`, `analyze`, `info`, `layers`, `check`; later `search`, `redact`, `estimate`).
+Tool schemas are generated from `PRODUCERS`, like the CLI help. Long runs report MCP progress
+notifications; cancellation closes the compute page, which stops the work. The browser and
+compute page stay warm between calls, so an agent's second query skips browser start and page
+load. Not yet: models loaded once (each call still creates its Whisper/YuNet sessions; files
+come from the browser's HTTP cache) and a persistent browser profile.
 
 **Demo web app.** Drag-and-drop a video, pick features, watch layers fill in, download the doc
 and outputs. Also the regression harness's UI.
@@ -208,7 +211,8 @@ and outputs. Also the regression harness's UI.
    coverage), markdown without captions, seek-based keyframe JPEGs~~ (done 2026-10-27:
    `src/doc/keyframes.ts`, `src/doc/markdown.ts`, `videodoc markdown [--images]`); next,
    captions with a small VLM.
-3. **MCP server** with a warm browser.
+3. ~~**MCP server** with a warm browser.~~ Done 2026-10-27 (`cli/mcp.ts`, shared `cli/lib.ts`).
+   Follow-up: keep model sessions alive in the warm page.
 4. **Redact module**: output encoding, redaction log, plates.
 5. **Search**: text + image embeddings, hybrid ranking.
 6. Worker-by-default runtime, single shared GPU device (detector + Whisper), packaging/publishing.

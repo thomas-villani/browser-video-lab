@@ -71,12 +71,11 @@ export async function newPage(browser) {
 }
 
 /**
- * Run `fn(open, ctx)` with a served build and a browser. `open(page, params)` loads e.g.
- * `pipeline.html?<params>` and resolves with { result, page } once the page reports a result.
- * `ctx` = { browser, base } for drivers that talk to a page directly. `files` maps keys to
- * local paths served at `${base}@file/<key>`. `build`: true, false, or 'auto' (when stale).
+ * Build if needed, serve the pages and launch a browser; resolves with { browser, base, files,
+ * close }. `files` maps keys to local paths served at `${base}@file/<key>`; it is read on every
+ * request, so long-lived callers can change it between runs. `build`: true, false, or 'auto'.
  */
-export async function withBrowser({ build = true, browser = 'msedge', headed = false, files = {} }, fn) {
+export async function openBrowser({ build = true, browser = 'msedge', headed = false, files = {} }) {
   if (build === true || (build === 'auto' && buildIsStale())) {
     console.error('building...');
     execSync('npx vite build --logLevel warn', { stdio: ['ignore', 'ignore', 'inherit'] });
@@ -95,6 +94,20 @@ export async function withBrowser({ build = true, browser = 'msedge', headed = f
     const other = browser === 'msedge' ? 'chrome' : 'msedge';
     throw new Error(`could not launch ${browser} (${e.message.split('\n')[0]}); install it or pass --browser ${other}`);
   }
+  const close = async () => {
+    await b.close();
+    await server.close();
+  };
+  return { browser: b, base, files, close };
+}
+
+/**
+ * Run `fn(open, ctx)` with a served build and a browser (see openBrowser). `open(page, params)`
+ * loads e.g. `pipeline.html?<params>` and resolves with { result, page } once the page reports
+ * a result. `ctx` = { browser, base } for drivers that talk to a page directly.
+ */
+export async function withBrowser(opts, fn) {
+  const { browser: b, base, close } = await openBrowser(opts);
   const open = async (path, params, { timeoutMs = 30 * 60_000 } = {}) => {
     const page = await newPage(b);
     await page.goto(`${base}${path}?${new URLSearchParams(params)}`);
@@ -104,7 +117,6 @@ export async function withBrowser({ build = true, browser = 'msedge', headed = f
   try {
     return await fn(open, { browser: b, base });
   } finally {
-    await b.close();
-    await server.close();
+    await close();
   }
 }

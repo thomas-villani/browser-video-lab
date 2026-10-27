@@ -21,12 +21,13 @@ difference, denser visual analysis where nobody speaks.
 
 ## State
 
-- Branch `main`. Last commit `9a32bfb` "videodoc step 1" is **not pushed** (earlier ones are).
-  Push only when the user asks.
-- Roadmap step 1 is done (step 2 status below): `src/doc/` (schema `videodoc/0`, planner, tracks, hashing,
-  serialization), `src/analyze.ts` (`computeLayers`, browser `analyze()`), `cli/videodoc.ts`
-  (`check`, `analyze`, `info`, `layers`; `--set layer.key=v`, `--dry-run`), `analyze.html` +
-  `src/analyze-page.ts` (the compute page the CLI drives). 33 tests pass; `tsc --noEmit` clean.
+- Branch `main`; see `git log` / `git status` for what is pushed. Push only when the user asks.
+- Roadmap steps 1-3 are done except captions (status below): `src/doc/` (schema `videodoc/0`,
+  planner, tracks, keyframes, markdown, hashing, serialization), `src/analyze.ts`
+  (`computeLayers`, browser `analyze()`, `frameImages`), `cli/lib.ts` (the commands),
+  `cli/videodoc.ts` (CLI: `check`, `analyze`, `markdown`, `info`, `layers`), `cli/mcp.ts` (MCP
+  server, same commands), `analyze.html` + `src/analyze-page.ts` (the compute page they drive).
+  36 tests pass (3 of them drive the MCP server over stdio); `tsc --noEmit` clean.
 - Layers today: `speech` (Silero VAD), `transcript` (Whisper base via transformers.js; needs
   speech), `scenes` (GPU thumbnail scene score), `faces` (YuNet 640 + adaptive bisection +
   native-resolution tile refinement; needs scenes). Defaults live in `PRODUCERS`
@@ -54,12 +55,22 @@ difference, denser visual analysis where nobody speaks.
   writes `<video>.keyframes/<frame>.jpg` (gitignored).
 - Measurements and findings: NOTES.md "videodoc step 2".
 
-## Next: captions, then MCP (step 3)
+## Done: roadmap step 3, MCP server (2026-10-27)
+
+- `cli/mcp.ts`: stdio server, tools `markdown` (can embed keyframes as image content),
+  `analyze`, `info`, `layers`, `check`; schemas generated from `PRODUCERS`; progress
+  notifications; cancellation closes the compute page. `npm run mcp`.
+- `cli/lib.ts`: commands shared with the CLI; `warmBrowser` (one browser + page, serialized,
+  idle close) vs `oneShotBrowser` (CLI). `scripts/lib/harness.mjs` gained `openBrowser`.
+- Measurements: NOTES.md "videodoc step 3". Warm calls skip ~1.7 s of browser start.
+- Not yet: model sessions kept alive between calls (each call re-creates Whisper/YuNet).
+
+## Next: captions
 
 Captions with a small in-browser VLM (Florence-2 / SmolVLM class via transformers.js) over the
 keyframe images, as a `captions` layer (`{ keyframe, text }`) whose pass is a seek pass;
 extract images and caption in the same pass. `toMarkdown` then renders each caption in italics
-after its image (DESIGN.md sketch). Then the MCP server with a warm browser (step 3).
+after its image (DESIGN.md sketch). Needs AC power and the benchmark overlay for timings.
 
 Open issues found in step 1 (also in DESIGN.md open questions / NOTES.md):
 - Silero finds no speech in sung vocals → empty transcript on music; needs a lyrics mode.
@@ -98,5 +109,9 @@ Open issues found in step 1 (also in DESIGN.md open questions / NOTES.md):
   CLI rebuilds only when sources are newer than `dist/analyze.html`.
 - Media and models are gitignored (`public/media/*.mp4`, `public/models/*.onnx`, Whisper dirs);
   `*.videodoc.json` outputs and `*.keyframes/` folders are gitignored too.
+- MCP server: stdout is the protocol channel. Nothing in `cli/lib.ts` may print to stdout
+  (`cli/mcp.ts` redirects `console.log` to stderr as a guard).
+- The Bash tool collapses `\\` to `\` even inside quoted heredocs: write scripts containing
+  backslash escapes with the Write tool.
 - Python on Windows writes cp1252 and CRLF by default: in edit scripts use
   `read_text(encoding='utf-8')` and `write_bytes(s.encode('utf-8'))`.

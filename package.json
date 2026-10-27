@@ -11,6 +11,7 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "videodoc": "node cli/videodoc.ts",
+    "mcp": "node cli/mcp.ts",
     "bench": "node scripts/bench.mjs",
     "pipeline": "node scripts/pipeline.mjs",
     "transcribe": "node scripts/transcribe.mjs",
@@ -25,6 +26,7 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.1",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "mediabunny": "^1.62.1",
     "onnxruntime-web": "^1.30.0"
   },
@@ -35,6 +37,7 @@
     "vite": "^8.3.5"
   },
   "bin": {
-    "videodoc": "cli/videodoc.ts"
+    "videodoc": "cli/videodoc.ts",
+    "videodoc-mcp": "cli/mcp.ts"
   }
 }

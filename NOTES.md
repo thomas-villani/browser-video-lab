@@ -414,23 +414,60 @@ the middle of every silent gap of 4 s or more, and evenly spaced fill-ins so no 
 goes 30 s without one. Shots shorter than 2 s lose their frame when a kept frame is within 2 s;
 longer shots always keep theirs. `videodoc markdown` renders shots, timed transcript paragraphs
 (new paragraph after a 2 s pause, or at the first sentence end after a keyframe), silent gaps and
-optionally the keyframe images. Iris Xe, Edge headless (not on the benchmark power overlay;
-times are indicative):
+optionally the keyframe images.
 
-| Run | Keyframes | Time |
-|---|---|---|
-| Briefing (14:23, 1 shot), text only, layers cached | 30 (1 shot, 1 silence, 28 fill-ins) | 0.5 s, no browser; 11.8 kB Markdown |
-| Briefing, `--images` (768 px JPEGs) | 30 extracted | 5.2 s including browser start |
-| Music video (3:33, 70 shots), `--images --layers faces` | 47 (46 shots, 1 fill-in) | 4 s seeking, 17 s total with a rebuild; 1.6 MB of JPEGs |
+Iris Xe, Edge headless, AC + "Best performance" overlay; 3 runs each (spread ≤ 0.42 s), keyframe
+folder deleted before every image run. `imageMs` = seeking + JPEG encoding inside the page;
+the rest of an image run is the browser and preview server start (~1.7 s):
+
+| Video | Keyframes | Text only | `--images` 768 px | `imageMs` | JPEGs (768 / 1536 px) |
+|---|---|---|---|---|---|
+| Briefing (14:23, 1 shot, 30 fps) | 30 (1 shot, 1 silence, 28 fill-ins) | 0.53 s, no browser | 5.26 s | 3.56 s (119 ms/frame) | 1.8 / 4.7 MB |
+| Music video (3:33, 70 shots, 25 fps) | 47 (46 shots, 1 fill-in) | 0.53 s, no browser | 5.33 s | 3.58 s (76 ms/frame) | 1.6 / 4.2 MB |
+
+1536 px images cost the same time as 768 px (3.59 vs 3.56 s; 3.57 vs 3.58 s). Inside one page,
+1 frame takes 42–58 ms, 5 take 364 ms, 47 take 3.4–3.8 s: linear in frames, no fixed cost.
 
 Findings:
 
-1. **Seeking is cheap enough.** mediabunny's `CanvasSink.canvasesAtTimestamps` decodes from
-   the key frame before each requested time only: 47 frames of the 1080p music video in ~4 s
-   including JPEG encoding (its 5,300 frames would take ~10 s to decode at the scenes pass's
-   ~530 fps). Not measured: long GOPs (sparse key frames) make each seek costlier.
+1. **A keyframe image costs a seek: decoding from the preceding key frame.** Key frames
+   (ffprobe): briefing every 5.33 s (160 frames), so ~80 frames decoded per image on average
+   = 119 ms, i.e. ~680 fps of decode; JPEG size and encoding are negligible. The music video's
+   key frames are denser (median gap 2.08 s) and it is cheaper per image. Still far below a full
+   decode: briefing's 30 images in 3.6 s vs ~49 s to decode its 25,893 frames at ~530 fps.
+   Idea (not built): snap fill-in and silence frames to the nearest key frame within a second
+   or two — they are arbitrary times anyway — making those seeks nearly free.
 2. **Keyframes in speech must wait for a sentence end.** Breaking the paragraph at the keyframe
    time split Whisper segments mid-sentence ("…the new White House" / "press secretary.").
 3. Quick-cut video (music video) yields many shots with no frame of their own: 24 of 70 shots
    are under 2 s and near a kept frame. They still get a heading (with face counts).
 
+## videodoc step 3: MCP server (2026-10-27)
+
+`cli/mcp.ts` (stdio, `@modelcontextprotocol/sdk` 1.32.2, low-level `Server` with JSON Schemas
+generated from `PRODUCERS`) over `cli/lib.ts`, the command code now shared with the CLI. One
+warm browser + compute page, runs serialized. End to end through an SDK client, real videos
+(Iris Xe, Edge headless, AC + "Best performance" overlay; single runs):
+
+| Call | Time | Notes |
+|---|---|---|
+| `check`, cold (build fresh, browser start, page load) | 1.03 s | |
+| `check`, warm | 4 ms | |
+| `markdown` music video, extract 47 keyframes, embed 4 | 3.67 s | CLI: 5.33 s (browser start ~1.7 s saved); 7 progress messages; 4 images 23–50 KB |
+| `markdown` music video again, images on disk | 11 ms | no browser |
+| `markdown` briefing, extract 30 keyframes | 3.56 s | CLI: 5.26 s |
+| `analyze` briefing scenes `force`, cancelled at 5 s | 5.01 s | page closed, doc untouched; 11 progress messages before |
+| `check` right after the cancel | 244 ms | new compute page |
+| `analyze` music video scenes `force` (5,326 frames) | 7.75 s | 70 shots as before (~690 fps); 16 progress messages |
+| `markdown` briefing, text, cached | 7 ms | 11.8 kB |
+
+Findings:
+
+1. **Warm calls cost what the work costs.** The fixed ~1.7 s of browser and server start is
+   paid once per session (and again after 10 min idle).
+2. **Cancel by closing the page.** Aborting work inside the page would need abort checks in
+   every stage; closing the page ends decode, GPU and wasm work at once, and the next call
+   opens a fresh page in ~0.25 s.
+3. MCP progress values must increase while our stages restart their counts: the server sends a
+   running step number and puts the stage and count in the message, at most ~2 per second plus
+   every stage change.
