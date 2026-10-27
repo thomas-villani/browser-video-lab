@@ -16,3 +16,4 @@ public/label/*
 !public/label/retina.json
 !results/labels/*.jsonl
 *.videodoc.json
+*.keyframes/

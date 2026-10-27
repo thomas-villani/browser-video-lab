@@ -1,14 +1,16 @@
 // Compute planned layers in the browser: one audio pass (speech, transcript) and one video
-// decode shared by every frame consumer (scenes, faces). Planning and merging live in src/doc,
-// so the same code serves the JS API (analyze below) and the CLI (which plans in Node).
+// decode shared by every frame consumer (scenes, faces); keyframe images seek to selected frames
+// only. Planning, merging and pure layers live in src/doc, so the same code serves the JS API
+// (analyze below) and the CLI (which plans in Node).
+import { CanvasSink } from 'mediabunny';
 import {
-  fingerprint, newDoc, plan, VERSION, withLayers, linkTracks,
+  deriveLayers, fingerprint, newDoc, plan, VERSION, withLayers, linkTracks,
   type Box, type Layer, type LayerName, type Layers, type Overrides, type PlannedLayer, type SpeechItem, type VideoDoc,
 } from './doc/index.ts';
 import { decodeAudio } from './runtime/audio';
 import { Detector } from './runtime/detector';
 import { sceneStream } from './runtime/scenes';
-import { probe, VideoSource, type MediaInput, type Probe } from './runtime/source';
+import { openInput, probe, VideoSource, type MediaInput, type Probe } from './runtime/source';
 import { adaptiveStream } from './runtime/stream';
 import { Transcriber } from './runtime/transcribe';
 import { Vad } from './runtime/vad';
@@ -196,9 +198,47 @@ export async function analyze(input: MediaInput, layers: LayerName[], opts: Anal
   let doc = opts.doc?.source.fingerprint === id.fingerprint ? opts.doc : undefined;
   const p = await plan(doc, layers, opts.settings, opts.force);
   if (doc && !Object.keys(p.passes).length) return doc;
-  const inputs = doc?.layers;
-  const r = await computeLayers(input, p.layers, { ...opts, inputs });
-  const name = typeof input === 'string' ? decodeURIComponent(input.split('/').pop() ?? input) : 'name' in input ? (input as File).name : 'video';
-  doc ??= newDoc({ name, ...id, ...r.probe });
-  return withLayers({ ...doc, source: { ...doc.source, ...r.probe } }, r.layers);
+  if (!doc || p.passes.audio || p.passes.frames) {
+    const r = await computeLayers(input, p.layers, { ...opts, inputs: doc?.layers });
+    const name = typeof input === 'string' ? decodeURIComponent(input.split('/').pop() ?? input) : 'name' in input ? (input as File).name : 'video';
+    doc ??= newDoc({ name, ...id, ...r.probe });
+    doc = withLayers({ ...doc, source: { ...doc.source, ...r.probe } }, r.layers);
+  }
+  return withLayers(doc, deriveLayers(doc, p.layers));
+}
+
+export interface ImageOptions {
+  /** Long side of the images, px (never upscaled). */
+  maxSide?: number;
+  /** JPEG quality, 0-1. */
+  quality?: number;
+  signal?: AbortSignal;
+  onProgress?: (p: Progress) => void;
+}
+
+/**
+ * JPEGs of the frames shown at `times` (seconds, ascending), e.g. a doc's keyframes. Seeks to
+ * each frame and decodes from its preceding key frame only, never the whole video.
+ */
+export async function frameImages(input: MediaInput, times: number[], opts: ImageOptions = {}): Promise<Blob[]> {
+  const { maxSide = 768, quality = 0.85, signal, onProgress } = opts;
+  const track = await openInput(input).getPrimaryVideoTrack();
+  if (!track) throw new Error('no video track');
+  const { displayWidth: w, displayHeight: h } = track;
+  const scale = Math.min(1, maxSide / Math.max(w, h));
+  const sink = new CanvasSink(track, { width: Math.round(w * scale), height: Math.round(h * scale), fit: 'fill', poolSize: 2 });
+  const out: Blob[] = [];
+  for await (const c of sink.canvasesAtTimestamps(times)) {
+    signal?.throwIfAborted();
+    const t = times[out.length];
+    if (!c) throw new Error(`no frame at ${t} s (before the first frame?)`);
+    const cv = c.canvas;
+    out.push(
+      cv instanceof HTMLCanvasElement
+        ? await new Promise<Blob>((ok, fail) => cv.toBlob((b) => (b ? ok(b) : fail(new Error('JPEG encode failed'))), 'image/jpeg', quality))
+        : await cv.convertToBlob({ type: 'image/jpeg', quality }),
+    );
+    onProgress?.({ pass: 'frames', stage: 'keyframe images', done: out.length, total: times.length });
+  }
+  return out;
 }

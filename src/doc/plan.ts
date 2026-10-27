@@ -2,15 +2,18 @@
 // config, and which decode pass computes the rest. Pure (no browser APIs), so the CLI can plan
 // in Node and skip launching a browser when nothing is missing.
 import { hashOf } from './hash.ts';
-import { LAYER_NAMES, type LayerName, type VideoDoc } from './schema.ts';
+import { selectKeyframes, type KeyframeConfig } from './keyframes.ts';
+import { LAYER_NAMES, VERSION, type Layer, type LayerName, type Layers, type VideoDoc } from './schema.ts';
 
 export type ConfigValue = number | string | boolean;
-export type Pass = 'audio' | 'frames';
+/** 'pure' layers are derived from other layers (deriveLayers): no browser, no decode. */
+export type Pass = 'audio' | 'frames' | 'pure';
 
 export interface ProducerSpec {
   name: LayerName;
   needs: LayerName[];
-  /** Audio is decoded on its own (cheap); every frame consumer shares one video decode. */
+  /** Audio is decoded on its own (cheap); every frame consumer shares one video decode; pure
+   *  layers are computed from the doc. */
   pass: Pass;
   description: string;
   defaults: Record<string, ConfigValue>;
@@ -53,6 +56,19 @@ export const PRODUCERS: Record<LayerName, ProducerSpec> = {
     description: 'Shots between scene cuts (GPU thumbnails, ffmpeg-style scene score).',
     defaults: { threshold: 0.15 },
     help: { threshold: 'scene score at or above which a frame starts a new shot' },
+  },
+  keyframes: {
+    name: 'keyframes',
+    needs: ['scenes', 'speech'],
+    pass: 'pure',
+    description: 'Frames worth looking at: each shot start, silent gaps, fill-ins in long shots (no decode).',
+    defaults: { offset: 0.5, silence: 4, minGap: 2, maxGap: 30 },
+    help: {
+      offset: 'seconds into a shot for its frame (skips fades at the cut)',
+      silence: 'silent gaps at least this long get a frame at their middle, seconds',
+      minGap: 'drop candidates closer than this to a kept frame, seconds (shot starts win)',
+      maxGap: 'longest stretch of a shot without a frame, seconds',
+    },
   },
   faces: {
     name: 'faces',
@@ -147,6 +163,30 @@ export function parseSettings(settings: string[]): Overrides {
       v = raw === 'true' || raw === '1';
     }
     (out[layer as LayerName] ??= {})[key] = v;
+  }
+  return out;
+}
+
+/** Compute the planned 'pure' layers of `doc` (their inputs must already be in it). */
+export function deriveLayers(doc: VideoDoc, planned: PlannedLayer[]): Partial<Layers> {
+  const out: Partial<Layers> = {};
+  for (const l of planned) {
+    if (l.status !== 'compute' || PRODUCERS[l.name].pass !== 'pure') continue;
+    const t0 = performance.now();
+    const layer = <T>(items: T[]): Layer<T> => ({
+      producer: { module: l.name, version: VERSION, config: l.config, configHash: l.configHash },
+      coverage: [[0, doc.source.duration]],
+      createdAt: new Date().toISOString(),
+      ms: Math.round(performance.now() - t0),
+      device: 'cpu',
+      items,
+    });
+    if (l.name === 'keyframes') {
+      const { scenes, speech } = doc.layers;
+      if (!scenes || !speech) throw new PlanError('keyframes needs the scenes and speech layers');
+      const c = l.config as unknown as KeyframeConfig;
+      out.keyframes = layer(selectKeyframes(scenes.items, speech.items, doc.source.duration, doc.source.fps, c));
+    }
   }
   return out;
 }

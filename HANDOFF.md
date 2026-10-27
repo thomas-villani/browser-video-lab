@@ -23,10 +23,10 @@ difference, denser visual analysis where nobody speaks.
 
 - Branch `main`. Last commit `9a32bfb` "videodoc step 1" is **not pushed** (earlier ones are).
   Push only when the user asks.
-- Roadmap step 1 is done: `src/doc/` (schema `videodoc/0`, planner, tracks, hashing,
+- Roadmap step 1 is done (step 2 status below): `src/doc/` (schema `videodoc/0`, planner, tracks, hashing,
   serialization), `src/analyze.ts` (`computeLayers`, browser `analyze()`), `cli/videodoc.ts`
   (`check`, `analyze`, `info`, `layers`; `--set layer.key=v`, `--dry-run`), `analyze.html` +
-  `src/analyze-page.ts` (the compute page the CLI drives). 30 tests pass; `tsc --noEmit` clean.
+  `src/analyze-page.ts` (the compute page the CLI drives). 33 tests pass; `tsc --noEmit` clean.
 - Layers today: `speech` (Silero VAD), `transcript` (Whisper base via transformers.js; needs
   speech), `scenes` (GPU thumbnail scene score), `faces` (YuNet 640 + adaptive bisection +
   native-resolution tile refinement; needs scenes). Defaults live in `PRODUCERS`
@@ -44,14 +44,22 @@ difference, denser visual analysis where nobody speaks.
 - videodoc runs: briefing speech+scenes 66 s; cached re-run 0.1 s (no browser); transcript
   added incrementally 161 s; music video all layers ~90 s after the refinement fix.
 
-## Next: roadmap step 2, keyframes + markdown
+## Done: roadmap step 2 up to captions (2026-10-27)
 
-Agreed direction (DESIGN.md "Modules" and "Roadmap"): a `keyframes` layer chosen from
-scenes + speech (scene starts, silent gaps, coverage so long shots get more than one), and a
-`markdown` module that renders the doc as the agent-facing "read the video" view (sketch in
-DESIGN.md), working without captions or an LLM. Keyframe JPEGs need a seek-based pass
-(selected frames only, not a full decode). Then captions with a small in-browser VLM
-(Florence-2 / SmolVLM class), then the MCP server with a warm browser (step 3).
+- `keyframes` layer (`src/doc/keyframes.ts`): pure, `pass: 'pure'`, derived in Node by
+  `deriveLayers` (`src/doc/plan.ts`); now in the CLI's default `analyze` layers.
+- `markdown` module (`src/doc/markdown.ts`, `toMarkdown`) and `videodoc markdown <video>
+  [--images] [--out f.md]`: analyzes missing layers, renders shots / timed paragraphs / silent
+  gaps / face counts; `--images` seeks to keyframes (`frameImages` in `src/analyze.ts`) and
+  writes `<video>.keyframes/<frame>.jpg` (gitignored).
+- Measurements and findings: NOTES.md "videodoc step 2".
+
+## Next: captions, then MCP (step 3)
+
+Captions with a small in-browser VLM (Florence-2 / SmolVLM class via transformers.js) over the
+keyframe images, as a `captions` layer (`{ keyframe, text }`) whose pass is a seek pass;
+extract images and caption in the same pass. `toMarkdown` then renders each caption in italics
+after its image (DESIGN.md sketch). Then the MCP server with a warm browser (step 3).
 
 Open issues found in step 1 (also in DESIGN.md open questions / NOTES.md):
 - Silero finds no speech in sung vocals → empty transcript on music; needs a lyrics mode.
@@ -89,4 +97,6 @@ Open issues found in step 1 (also in DESIGN.md open questions / NOTES.md):
 - The harness builds into `dist/` and copies `public/` (≈1 GB of models) on every build; the
   CLI rebuilds only when sources are newer than `dist/analyze.html`.
 - Media and models are gitignored (`public/media/*.mp4`, `public/models/*.onnx`, Whisper dirs);
-  `*.videodoc.json` outputs are gitignored too.
+  `*.videodoc.json` outputs and `*.keyframes/` folders are gitignored too.
+- Python on Windows writes cp1252 and CRLF by default: in edit scripts use
+  `read_text(encoding='utf-8')` and `write_bytes(s.encode('utf-8'))`.

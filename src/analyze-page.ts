@@ -2,7 +2,7 @@
 // on its own; the driver calls compute()/check() with page.evaluate and receives progress
 // through window.__videodocProgress (if the driver exposed it).
 import type { PlannedLayer, Layers } from './doc/index.ts';
-import { computeLayers, type Progress } from './analyze';
+import { computeLayers, frameImages, type Progress } from './analyze';
 
 declare global {
   interface Window {
@@ -32,6 +32,19 @@ const api = {
         window.__videodocProgress?.(p);
       },
     });
+  },
+
+  /** JPEGs of the frames at `times`, base64 (page.evaluate results must be JSON). */
+  async images(url: string, times: number[], maxSide?: number, quality?: number) {
+    const blobs = await frameImages(url, times, { maxSide, quality, onProgress: (p) => window.__videodocProgress?.(p) });
+    return Promise.all(
+      blobs.map(async (b) => {
+        let s = '';
+        const bytes = new Uint8Array(await b.arrayBuffer());
+        for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        return btoa(s);
+      }),
+    );
   },
 
   /** What this browser can do: WebGPU adapter, decoders, isolation (threaded wasm). */

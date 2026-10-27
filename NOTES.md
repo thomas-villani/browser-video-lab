@@ -367,7 +367,7 @@ Every tool here should be as usable by agents as by humans:
 - [ ] Use the scene score as an extra bisection trigger (sub-threshold content change).
 - [ ] Overlap next-window decode with current-window detection (double-buffered ingest).
 - [x] Transcript building block: Silero VAD + Whisper (transformers.js/WebGPU), speech coverage.
-- [ ] Transcript-guided sampling: feed VAD gaps + scene cuts into keyframe selection for captioning.
+- [x] Transcript-guided sampling: VAD gaps + scene cuts drive keyframe selection (`keyframes` layer).
 - [ ] One GPU device for detector + Whisper (transformers.js bundles its own onnxruntime-web).
 - [ ] Word-level timestamps (Whisper cross-attention models) for precise search hits.
 - [ ] GPU-side YuNet decode + compaction (score threshold → atomic append) to shrink readback.
@@ -376,7 +376,7 @@ Every tool here should be as usable by agents as by humans:
 - [x] Small-face recall in crowds: native tiles where the 640 pass sees faces, every 2nd
       frame — 50.8% → 8.0% misses at 30 fps on the walk.
 - [ ] Batch a frame's tiles into one detector call (dynamic batch dim or a tile mosaic).
-- [~] Library shape: see DESIGN.md (VideoDoc, planner, modules, CLI + MCP). Step 1 (doc + planner + CLI `analyze`/`check`) done 2026-10-26; next: keyframes + markdown.
+- [~] Library shape: see DESIGN.md (VideoDoc, planner, modules, CLI + MCP). Step 1 (doc + planner + CLI `analyze`/`check`) done 2026-10-26; step 2 keyframes + markdown done 2026-10-27; next: captions.
 - [ ] Plate model (YuNet LPD, prior-box decoding).
 - [ ] Run the bench in a Worker (OffscreenCanvas) to keep the UI thread free.
 - [ ] Re-test on a discrete GPU, a phone, and Firefox/Safari.
@@ -406,3 +406,31 @@ Findings:
    empty. Needs a lyrics mode (lower threshold or no gating).
 3. **Tracks fragment under fast motion**: linking per-frame boxes by IoU gives a median track of
    13 frames on the music video without refinement. Fine for redaction and per-frame counts.
+
+## videodoc step 2: keyframes + markdown (2026-10-27)
+
+`keyframes` is a pure layer (scenes + speech, no decode): a frame 0.5 s into every shot, one in
+the middle of every silent gap of 4 s or more, and evenly spaced fill-ins so no stretch of a shot
+goes 30 s without one. Shots shorter than 2 s lose their frame when a kept frame is within 2 s;
+longer shots always keep theirs. `videodoc markdown` renders shots, timed transcript paragraphs
+(new paragraph after a 2 s pause, or at the first sentence end after a keyframe), silent gaps and
+optionally the keyframe images. Iris Xe, Edge headless (not on the benchmark power overlay;
+times are indicative):
+
+| Run | Keyframes | Time |
+|---|---|---|
+| Briefing (14:23, 1 shot), text only, layers cached | 30 (1 shot, 1 silence, 28 fill-ins) | 0.5 s, no browser; 11.8 kB Markdown |
+| Briefing, `--images` (768 px JPEGs) | 30 extracted | 5.2 s including browser start |
+| Music video (3:33, 70 shots), `--images --layers faces` | 47 (46 shots, 1 fill-in) | 4 s seeking, 17 s total with a rebuild; 1.6 MB of JPEGs |
+
+Findings:
+
+1. **Seeking is cheap enough.** mediabunny's `CanvasSink.canvasesAtTimestamps` decodes from
+   the key frame before each requested time only: 47 frames of the 1080p music video in ~4 s
+   including JPEG encoding (its 5,300 frames would take ~10 s to decode at the scenes pass's
+   ~530 fps). Not measured: long GOPs (sparse key frames) make each seek costlier.
+2. **Keyframes in speech must wait for a sentence end.** Breaking the paragraph at the keyframe
+   time split Whisper segments mid-sentence ("…the new White House" / "press secretary.").
+3. Quick-cut video (music video) yields many shots with no frame of their own: 24 of 70 shots
+   are under 2 s and near a kept frame. They still get a heading (with face counts).
+

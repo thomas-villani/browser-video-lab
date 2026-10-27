@@ -64,7 +64,7 @@ const r1 = (v: number) => Math.round(v * 10) / 10;
 
 export function summarize(doc: VideoDoc): Record<string, LayerSummary> {
   const out: Record<string, LayerSummary> = {};
-  const { speech, transcript, scenes, faces } = doc.layers;
+  const { speech, transcript, scenes, keyframes, faces } = doc.layers;
   const base = (l: NonNullable<VideoDoc['layers'][keyof Layers]>) => ({
     items: l.items.length,
     ms: Math.round(l.ms),
@@ -78,6 +78,11 @@ export function summarize(doc: VideoDoc): Record<string, LayerSummary> {
   }
   if (transcript) out.transcript = { ...base(transcript), words: transcript.items.reduce((n, x) => n + x.text.split(/\s+/).filter(Boolean).length, 0) };
   if (scenes) out.scenes = base(scenes);
+  if (keyframes) {
+    const why: Record<string, number> = {};
+    for (const k of keyframes.items) why[k.why] = (why[k.why] ?? 0) + 1;
+    out.keyframes = { ...base(keyframes), ...why };
+  }
   if (faces) {
     const frames = faces.items.reduce((n, t) => n + t.f1 - t.f0 + 1, 0);
     out.faces = { ...base(faces), samples: faces.items.reduce((n, t) => n + t.samples.length, 0), faceFrames: frames };

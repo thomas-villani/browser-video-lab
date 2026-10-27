@@ -2,8 +2,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  boxesAt, fingerprint, formatDoc, linkTracks, newDoc, parseDoc, parseSettings, plan, PlanError, resolve, stableStringify, withLayers,
-  type Box, type Layer, type SourceInfo, type SpeechItem,
+  boxesAt, deriveLayers, fingerprint, fmtTime, formatDoc, linkTracks, maxFaces, newDoc, parseDoc, parseSettings, plan, PlanError, PRODUCERS, resolve,
+  selectKeyframes, stableStringify, toMarkdown, withLayers,
+  type Box, type KeyframeConfig, type Layer, type SceneItem, type SourceInfo, type SpeechItem,
 } from '../src/doc/index.ts';
 
 const source: SourceInfo = {
@@ -92,4 +93,57 @@ test('doc: one item per line round-trips; bad docs say how to fix them', () => {
   assert.equal(text.split('\n').filter((l) => l.includes('"t0"')).length, 2);
   assert.throws(() => parseDoc('{"schema":"videodoc/9"}'), /re-run analyze with --force/);
   assert.throws(() => parseDoc('not json'), /not valid JSON/);
+});
+
+const KF = PRODUCERS.keyframes.defaults as unknown as KeyframeConfig;
+const scene = (t0: number, t1: number, fps = 25): SceneItem => ({ t0, t1, f0: Math.round(t0 * fps), f1: Math.round(t1 * fps) - 1, score: t0 ? 0.5 : 0 });
+
+test('keyframes: shot starts, silent gaps, fill-ins for long shots', () => {
+  // One 100 s shot, speech everywhere except 40-50 s.
+  const one = selectKeyframes([scene(0, 100)], [{ t0: 0, t1: 40 }, { t0: 50, t1: 100 }], 100, 25, KF);
+  assert.deepEqual(one.map((k) => [k.t, k.why]), [[0.5, 'scene'], [22.75, 'coverage'], [45, 'silence'], [72.5, 'coverage']]);
+  for (let i = 1; i < one.length; i++) assert.ok(one[i].t - one[i - 1].t <= KF.maxGap);
+  assert.equal(one[2].frame, 45 * 25);
+
+  // Quick cuts: shots shorter than minGap are skipped near a kept frame (a longer shot's always
+  // is); a short shot's frame sits in its middle; frames point at their shot.
+  const quick = selectKeyframes([scene(0, 0.6), scene(0.6, 1.5), scene(1.5, 12), scene(12, 12.6)], [{ t0: 0, t1: 12.6 }], 12.6, 25, KF);
+  assert.deepEqual(quick.map((k) => [k.t, k.scene]), [[2, 2], [12.3, 3]]);
+  assert.deepEqual(selectKeyframes([], [], 10, 25, KF), []);
+});
+
+test('keyframes: planned as a pure layer and derived without a browser', async () => {
+  const p = await plan(undefined, ['keyframes']);
+  assert.deepEqual(p.passes, { audio: ['speech'], frames: ['scenes'], pure: ['keyframes'] });
+  const layer = <T>(items: T[]) => ({ producer: { configHash: 'h' }, items }) as unknown as Layer<T>;
+  const doc = withLayers(newDoc(source), { speech: layer([{ t0: 0, t1: 10 }]), scenes: layer([scene(0, 4), scene(4, 10)]) });
+  const kf = deriveLayers(doc, p.layers).keyframes!;
+  assert.deepEqual(kf.items.map((k) => k.t), [0.5, 4.5]);
+  assert.equal(kf.device, 'cpu');
+  assert.equal(kf.producer.configHash, p.layers.find((l) => l.name === 'keyframes')!.configHash);
+});
+
+test('markdown: shots, timed paragraphs, silent gaps, keyframe images, faces', () => {
+  const layer = <T>(items: T[], extra = {}) => ({ producer: { configHash: 'h', config: {}, ...extra }, items }) as unknown as Layer<T>;
+  const doc = withLayers(newDoc(source), {
+    speech: layer([{ t0: 0, t1: 3 }]),
+    transcript: layer([{ t0: 0, t1: 1.5, text: ' Hello' }, { t0: 1.5, t1: 3, text: 'world.' }], { model: 'whisper' }),
+    scenes: layer([scene(0, 4), scene(4, 10)]),
+    keyframes: layer([{ t: 0.5, frame: 12, scene: 0, why: 'scene' }, { t: 4.5, frame: 112, scene: 1, why: 'scene' }]),
+    faces: layer([{ id: 1, f0: 0, f1: 50, samples: [] }, { id: 2, f0: 20, f1: 120, samples: [] }]),
+  });
+  // Only shot 2's keyframe has an image; shot 1's still ends the paragraph.
+  const md = toMarkdown(doc, { image: (k) => (k.scene ? `clip keyframes/${k.frame}.jpg` : undefined) });
+  assert.equal(md, [
+    '# clip.mp4', '',
+    '00:10 · 1920×1080 · 25 fps · 2 shots · 30% speech · 2 words · 2 face tracks',
+    '<!-- videodoc/0 · speech · transcript (whisper) · scenes · keyframes · faces -->', '',
+    '## Shot 1 · 00:00–00:04 · up to 2 faces', '',
+    '**[00:00]** Hello world.', '',
+    '*(no speech 00:03–00:10)*', '',
+    '## Shot 2 · 00:04–00:10 · up to 1 face', '',
+    '![00:04](clip%20keyframes/112.jpg)', '',
+  ].join('\n'));
+  assert.equal(fmtTime(3725, true), '1:02:05');
+  assert.equal(maxFaces([{ id: 1, f0: 0, f1: 9, samples: [] }, { id: 2, f0: 10, f1: 19, samples: [] }], 0, 19), 1);
 });

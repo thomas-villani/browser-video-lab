@@ -2,7 +2,8 @@
 
 How the spike's building blocks become a library, **videodoc** (named after its data type;
 decided 2026-10-26). Status: roadmap step 1 is built (`src/doc`, `src/analyze.ts`,
-`cli/videodoc.ts`); the rest is proposal. Decisions so far:
+`cli/videodoc.ts`), and step 2 up to captions (`keyframes` layer, `markdown` module and command);
+the rest is proposal. Decisions so far:
 
 - **Analyze once, query many times.** Analysis produces a saved, versioned document; every
   feature (markdown, search, summaries, counting, redaction) reads from it.
@@ -100,12 +101,13 @@ Each producer declares `needs` and `produces`:
 | transcript (Whisper) | speech | audio |
 | scenes (GPU thumbnails) | — | frames |
 | faces / objects (adaptive + refine) | (scenes) | frames |
-| keyframes (transcript-guided) | scenes, speech | — (pure) |
+| keyframes (shots, silences, coverage) | scenes, speech | pure (Node, no decode) |
 | captions (small VLM) | keyframes | seek (selected frames only) |
 | embeddings (text + image encoders) | transcript, keyframes, captions | seek + text |
 
 Built: `src/doc/plan.ts` (`PRODUCERS` holds each layer's needs, pass, defaults and help;
-the CLI's `layers` command and `--help` are generated from it).
+the CLI's `layers` command and `--help` are generated from it). Pure layers (`pass: 'pure'`) are
+derived from other layers by `deriveLayers`, in Node or the browser alike.
 `analyze(file, ['faces', 'scenes', 'transcript'])` resolves dependencies, skips layers already
 present with a matching config, and **groups every frame consumer into one decode pass** (decode
 and transfer are a large share of browser cost). Audio is decoded separately (cheap). Selected-
@@ -202,8 +204,10 @@ and outputs. Also the regression harness's UI.
 1. ~~**Doc + planner** wrapping today's blocks (speech, transcript, scenes, faces) into
    `analyze()`; save/load; CLI `analyze` / `check` on the existing harness.~~ Done
    2026-10-26 (plus `info`, `layers`, `--set`, `--dry-run`).
-2. **Keyframes + markdown module**: transcript-guided keyframe selection (scene starts, silent
-   gaps, coverage), markdown without captions; then captions with a small VLM.
+2. **Keyframes + markdown module**: ~~keyframe selection (scene starts, silent gaps,
+   coverage), markdown without captions, seek-based keyframe JPEGs~~ (done 2026-10-27:
+   `src/doc/keyframes.ts`, `src/doc/markdown.ts`, `videodoc markdown [--images]`); next,
+   captions with a small VLM.
 3. **MCP server** with a warm browser.
 4. **Redact module**: output encoding, redaction log, plates.
 5. **Search**: text + image embeddings, hybrid ranking.
@@ -220,3 +224,8 @@ and outputs. Also the regression harness's UI.
 - Sidecar format for embeddings: raw float16 + offsets, or a small Parquet/Arrow file.
 - Long-video incremental analysis: resume a partially covered layer after an interrupted run.
 - Which captioning VLM fits in-browser budgets (Florence-2 / SmolVLM class via transformers.js).
+- Keyframe images are files next to the video (`<video>.keyframes/<frame>.jpg`), not doc data;
+  the image size is not part of any cache key (delete the folder to re-extract). Captions will
+  need the images in the browser anyway: extract and caption in one seek pass.
+- Markdown on quick-cut video lists many shots without a frame (shorter than `minGap`, 2 s).
+  Merging runs of such shots into one section may read better; wait for captions to judge.

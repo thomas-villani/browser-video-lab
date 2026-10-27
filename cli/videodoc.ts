@@ -3,19 +3,21 @@
 // Compute runs in a headless Edge/Chrome (WebGPU) driving analyze.html; planning, caching and
 // reading docs run in Node, so commands with nothing to compute never start a browser.
 //
-// stdout: JSON results (one object per command). stderr: progress and human summaries.
-// Exit codes: 0 ok, 1 failure, 2 usage error.
-import { existsSync, openSync, readFileSync, readSync, closeSync, renameSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+// stdout: JSON results (one object per command; `markdown` without --out prints Markdown).
+// stderr: progress and human summaries. Exit codes: 0 ok, 1 failure, 2 usage error.
+import { existsSync, mkdirSync, openSync, readFileSync, readSync, closeSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import {
-  DocError, docPathFor, fingerprint, formatDoc, LAYER_NAMES, newDoc, parseDoc, parseSettings, plan, PlanError, PRODUCERS, summarize, withLayers,
-  type Layers, type Plan, type VideoDoc,
+  deriveLayers, DocError, docPathFor, fingerprint, formatDoc, LAYER_NAMES, newDoc, parseDoc, parseSettings, plan, PlanError, PRODUCERS, summarize,
+  toMarkdown, withLayers,
+  type KeyframeItem, type Layers, type Plan, type VideoDoc,
 } from '../src/doc/index.ts';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const DEFAULT_LAYERS = ['speech', 'transcript', 'scenes'];
+const DEFAULT_LAYERS = ['speech', 'transcript', 'scenes', 'keyframes'];
+const MARKDOWN_LAYERS = ['transcript', 'keyframes'];
 // User paths are relative to where the user ran the command (npm run moves cwd to the repo root).
 const userPath = (p: string) => resolve(process.env.INIT_CWD ?? process.cwd(), p);
 
@@ -27,6 +29,9 @@ Commands:
   check                  What this machine can run: browser, WebGPU adapter, decoders, models.
   analyze <video>        Compute layers into <video>.videodoc.json. Layers already in the doc with
                          the same settings are reused; with nothing to compute, no browser starts.
+  markdown <video>       Read the video: shots, timed transcript paragraphs, silent gaps and
+                         (with --images) keyframe JPEGs, as Markdown. Analyzes missing layers first
+                         (${MARKDOWN_LAYERS.join(', ')} and their dependencies, plus any --layers).
   info <video|doc>       Summarize a saved doc (no browser).
   layers                 Layers, their dependencies and settings with defaults (JSON).
 
@@ -37,6 +42,14 @@ analyze options:
   --out <path>           Doc path (default: <video>.videodoc.json).
   --force                Recompute the requested layers even if cached.
   --dry-run              Print the plan and exit.
+
+markdown options:
+  --out <path>           Write the Markdown here (image links relative to it) and print a JSON
+                         summary; default: Markdown on stdout with absolute image paths.
+  --images               Link keyframe JPEGs, extracting missing ones into <video>.keyframes/
+                         (named by frame; delete the folder to re-extract at another size).
+  --image-size <px>      Long side of extracted keyframes (default 768).
+  --layers, --set, --force   As for analyze (e.g. --layers faces adds faces per shot).
 
 Common options:
   --browser msedge|chrome   (default msedge)   --headed   --help
@@ -53,6 +66,8 @@ const { values: a, positionals } = parseArgs({
     out: { type: 'string' },
     force: { type: 'boolean', default: false },
     'dry-run': { type: 'boolean', default: false },
+    images: { type: 'boolean', default: false },
+    'image-size': { type: 'string', default: '768' },
     browser: { type: 'string', default: 'msedge' },
     headed: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
@@ -137,13 +152,37 @@ function progressPrinter() {
   };
 }
 
-async function analyzeCmd(videoArg: string) {
-  const video = userPath(videoArg);
-  if (!existsSync(video) || !statSync(video).isFile()) throw new UsageError(`no such file: ${videoArg}`);
-  const docPath = a.out ? userPath(a.out) : docPathFor(video);
-  const requested = (a.layers ?? DEFAULT_LAYERS.join(',')).split(',').map((s) => s.trim()).filter(Boolean);
-  const settings = parseSettings(a.set ?? []);
+/** Run `fn` on the compute page (analyze.html) with `files` served and progress on stderr. */
+// `page` is a Playwright Page (the harness is untyped JS).
+async function onComputePage<T>(files: Record<string, string>, fn: (page: any, base: string) => Promise<T>): Promise<T> {
+  const { withBrowser, newPage } = await harness();
+  return withBrowser({ build: 'auto', browser: a.browser, headed: a.headed, files }, async (_open: unknown, { browser, base }: { browser: unknown; base: string }) => {
+    const page = await newPage(browser);
+    const progress = progressPrinter();
+    await page.exposeFunction('__videodocProgress', (x: Parameters<typeof progress.update>[0]) => progress.update(x));
+    await page.goto(`${base}analyze.html`);
+    await page.waitForFunction(() => window.videodoc, null, { timeout: 60_000 });
+    try {
+      return await fn(page, base);
+    } finally {
+      progress.end();
+    }
+  });
+}
 
+interface Ensured {
+  doc: VideoDoc;
+  docPath: string;
+  plan: Plan;
+  wallMs: number;
+  adapter?: unknown;
+  replaced?: string;
+}
+
+/** Bring the doc at `docPath` up to date with the `requested` layers: plan in Node, run decode
+ *  passes in the browser (only if any), derive pure layers, save. */
+async function ensure(video: string, docPath: string, requested: string[]): Promise<Ensured | { dryRun: object }> {
+  const settings = parseSettings(a.set ?? []);
   const id = await fingerprintFile(video);
   let existing = loadDoc(docPath);
   let replaced: string | undefined;
@@ -153,53 +192,51 @@ async function analyzeCmd(videoArg: string) {
     existing = undefined;
   }
   const p = await plan(existing, requested, settings, a.force);
-  const planned = p.layers.map((l) => ({ name: l.name, status: l.status }));
   log(`plan: ${p.layers.map((l) => `${l.name} (${l.status})`).join(', ')}`);
-
-  if (a['dry-run']) return out({ doc: docPath, plan: planned, passes: p.passes, missing: missingModels(p) });
   const missing = missingModels(p);
+  if (a['dry-run']) return { dryRun: { doc: docPath, plan: p.layers.map((l) => ({ name: l.name, status: l.status })), passes: p.passes, missing } };
   if (missing.length) throw new Error(missing.join('; '));
 
   let doc = existing;
   let adapter: unknown;
   const wall0 = Date.now();
-  if (Object.keys(p.passes).length) {
-    const { withBrowser, newPage } = await harness();
-    // Cached layers that computed ones depend on (e.g. speech for the transcript).
+  if (p.passes.audio || p.passes.frames) {
+    // Cached layers that browser-computed ones depend on (e.g. speech for the transcript).
     const inputs: Partial<Layers> = {};
     for (const l of p.layers) {
-      if (l.status !== 'compute') continue;
+      if (l.status !== 'compute' || PRODUCERS[l.name].pass === 'pure') continue;
       for (const dep of PRODUCERS[l.name].needs) {
         if (existing?.layers[dep] && p.layers.find((x) => x.name === dep)?.status === 'cached') {
           (inputs as Record<string, unknown>)[dep] = existing.layers[dep];
         }
       }
     }
-    const result = await withBrowser(
-      { build: 'auto', browser: a.browser, headed: a.headed, files: { video } },
-      async (_open: unknown, { browser, base }: { browser: unknown; base: string }) => {
-        const page = await newPage(browser);
-        const progress = progressPrinter();
-        await page.exposeFunction('__videodocProgress', (x: Parameters<typeof progress.update>[0]) => progress.update(x));
-        await page.goto(`${base}analyze.html`);
-        await page.waitForFunction(() => window.videodoc, null, { timeout: 60_000 });
-        try {
-          return await page.evaluate(
-            ([url, layers, inp]: [string, typeof p.layers, Partial<Layers>]) => window.videodoc.compute(url, layers, inp),
-            [`${base}@file/video`, p.layers, inputs],
-          );
-        } finally {
-          progress.end();
-        }
-      },
+    const result = await onComputePage<Awaited<ReturnType<Window['videodoc']['compute']>>>({ video }, (page, base) =>
+      page.evaluate(
+        ([url, layers, inp]: [string, typeof p.layers, Partial<Layers>]) => window.videodoc.compute(url, layers, inp),
+        [`${base}@file/video`, p.layers, inputs],
+      ),
     );
     adapter = result.adapter;
     doc ??= newDoc({ name: basename(video), ...id, ...result.probe });
     doc = withLayers({ ...doc, source: { ...doc.source, ...result.probe } }, result.layers);
-    saveDoc(docPath, doc);
   }
   if (!doc) throw new Error('nothing to compute and no doc');
+  if (p.passes.pure) doc = withLayers(doc, deriveLayers(doc, p.layers));
+  if (Object.keys(p.passes).length) saveDoc(docPath, doc);
+  return { doc, docPath, plan: p, wallMs: Date.now() - wall0, adapter, replaced };
+}
 
+function videoArg(arg: string) {
+  const video = userPath(arg);
+  if (!existsSync(video) || !statSync(video).isFile()) throw new UsageError(`no such file: ${arg}`);
+  return video;
+}
+
+const listArg = (s: string | undefined) => (s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+
+/** One stderr line per planned layer: status, items, time, device, model, layer figures. */
+function logLayers(doc: VideoDoc, p: Plan) {
   const summary = summarize(doc);
   const status = Object.fromEntries(p.layers.map((l) => [l.name, l.status]));
   log(`\n${doc.source.name}: ${fmtTime(doc.source.duration)}, ${doc.source.width}x${doc.source.height}, ${doc.source.fps} fps`);
@@ -208,15 +245,63 @@ async function analyzeCmd(videoArg: string) {
     const extra = Object.entries(s).filter(([k]) => !['items', 'ms', 'device', 'configHash', 'model'].includes(k)).map(([k, v]) => `${k} ${v}`);
     log(`  ${name.padEnd(11)} ${status[name].padEnd(8)} ${String(s.items).padStart(6)} items  ${(s.ms / 1000).toFixed(1).padStart(7)} s  ${s.device}${s.model ? `  ${s.model}` : ''}${extra.length ? `  (${extra.join(', ')})` : ''}`);
   }
+  return summary;
+}
+
+async function analyzeCmd(arg: string) {
+  const video = videoArg(arg);
+  const docPath = a.out ? userPath(a.out) : docPathFor(video);
+  const r = await ensure(video, docPath, a.layers ? listArg(a.layers) : DEFAULT_LAYERS);
+  if ('dryRun' in r) return out(r.dryRun);
+  const summary = logLayers(r.doc, r.plan);
   log(`  -> ${docPath}`);
   out({
     doc: docPath,
-    source: doc.source,
-    layers: Object.fromEntries(p.layers.map((l) => [l.name, { status: l.status, ...summary[l.name] }])),
-    wallMs: Date.now() - wall0,
-    ...(adapter ? { adapter } : {}),
-    ...(replaced ? { note: replaced } : {}),
+    source: r.doc.source,
+    layers: Object.fromEntries(r.plan.layers.map((l) => [l.name, { status: l.status, ...summary[l.name] }])),
+    wallMs: r.wallMs,
+    ...(r.adapter ? { adapter: r.adapter } : {}),
+    ...(r.replaced ? { note: r.replaced } : {}),
   });
+}
+
+/** Keyframe JPEG path: in <video>.keyframes/, named by frame so re-selection reuses files. */
+const imagePath = (video: string, k: KeyframeItem) => join(`${video}.keyframes`, `${String(k.frame).padStart(6, '0')}.jpg`);
+
+/** Extract the keyframe JPEGs not on disk yet (one seek pass); returns how many were written. */
+async function extractImages(video: string, keyframes: KeyframeItem[]): Promise<number> {
+  const todo = keyframes.filter((k) => !existsSync(imagePath(video, k)));
+  if (!todo.length) return 0;
+  const size = Number(a['image-size']);
+  if (!(size >= 16)) throw new UsageError(`--image-size takes a number of pixels, got '${a['image-size']}'`);
+  log(`keyframe images: extracting ${todo.length} of ${keyframes.length}`);
+  const jpegs: string[] = await onComputePage({ video }, (page, base) =>
+    page.evaluate(
+      ([url, times, s]: [string, number[], number]) => window.videodoc.images(url, times, s),
+      [`${base}@file/video`, todo.map((k) => k.t), size],
+    ),
+  );
+  mkdirSync(`${video}.keyframes`, { recursive: true });
+  todo.forEach((k, i) => writeFileSync(imagePath(video, k), Buffer.from(jpegs[i], 'base64')));
+  return todo.length;
+}
+
+async function markdownCmd(arg: string) {
+  const video = videoArg(arg);
+  const r = await ensure(video, docPathFor(video), [...MARKDOWN_LAYERS, ...listArg(a.layers)]);
+  if ('dryRun' in r) return out(r.dryRun);
+  const mdPath = a.out ? userPath(a.out) : undefined;
+  const keyframes = r.doc.layers.keyframes?.items ?? [];
+  const extracted = a.images ? await extractImages(video, keyframes) : 0;
+  // Links are relative to the Markdown file, or absolute when it goes to stdout.
+  const link = (p: string) => (mdPath ? relative(dirname(mdPath), p) : p).replace(/\\/g, '/');
+  const md = toMarkdown(r.doc, { image: a.images ? (k) => link(imagePath(video, k)) : undefined });
+  logLayers(r.doc, r.plan);
+  if (a.images) log(`  images      ${keyframes.length} (${extracted} extracted) in ${video}.keyframes`);
+  if (!mdPath) return void process.stdout.write(md);
+  writeFileSync(mdPath, md);
+  log(`  -> ${mdPath}`);
+  out({ markdown: mdPath, doc: r.docPath, chars: md.length, keyframes: keyframes.length, ...(a.images && { images: `${video}.keyframes`, extracted }) });
 }
 
 function infoCmd(arg: string) {
@@ -283,11 +368,12 @@ async function main() {
   }
   if (cmd === 'check') return checkCmd();
   if (cmd === 'layers') return layersCmd();
-  if (cmd === 'analyze' || cmd === 'info') {
+  const cmds: Record<string, (arg: string) => unknown> = { analyze: analyzeCmd, markdown: markdownCmd, info: infoCmd };
+  if (cmds[cmd]) {
     if (rest.length !== 1) throw new UsageError(`usage: videodoc ${cmd} <video>`);
-    return cmd === 'analyze' ? analyzeCmd(rest[0]) : infoCmd(rest[0]);
+    return cmds[cmd](rest[0]);
   }
-  throw new UsageError(`unknown command '${cmd}' (have: check, analyze, info, layers; see --help)`);
+  throw new UsageError(`unknown command '${cmd}' (have: check, analyze, markdown, info, layers; see --help)`);
 }
 
 main().catch((e: unknown) => {

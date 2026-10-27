@@ -43,7 +43,8 @@ export interface Layer<T> {
   /** Wall time of the pass that produced the layer. Layers produced by one shared pass (scenes
    *  and faces share a decode) report the same time. */
   ms: number;
-  device: 'webgpu' | 'wasm';
+  /** 'cpu' for layers derived from other layers (no decode, no model). */
+  device: 'webgpu' | 'wasm' | 'cpu';
   items: T[];
 }
 
@@ -52,6 +53,9 @@ export interface SpeechItem { t0: number; t1: number }
 export interface TranscriptItem { t0: number; t1: number; text: string }
 /** A shot: frames [f0, f1] inclusive; `score` is the cut score that started it (0 for the first). */
 export interface SceneItem { t0: number; t1: number; f0: number; f1: number; score: number }
+/** A frame worth looking at: the start of a shot, the middle of a silent gap, or a fill-in
+ *  so long shots are covered. `scene` indexes the scenes layer. */
+export interface KeyframeItem { t: number; frame: number; scene: number; why: 'scene' | 'silence' | 'coverage' }
 
 /**
  * A tracked object over frames [f0, f1]. `samples` are [frame, x, y, w, h] in source pixels;
@@ -63,11 +67,13 @@ export interface Layers {
   speech: Layer<SpeechItem>;
   transcript: Layer<TranscriptItem>;
   scenes: Layer<SceneItem>;
+  keyframes: Layer<KeyframeItem>;
   faces: Layer<Track>;
 }
 
 export type LayerName = keyof Layers;
-export const LAYER_NAMES: LayerName[] = ['speech', 'transcript', 'scenes', 'faces'];
+/** In dependency order. */
+export const LAYER_NAMES: LayerName[] = ['speech', 'transcript', 'scenes', 'keyframes', 'faces'];
 
 export interface VideoDoc {
   schema: typeof SCHEMA;

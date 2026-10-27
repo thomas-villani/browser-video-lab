@@ -4,4 +4,6 @@ export * from './schema.ts';
 export * from './hash.ts';
 export * from './plan.ts';
 export * from './tracks.ts';
+export * from './keyframes.ts';
+export * from './markdown.ts';
 export * from './doc.ts';
