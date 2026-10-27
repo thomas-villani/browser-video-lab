@@ -27,6 +27,11 @@ export interface Entry {
   status: 'new' | 'queued' | 'analyzing' | 'ready' | 'error';
   progress?: string;
   error?: string;
+  /** Analysis steps (analysisSteps) and the current one, while analyzing. */
+  steps?: string[];
+  step?: number;
+  /** Video length in seconds before there is a doc (probeDuration), for time estimates. */
+  duration?: number;
   /** Keyframe images by frame: object URLs. */
   images: Map<number, string>;
 }
@@ -135,4 +140,20 @@ export async function storeImages(e: Entry, keyframes: KeyframeItem[], blobs: Bl
     await w.write(blobs[i]);
     await w.close();
   }
+}
+
+/** A video's length from its metadata (fast; undefined when the browser cannot play it, e.g. some mkv). */
+export function probeDuration(file: File): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    const v = document.createElement('video');
+    const url = URL.createObjectURL(file);
+    const done = (d?: number) => {
+      URL.revokeObjectURL(url);
+      resolve(d);
+    };
+    v.preload = 'metadata';
+    v.onloadedmetadata = () => done(Number.isFinite(v.duration) ? v.duration : undefined);
+    v.onerror = () => done(undefined);
+    v.src = url;
+  });
 }

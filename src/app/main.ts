@@ -3,8 +3,8 @@
 // is uploaded: analysis runs here on WebGPU, docs are saved next to the videos or kept in memory.
 import { highlight, search, toMarkdown, type LayerName } from '../doc/index.ts';
 import { analyze, frameImages } from '../analyze';
-import { canOpenFolders, downloadDoc, fromFiles, loadSavedImages, openFolder, saveDoc, storeImages, type Entry } from './library';
-import { esc, markdownToHtml, marks } from './render';
+import { canOpenFolders, downloadDoc, fromFiles, loadSavedImages, openFolder, probeDuration, saveDoc, storeImages, type Entry } from './library';
+import { analysisSteps, esc, estimate, markdownToHtml, marks, stepOf, suggestions } from './render';
 import './style.css';
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
@@ -19,7 +19,32 @@ const state = {
   videoUrl: '',
   /** Search terms (stemmed) to mark in the reading view, when it was opened from a hit. */
   marked: new Set<string>(),
+  /** Example queries from the loaded transcripts. */
+  suggest: [] as string[],
 };
+
+const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
+
+// ---- toasts: what just happened and what to do next ----
+
+/** Show a message at the bottom of the page; ms = 0 keeps it until dismissed. Returns close(). */
+function toast(html: string, o: { action?: string; onAction?: () => void; ms?: number } = {}): () => void {
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.innerHTML = `<span>${html}</span>${o.action ? `<button class="primary">${esc(o.action)}</button>` : ''}<button class="x" title="Dismiss">×</button>`;
+  const close = () => el.remove();
+  el.querySelector('.primary')?.addEventListener('click', () => {
+    close();
+    o.onAction?.();
+  });
+  el.querySelector('.x')!.addEventListener('click', close);
+  $('#toasts').append(el);
+  if (o.ms !== 0) setTimeout(close, o.ms ?? 8000);
+  return close;
+}
+
+/** The "N videos not analyzed yet" toast, closed once they are queued. */
+let closeTodo: (() => void) | undefined;
 
 // ---- analysis queue: one video at a time (one GPU) ----
 
@@ -31,6 +56,18 @@ function layersWanted(): LayerName[] {
   if ($<HTMLInputElement>('#opt-transcript').checked) layers.push('transcript');
   if ($<HTMLInputElement>('#opt-faces').checked) layers.push('faces');
   return layers;
+}
+
+const timeFor = (seconds: number) =>
+  estimate(seconds, { transcript: $<HTMLInputElement>('#opt-transcript').checked, faces: $<HTMLInputElement>('#opt-faces').checked });
+
+/** Queue every video not analyzed yet (or failed), saying what happens next. */
+function analyzeAll() {
+  const todo = state.entries.filter((e) => e.status === 'new' || e.status === 'error');
+  todo.forEach(enqueue);
+  closeTodo?.();
+  if (todo.length > 1)
+    toast(`Analyzing ${plural(todo.length, 'video')}, one at a time: follow along in the list. You can read and search the others meanwhile.`);
 }
 
 function enqueue(e: Entry) {
@@ -48,24 +85,34 @@ async function runQueue() {
   while (queue.length) {
     const e = queue.shift()!;
     e.status = 'analyzing';
-    e.progress = 'starting';
+    e.progress = '';
+    e.steps = analysisSteps(layersWanted(), new Set(Object.keys(e.doc?.layers ?? {})));
+    e.step = -1;
     renderList();
+    if (state.selected === e && !e.doc) renderPending(e);
     try {
       const t0 = performance.now();
       e.doc = await analyze(await e.file(), layersWanted(), {
         doc: e.doc,
         onProgress: (p) => {
-          e.progress = `${p.stage}${p.total > 1 ? ` ${Math.floor((100 * p.done) / p.total)}%` : ''}`;
+          e.step = stepOf(p, e.steps!);
+          e.progress = p.total > 1 ? `${Math.floor((100 * p.done) / p.total)}%` : '';
           renderEntry(e);
+          if (state.selected === e && !e.doc) renderPending(e);
         },
       });
       e.status = 'ready';
       e.progress = `done in ${((performance.now() - t0) / 1000).toFixed(0)} s`;
-      if (!(await saveDoc(e))) e.progress += ' (not saved: download the doc to keep it)';
+      const saved = await saveDoc(e);
+      if (!saved) e.progress += ' (not saved: download the doc to keep it)';
+      const more = queue.length ? ` ${queue.length} more to go.` : '';
+      const said = e.doc.layers.transcript?.items.length;
+      toast(`<b>${esc(e.name)}</b> is ready to read${said ? ' and search' : said === 0 ? ' (no speech found, so nothing to search)' : ''}.${more}`, state.selected === e ? {} : { action: 'Open', onAction: () => void showEntry(e) });
     } catch (err) {
       console.error(err);
       e.status = 'error';
       e.error = (err as Error).message;
+      toast(`Could not analyze <b>${esc(e.name)}</b>: ${esc(e.error)}`, { ms: 0 });
     }
     renderList();
     if (state.selected === e) await showEntry(e);
@@ -78,16 +125,30 @@ async function runQueue() {
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
+/** "✓ Listening → Transcribing 42% → Finding shots", the current step lit. */
+function stepsHtml(e: Entry): string {
+  const steps = e.steps ?? [];
+  const at = e.step ?? -1;
+  if (!steps.length) return '<span class="busy">analyzing…</span>';
+  return `<span class="steps">${steps
+    .map((s, i) => (i < at ? `<span class="done">✓ ${s}</span>` : i === at ? `<span class="cur">${s}${e.progress ? ` ${e.progress}` : '…'}</span>` : `<span>${s}</span>`))
+    .join(' → ')}</span>`;
+}
+
+/** Videos ahead of e in the queue (including the one being analyzed). */
+const ahead = (e: Entry) => queue.indexOf(e) + 1;
+
 function entryHtml(e: Entry): string {
   const d = e.doc;
   const chips = d ? Object.keys(d.layers).map((n) => `<span class="chip">${n}</span>`).join('') : '';
-  const meta = d ? `${fmt(d.source.duration)} · ${d.source.height}p` : '';
+  const meta = d ? `${fmt(d.source.duration)} · ${d.source.height}p` : e.duration ? fmt(e.duration) : '';
   const status =
-    e.status === 'analyzing' ? `<span class="busy">${esc(e.progress ?? '')}</span>`
-    : e.status === 'queued' ? '<span class="busy">queued</span>'
+    e.status === 'analyzing' ? stepsHtml(e)
+    : e.status === 'queued' ? `<span class="busy">queued · ${plural(ahead(e), 'video')} ahead</span>`
     : e.status === 'error' ? `<span class="err" title="${esc(e.error ?? '')}">failed: ${esc(e.error ?? '')}</span>`
+    : e.status === 'new' ? `<span class="muted">not analyzed yet${e.duration ? ` · takes ${timeFor(e.duration)}` : ''}</span>`
     : e.progress ? `<span class="muted">${esc(e.progress)}</span>` : '';
-  const action = e.status === 'new' || e.status === 'error' ? '<button class="analyze">Analyze</button>' : '';
+  const action = e.status === 'new' || e.status === 'error' ? `<button class="analyze primary">${e.status === 'error' ? 'Retry' : 'Analyze'}</button>` : '';
   return `<li data-id="${e.id}" class="${state.selected === e ? 'sel' : ''} ${e.status}">
     <div class="row"><span class="name" title="${esc(e.path)}">${esc(e.path)}</span>${action}</div>
     <div class="meta">${meta} ${chips}</div>${status ? `<div class="status">${status}</div>` : ''}</li>`;
@@ -102,9 +163,19 @@ function renderList() {
   const n = state.entries.length;
   const todo = state.entries.filter((e) => e.status === 'new' || e.status === 'error').length;
   $('#list-head').innerHTML = n
-    ? `<span>${esc(state.folder || 'Videos')} · ${n}</span>${todo ? `<button id="analyze-all">Analyze ${todo}</button>` : ''}`
+    ? `<span>${esc(state.folder || 'Videos')} · ${n}</span>${todo ? `<button id="analyze-all" class="primary">Analyze ${todo === n ? 'all' : todo}</button>` : ''}`
     : '';
   $('#list').innerHTML = state.entries.map(entryHtml).join('');
+  updateSearchHints();
+}
+
+/** Search box placeholder: what can be searched, with an example query from the transcripts. */
+function updateSearchHints() {
+  const searchable = state.entries.filter((e) => e.doc?.layers.transcript?.items.length);
+  state.suggest = suggestions(searchable.map((e) => e.doc!.layers.transcript!.items.map((i) => i.text)));
+  $<HTMLInputElement>('#q').placeholder = searchable.length
+    ? `Search what's said in ${plural(searchable.length, 'video')}${state.suggest.length ? `, e.g. ${state.suggest[0]}` : ''}  ( / )`
+    : state.entries.length ? "Analyze a video to search what's said in it" : "Add videos, then search what's said in them";
 }
 
 // ---- reading view ----
@@ -133,9 +204,10 @@ async function showEntry(e: Entry, at?: number, marked: string[] = []) {
   $('#doc-actions').innerHTML = e.doc
     ? `<button id="copy-md">Copy Markdown</button><button id="dl-doc">Download doc</button>${e.status === 'ready' ? '<button id="reanalyze" title="Compute the layers ticked above that are missing">Add layers</button>' : ''}`
     : '';
-  const read = $('#read');
+  $('#tip').hidden = !e.doc || tipSeen();
+  $('#read-status').textContent = '';
   if (!e.doc) {
-    read.innerHTML = `<h1>${esc(e.name)}</h1><p class="note">Not analyzed yet.</p>${e.status === 'new' ? '<p><button class="analyze-this primary">Analyze this video</button></p>' : ''}`;
+    renderPending(e);
   } else {
     renderRead(e);
     const kfs = e.doc.layers.keyframes?.items ?? [];
@@ -143,18 +215,43 @@ async function showEntry(e: Entry, at?: number, marked: string[] = []) {
     renderRead(e);
     const missing = kfs.filter((k) => !e.images.has(k.frame));
     if (missing.length && state.gpu !== false) {
-      $('#read-status').textContent = `extracting ${missing.length} keyframes…`;
+      const status = (s: string) => {
+        if (state.selected === e) $('#read-status').textContent = s;
+      };
+      status(`extracting ${missing.length} keyframes…`);
       try {
         await storeImages(e, missing, await frameImages(file, missing.map((k) => k.t)));
       } catch (err) {
         console.warn(err);
       }
-      $('#read-status').textContent = '';
+      status('');
       if (state.selected === e) fillImages(e);
     }
   }
   if (at !== undefined) seek(at, true);
 }
+
+/** The reading view of a video without a doc: what analysis will do, or how far along it is. */
+function renderPending(e: Entry) {
+  const time = e.duration ? ` It takes ${timeFor(e.duration)} here.` : '';
+  const body =
+    e.status === 'analyzing' ? `<p>Analyzing in this browser:</p><p class="big-steps">${stepsHtml(e)}</p><p class="muted">You can read and search other videos meanwhile.</p>`
+    : e.status === 'queued' ? `<p>Queued: ${plural(ahead(e), 'video')} ahead of it. Videos are analyzed one at a time.</p>`
+    : state.gpu === false ? '<p>Not analyzed yet, and this browser has no WebGPU to analyze it. Use Chrome or Edge, or the <code>videodoc</code> CLI.</p>'
+    : `${e.status === 'error' ? `<p class="err">Analysis failed: ${esc(e.error ?? '')}</p>` : ''}
+       <p>Not analyzed yet. Analysis transcribes what's said, finds the shots and picks a picture for each, in this browser.${time}</p>
+       <p><button class="analyze-this primary">${e.status === 'error' ? 'Try again' : 'Analyze this video'}</button></p>`;
+  $('#read').innerHTML = `<h1>${esc(e.name)}</h1>${body}`;
+}
+
+const TIP = 'videodoc.tip.seek';
+const tipSeen = () => {
+  try {
+    return localStorage.getItem(TIP) === '1';
+  } catch {
+    return false;
+  }
+};
 
 function renderRead(e: Entry) {
   const md = toMarkdown(e.doc!, { image: (k) => `kf:${k.frame}` });
@@ -206,10 +303,17 @@ function renderResults() {
   $('#viewer').hidden = true;
   $('#empty').hidden = true;
   const skipped = state.entries.length - searchable.length;
-  const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
-  const head = `<p class="muted">${plural(hits.length, 'passage')} in ${plural(searchable.length, 'transcript')}${skipped ? ` · ${plural(skipped, 'video')} not searchable yet (analyze with the transcript layer)` : ''}</p>`;
+  const head = hits.length
+    ? `<p class="muted">${plural(hits.length, 'passage')} in ${plural(searchable.length, 'video')}${skipped ? ` · ${plural(skipped, 'video')} not searchable yet (analyze with “What's said” on)` : ''}</p>`
+    : searchable.length ? ''
+    : `<p>Nothing to search yet: ${state.entries.length ? 'analyze a video first (with “What’s said” on).' : 'add videos and analyze them first.'}</p>`;
+  const tryThese = state.suggest.filter((s) => s.toLowerCase() !== state.query.toLowerCase());
+  const none = searchable.length && !hits.length
+    ? `<p>No matches in ${plural(searchable.length, 'video')}.${tryThese.length ? ` Try: ${tryThese.map((s) => `<button class="suggest">${esc(s)}</button>`).join(' ')}` : ''}</p>`
+    : '';
   box.innerHTML =
     head +
+    none +
     hits
       .map((h) => {
         const e = searchable[h.doc];
@@ -240,25 +344,46 @@ function onSearch() {
 
 // ---- adding videos ----
 
-function addEntries(entries: Entry[], folder = '') {
+async function addEntries(entries: Entry[], folder = '') {
   if (folder) {
     state.entries = entries;
     state.folder = folder;
     state.selected = undefined;
   } else {
     const known = new Set(state.entries.map((e) => e.path));
-    state.entries.push(...entries.filter((e) => !known.has(e.path)));
+    entries = entries.filter((e) => !known.has(e.path));
+    state.entries.push(...entries);
   }
   renderList();
   const first = entries.find((e) => e.doc) ?? entries[0];
   if (first && !state.query) void showEntry(first);
+
+  // Say what is ready and what still needs analyzing (with how long it takes).
+  const todo = entries.filter((e) => !e.doc);
+  const ready = entries.length - todo.length;
+  for (const e of todo) e.duration = await probeDuration(await e.file());
+  renderList();
+  if (state.selected && !state.selected.doc) renderPending(state.selected);
+  const readyText = ready ? `${plural(ready, 'video')} ready to read and search.` : '';
+  if (!todo.length) {
+    if (ready) toast(readyText, { ms: 5000 });
+    return;
+  }
+  const total = todo.reduce((s, e) => s + (e.duration ?? 0), 0);
+  const time = total && todo.every((e) => e.duration) ? ` Analyzing takes ${timeFor(total)} in this browser.` : '';
+  const what = `${readyText} ${plural(todo.length, 'video')} not analyzed yet.`.trim();
+  closeTodo?.();
+  closeTodo =
+    state.gpu === false
+      ? toast(`${what} This browser can't analyze them (no WebGPU): use Chrome or Edge, or the videodoc CLI.`, { ms: 0 })
+      : toast(`${what}${time}`, { action: todo.length === 1 ? 'Analyze it' : `Analyze ${todo.length}`, onAction: analyzeAll, ms: 0 });
 }
 
 async function pickFolder() {
   try {
     const { folder, entries } = await openFolder();
-    if (!entries.length) return alert(`No videos (mp4, mov, mkv, webm) in ${folder}.`);
-    addEntries(entries, folder);
+    if (!entries.length) return void toast(`No videos (mp4, mov, mkv, webm) in ${esc(folder)}.`);
+    await addEntries(entries, folder);
   } catch (err) {
     if ((err as DOMException).name !== 'AbortError') alert((err as Error).message);
   }
@@ -269,10 +394,28 @@ async function pickFolder() {
 function wire() {
   $('#open-folder').hidden = !canOpenFolders();
   $('#open-folder').addEventListener('click', () => void pickFolder());
+  $('#start-folder').hidden = !canOpenFolders();
+  $('#start-folder').addEventListener('click', () => void pickFolder());
+  $('#start-files').addEventListener('click', () => $('#add-files').click());
   $('#add-files').addEventListener('change', async (ev) => {
     const input = ev.target as HTMLInputElement;
-    addEntries(await fromFiles([...(input.files ?? [])]));
+    const files = [...(input.files ?? [])];
     input.value = '';
+    await addEntries(await fromFiles(files));
+  });
+  // Time estimates depend on what is analyzed.
+  for (const id of ['#opt-transcript', '#opt-faces'])
+    $(id).addEventListener('change', () => {
+      renderList();
+      if (state.selected && !state.selected.doc && !state.query) renderPending(state.selected);
+    });
+  $('#tip-ok').addEventListener('click', () => {
+    $('#tip').hidden = true;
+    try {
+      localStorage.setItem(TIP, '1');
+    } catch {
+      // Private window: the tip comes back next time.
+    }
   });
   $('#q').addEventListener('input', onSearch);
   document.addEventListener('keydown', (ev) => {
@@ -283,7 +426,7 @@ function wire() {
   });
 
   $('#list-head').addEventListener('click', (ev) => {
-    if ((ev.target as HTMLElement).id === 'analyze-all') state.entries.filter((e) => e.status === 'new' || e.status === 'error').forEach(enqueue);
+    if ((ev.target as HTMLElement).id === 'analyze-all') analyzeAll();
   });
   $('#list').addEventListener('click', (ev) => {
     const li = (ev.target as HTMLElement).closest('li');
@@ -293,6 +436,11 @@ function wire() {
     else void showEntry(e);
   });
   $('#results').addEventListener('click', (ev) => {
+    const target = ev.target as HTMLElement;
+    if (target.classList.contains('suggest')) {
+      $<HTMLInputElement>('#q').value = target.textContent ?? '';
+      return onSearch();
+    }
     const li = (ev.target as HTMLElement).closest<HTMLElement>('li.hit');
     const e = li && state.entries.find((x) => x.id === Number(li.dataset.id));
     if (e) void showEntry(e, Number(li.dataset.t), li.dataset.terms?.split(' ').filter(Boolean));
@@ -331,7 +479,8 @@ function wire() {
     ev.preventDefault();
     body.classList.remove('dragging');
     const entries = await fromFiles([...(ev.dataTransfer?.files ?? [])]);
-    if (entries.length) addEntries(entries);
+    if (entries.length) await addEntries(entries);
+    else toast('Only video files (mp4, mov, mkv, webm) and their .videodoc.json files can be added.');
   });
 }
 

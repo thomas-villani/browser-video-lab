@@ -225,10 +225,23 @@ loaded. Reading and searching work without WebGPU.
    read the Markdown view, search across them. Nothing leaves the machine.~~ Built 2026-10-27
    (`app.html`, `src/app/`, `videodoc ui`). Not yet: hosted build with a model registry (models
    are served from `public/models`), analysis in a worker, OPFS persistence for dropped files.
+   First-run guidance added the same day: welcome screen with the two ways in, toasts that say
+   what is ready and what to analyze (with a time estimate), step-by-step analysis progress,
+   search placeholder and suggested queries from the transcripts, a one-time seek tip.
 6. **Redact module**: output encoding, redaction log, plates, and a review UI (8.1% of faces
    are still missed against human labels, so a person must check the result).
 7. Captions with a small VLM, pulled in where they visibly improve search or the Markdown view.
 8. Worker-by-default runtime, single shared GPU device (detector + Whisper), packaging/publishing.
+
+Ideas for later applications (2026-10-27, not scheduled):
+
+- **Audio files** (lectures, podcasts, voice memos): the audio pass (VAD, Whisper), transcript,
+  Markdown and search already work without frames; needs audio-only input in `analyze()`
+  (no frames pass, no keyframes) and a player without video in the app.
+- **Transcript-driven editing** for podcasts and YouTube videos: highlight fillers ("um", "uh",
+  false starts) and long pauses in the reading view, follow along, mark cuts, export an edit
+  list (EDL/FCPXML) or render the cut. Needs word-level timestamps (Whisper can give them) and
+  a prompt or post-pass that keeps disfluencies (Whisper drops most "um"s by default).
 
 **Lead application (decided 2026-10-27): search and read your videos privately.** It is more
 generally useful than redaction and shows every core claim: browser-only and private, analyze

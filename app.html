@@ -14,12 +14,11 @@
         <button id="open-folder" class="primary" hidden>Open folder</button>
         <label class="button">Add videos<input id="add-files" type="file" multiple accept="video/*,.json" hidden /></label>
         <details class="opts">
-          <summary>Layers</summary>
+          <summary>What to analyze</summary>
           <div class="menu">
-            <p class="muted">Computed when analyzing:</p>
-            <label><input type="checkbox" checked disabled /> speech, shots, keyframes</label>
-            <label><input id="opt-transcript" type="checkbox" checked /> transcript (Whisper)</label>
-            <label><input id="opt-faces" type="checkbox" /> faces</label>
+            <label><input type="checkbox" checked disabled /> When people speak, shots, key pictures <span class="muted">(always; quick)</span></label>
+            <label><input id="opt-transcript" type="checkbox" checked /> What's said <span class="muted">(transcript; most of the time, needed for search)</span></label>
+            <label><input id="opt-faces" type="checkbox" /> Who's on screen <span class="muted">(faces; about doubles the time)</span></label>
           </div>
         </details>
         <span id="gpu" class="muted">checking WebGPU…</span>
@@ -34,14 +33,22 @@
       <main>
         <section id="empty" class="empty">
           <h1>Read and search your videos, privately.</h1>
-          <p>
-            Open a folder or drop video files here. videodoc transcribes speech, finds shots and picks keyframes
-            <b>in this browser</b> (WebGPU); nothing is uploaded.
-          </p>
-          <p class="muted">
-            Opening a folder saves each video's analysis next to it (<code>video.mp4.videodoc.json</code>), the same
-            files the <code>videodoc</code> CLI and MCP server use, so analysis is done once.
-          </p>
+          <p class="muted">Everything runs in this browser. Nothing is uploaded.</p>
+          <div class="starts">
+            <button id="start-folder" class="start" hidden>
+              <b>Open a folder</b>
+              <span>Every video in it and its subfolders. Results are saved next to each video, so it's analyzed only once.</span>
+            </button>
+            <button id="start-files" class="start">
+              <b>Choose videos</b>
+              <span>Or drop them anywhere on this page. Results stay in this tab; you can download them.</span>
+            </button>
+          </div>
+          <ol class="how">
+            <li><b>Add videos.</b> Ones analyzed before (by this app or the <code>videodoc</code> CLI) are ready right away.</li>
+            <li><b>Analyze</b> the new ones: this browser transcribes what's said and picks a picture for each shot. It takes roughly a quarter of the video's length, one video at a time.</li>
+            <li><b>Read and search.</b> Click any time or picture to jump the video there.</li>
+          </ol>
         </section>
         <ul id="results" class="results" hidden></ul>
         <section id="viewer" class="viewer" hidden>
@@ -49,10 +56,17 @@
             <video id="player" controls preload="metadata"></video>
             <div class="doc-bar"><span id="read-status" class="muted"></span><span id="doc-actions"></span></div>
           </div>
-          <article id="read" class="read"></article>
+          <div class="read-col">
+            <p id="tip" class="tip" hidden>
+              Click any time, picture or shot heading to jump the video there. While it plays, the paragraph being said is
+              highlighted. <button id="tip-ok">Got it</button>
+            </p>
+            <article id="read" class="read"></article>
+          </div>
         </section>
       </main>
     </div>
+    <div id="toasts" class="toasts" aria-live="polite"></div>
     <div class="drop-hint">Drop videos to add them</div>
     <script type="module" src="/src/app/main.ts"></script>
   </body>

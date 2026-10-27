@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { highlight, newDoc, toMarkdown, withLayers, type Layer } from '../src/doc/index.ts';
-import { markdownToHtml, secs } from '../src/app/render.ts';
+import { analysisSteps, estimate, markdownToHtml, secs, stepOf, suggestions } from '../src/app/render.ts';
 
 const layer = <T>(items: T[]) => ({ producer: { configHash: 'h', config: {} }, items }) as unknown as Layer<T>;
 const doc = withLayers(
@@ -30,4 +30,26 @@ test('render: header, compact empty shots, timed paragraphs, keyframes, escaping
   const marked = markdownToHtml(toMarkdown(doc), () => undefined, (t) => highlight(t, new Set(['zon', 'board'])));
   assert.match(marked, /The <mark>zoning<\/mark> <mark>board<\/mark> approved/);
   assert.equal(secs('1:01:23'), 3683);
+});
+
+test('guidance: estimates, analysis steps, search suggestions', () => {
+  assert.equal(estimate(30, { transcript: true, faces: false }), 'under a minute');
+  assert.equal(estimate(3600, { transcript: true, faces: false }), 'about 16 min');
+  assert.equal(estimate(3 * 3600, { transcript: true, faces: true }), 'about 76 min');
+  assert.equal(estimate(6 * 3600, { transcript: true, faces: true }), 'about 2.5 h');
+  assert.deepEqual(analysisSteps(['speech', 'scenes', 'keyframes', 'transcript'], new Set()), ['Listening', 'Transcribing', 'Finding shots']);
+  // Adding faces to an analyzed video: only the frames pass runs.
+  const steps = analysisSteps(['speech', 'scenes', 'keyframes', 'transcript', 'faces'], new Set(['speech', 'transcript', 'scenes', 'keyframes']));
+  assert.deepEqual(steps, ['Shots and faces']);
+  const full = ['Listening', 'Transcribing', 'Finding shots'];
+  assert.equal(stepOf({ pass: 'probe', stage: 'reading container' }, full), -1);
+  assert.equal(stepOf({ pass: 'audio', stage: 'voice activity' }, full), 0);
+  assert.equal(stepOf({ pass: 'audio', stage: 'loading whisper-base' }, full), 1);
+  assert.equal(stepOf({ pass: 'frames', stage: 'scenes' }, full), 2);
+  // Names said mid-sentence, at least twice, taking turns between videos; sentence starts don't count.
+  const s = suggestions([
+    ['Then we went to Michigan and back to Michigan.', 'Detroit is in it, said the Governor of Michigan.', 'Tariffs hurt Detroit and Detroit.'],
+    ['The Senate in Alaska met.', 'Alaska again, and Alaska.'],
+  ]);
+  assert.deepEqual(s, ['Michigan', 'Alaska', 'Detroit']);
 });

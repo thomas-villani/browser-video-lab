@@ -531,3 +531,16 @@ Findings:
    a matched word (also in CLI/MCP results).
 3. Not tested automatically: **Open folder** (File System Access needs a real user gesture and
    a permission prompt). Needs a manual check in Chrome/Edge.
+
+### First-run guidance (2026-10-27)
+
+Driven headless (Edge, file chooser from the welcome screen): bodycam + briefing with docs,
+rickroll and pan1080 without. Toast: "2 videos ready to read and search. 2 videos not analyzed
+yet. Analyzing takes about 1 min in this browser. [Analyze 2]"; placeholder "Search what's said
+in 2 videos, e.g. Fairfield"; a query with no hits offers Fairfield, Trump, Indiana, President.
+Clicking Analyze 2: rickroll shows "Listening… → Transcribing → Finding shots" in the list and
+the reading view, pan1080 "queued · 1 video ahead"; rickroll done in 13 s (estimate: under a
+minute), pan1080 after. Estimates use 0.22x the duration for the transcript plus 0.05x for
+shots (0.2x with faces), from the step-4 table; they are for an integrated GPU.
+Found while testing: `[hidden]` lost to `display: grid` (the empty player showed under the
+welcome screen), and the previous video's "extracting keyframes…" status carried over.

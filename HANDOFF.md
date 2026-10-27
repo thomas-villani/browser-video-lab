@@ -84,12 +84,20 @@ difference, denser visual analysis where nobody speaks.
   beside a player; search across loaded docs; hits seek to `at` and mark the terms.
 - Silent videos now analyze (empty speech/transcript). 43 tests pass.
 - **Open folder is not tested automatically**: check it by hand in Chrome/Edge.
+- First-run guidance: welcome screen (Open a folder / Choose videos, three steps), toasts (what
+  is ready, "N not analyzed yet, takes about X" with an Analyze button; done; failed), analysis
+  progress as steps (Listening → Transcribing → Finding shots, `analysisSteps`/`stepOf` in
+  `render.ts`), queue position, estimates (`estimate`), search placeholder and suggested
+  queries (`suggestions`: names said mid-sentence), one-time seek tip, plain names in the
+  "What to analyze" menu. 44 tests pass.
 
 ## Next: redaction (step 6)
 
 Lead application decided 2026-10-27: search and read your videos privately; redaction follows
 (output encoding, redaction log, plates, review UI). Smaller follow-ups for the app: hosted
-build with a model registry, analysis in a worker, persistence for dropped files.
+build with a model registry, analysis in a worker, persistence for dropped files. Ideas noted
+in DESIGN.md (not scheduled): audio-only files (lectures, podcasts) and transcript-driven
+editing (filler words, cuts).
 
 ## Later: captions
 
