@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>videodoc</title>
+    <meta name="description" content="Read and search your videos privately: analysis runs in this browser, nothing is uploaded." />
+  </head>
+  <body>
+    <header>
+      <div class="brand">videodoc</div>
+      <div class="search"><input id="q" type="search" placeholder="Search what was said across your videos  ( / )" autocomplete="off" /></div>
+      <div class="actions">
+        <button id="open-folder" class="primary" hidden>Open folder</button>
+        <label class="button">Add videos<input id="add-files" type="file" multiple accept="video/*,.json" hidden /></label>
+        <details class="opts">
+          <summary>Layers</summary>
+          <div class="menu">
+            <p class="muted">Computed when analyzing:</p>
+            <label><input type="checkbox" checked disabled /> speech, shots, keyframes</label>
+            <label><input id="opt-transcript" type="checkbox" checked /> transcript (Whisper)</label>
+            <label><input id="opt-faces" type="checkbox" /> faces</label>
+          </div>
+        </details>
+        <span id="gpu" class="muted">checking WebGPU…</span>
+      </div>
+    </header>
+    <div id="banner" class="banner" hidden></div>
+    <div class="layout">
+      <aside>
+        <div id="list-head" class="list-head"></div>
+        <ul id="list"></ul>
+      </aside>
+      <main>
+        <section id="empty" class="empty">
+          <h1>Read and search your videos, privately.</h1>
+          <p>
+            Open a folder or drop video files here. videodoc transcribes speech, finds shots and picks keyframes
+            <b>in this browser</b> (WebGPU); nothing is uploaded.
+          </p>
+          <p class="muted">
+            Opening a folder saves each video's analysis next to it (<code>video.mp4.videodoc.json</code>), the same
+            files the <code>videodoc</code> CLI and MCP server use, so analysis is done once.
+          </p>
+        </section>
+        <ul id="results" class="results" hidden></ul>
+        <section id="viewer" class="viewer" hidden>
+          <div class="player">
+            <video id="player" controls preload="metadata"></video>
+            <div class="doc-bar"><span id="read-status" class="muted"></span><span id="doc-actions"></span></div>
+          </div>
+          <article id="read" class="read"></article>
+        </section>
+      </main>
+    </div>
+    <div class="drop-hint">Drop videos to add them</div>
+    <script type="module" src="/src/app/main.ts"></script>
+  </body>
+</html>

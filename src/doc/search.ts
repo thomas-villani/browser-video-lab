@@ -66,6 +66,9 @@ export interface SearchOptions {
 
 export interface SearchHit extends Passage {
   score: number;
+  /** Start of the first transcript item in the passage that contains a matched term: where to
+   *  seek to hear it (the passage may start a sentence or two earlier). */
+  at: number;
   /** Query terms found in the passage (stemmed). */
   matched: string[];
   /** The passage with matched words in **bold**. */
@@ -100,6 +103,7 @@ export function search(docs: VideoDoc[], query: string, o: SearchOptions = {}): 
   const q = [...new Set(terms(query))];
   if (!q.length) return [];
   const all = docs.flatMap((d, i) => passages(d.layers.transcript?.items ?? [], i, window));
+  const items = docs.map((d) => d.layers.transcript?.items ?? []);
   const toks = all.map((p) => terms(p.text));
   const avg = toks.reduce((n, t) => n + t.length, 0) / Math.max(1, toks.length);
   const df = new Map<string, number>(q.map((t) => [t, 0]));
@@ -124,7 +128,9 @@ export function search(docs: VideoDoc[], query: string, o: SearchOptions = {}): 
     if (hits.length >= top) break;
     if (hits.some((h) => h.doc === s.p.doc && h.t0 < s.p.t1 + gap && s.p.t0 < h.t1 + gap)) continue;
     const keyframe = nearestKeyframe(docs[s.p.doc].layers.keyframes?.items, s.p.t0, s.p.t1);
-    hits.push({ ...s.p, score: Math.round(s.score * 1000) / 1000, matched: s.matched, snippet: highlight(s.p.text, new Set(s.matched)), ...(keyframe !== undefined && { keyframe }) });
+    const matched = new Set(s.matched);
+    const first = items[s.p.doc].slice(s.p.i0, s.p.i1 + 1).find((x) => terms(x.text).some((w) => matched.has(w)));
+    hits.push({ ...s.p, score: Math.round(s.score * 1000) / 1000, at: first?.t0 ?? s.p.t0, matched: s.matched, snippet: highlight(s.p.text, new Set(s.matched)), ...(keyframe !== undefined && { keyframe }) });
   }
   return hits;
 }

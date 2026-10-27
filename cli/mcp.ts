@@ -78,7 +78,7 @@ const TOOLS = [
     name: 'search',
     title: 'Search videos',
     description:
-      'Find where something is said across videos: ranked transcript passages (keyword/BM25) with times, a highlighted snippet and the nearest keyframe. ' +
+      'Find where something is said across videos: ranked transcript passages (keyword/BM25) with times (`at`: where the first match is said), a highlighted snippet and the nearest keyframe. ' +
       'Reads saved docs only (instant); videos not yet analyzed are listed, analyze them first. Follow up with markdown from/to around a hit.',
     inputSchema: {
       type: 'object',

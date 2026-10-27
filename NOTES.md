@@ -507,3 +507,27 @@ Findings:
 3. **Narration compilations mix sources**: the bodycam video has a narrator, redacted audio
    and several cameras. Search handles it; per-speaker or per-source labels would help later.
 4. Whisper's segments sometimes start mid-sentence, so snippets do too; acceptable for now.
+
+## videodoc step 5: the app (2026-10-27)
+
+`app.html` + `src/app/` and `videodoc ui`. Driven headless with Playwright (Edge, Iris Xe, AC +
+overlay), adding videos through the file input (same path as drag-and-drop):
+
+| Step | Time | Notes |
+|---|---|---|
+| Add bodycam + briefing (with their docs) + pan1080 | 0.1 s | docs matched to videos by name |
+| Reading view of bodycam, extract 57 keyframes in the page | 6.3 s | 72 paragraphs; images appear as they are ready |
+| Search "turn signal" across loaded docs | < 0.3 s | 9 hits with thumbnails |
+| Click a hit ("prescription drug prices") | | player seeks to 3:17, paragraph highlighted, terms marked |
+| Analyze pan1080 (0:20, no audio) in the page | 1 s | scenes + keyframes; empty speech/transcript |
+
+Findings:
+
+1. **Silent videos failed analysis** ("no audio track in the file"): screen recordings and
+   muted exports are common. Now a video without audio gets empty speech and transcript layers,
+   and Whisper is not loaded when there is no speech at all (also saves seconds on music).
+2. **Seek to the first match, not the passage start.** Passages are 20 s windows that may start
+   a sentence or two early; hits now carry `at`, the start of the first transcript segment with
+   a matched word (also in CLI/MCP results).
+3. Not tested automatically: **Open folder** (File System Access needs a real user gesture and
+   a permission prompt). Needs a manual check in Chrome/Edge.

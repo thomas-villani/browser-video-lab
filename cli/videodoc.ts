@@ -8,7 +8,7 @@
 import { parseArgs } from 'node:util';
 import { DocError, LAYER_NAMES, PlanError } from '../src/doc/index.ts';
 import {
-  analyze, check, DEFAULT_IMAGE_SIZE, DEFAULT_LAYERS, info, layers, MARKDOWN_LAYERS, markdown, oneShotBrowser, search, UsageError,
+  analyze, check, DEFAULT_IMAGE_SIZE, DEFAULT_LAYERS, info, layers, MARKDOWN_LAYERS, markdown, oneShotBrowser, openUrl, search, serveApp, UsageError,
   type Context, type Progress,
 } from './lib.ts';
 
@@ -17,6 +17,8 @@ const HELP = `videodoc: analyze a video once, query it many times. Runs in a loc
 Usage: videodoc <command> [options]
 
 Commands:
+  ui                     The app in your browser: open a folder or drop videos, analyze, read and
+                         search them. Uses the same docs as the CLI. Needs Chrome or Edge (WebGPU).
   check                  What this machine can run: browser, WebGPU adapter, decoders, models.
   analyze <video|folder> Compute layers into <video>.videodoc.json (a folder: every video in it).
                          Layers already in the doc with the same settings are reused; with nothing
@@ -50,6 +52,10 @@ markdown options:
 search options:
   --top <n>              Hits to return (default 10).
 
+ui options:
+  --port <n>             Preferred port (default 4317; the next free one is used).
+  --no-open              Print the URL instead of opening the browser.
+
 Common options:
   --browser msedge|chrome   (default msedge)   --headed   --help
 
@@ -69,6 +75,8 @@ const { values: a, positionals } = parseArgs({
     from: { type: 'string' },
     to: { type: 'string' },
     top: { type: 'string', default: '10' },
+    port: { type: 'string', default: '4317' },
+    'no-open': { type: 'boolean', default: false },
     browser: { type: 'string', default: 'msedge' },
     headed: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
@@ -137,13 +145,22 @@ async function main() {
     return;
   }
   if (cmd === 'layers') return out(layers());
+  if (cmd === 'ui') {
+    const port = Number(a.port);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new UsageError(`--port takes a port number, got '${a.port}'`);
+    const url = await serveApp(port);
+    log(`videodoc app: ${url}  (Chrome or Edge; Ctrl+C to stop)`);
+    out({ url });
+    if (!a['no-open']) openUrl(url);
+    return new Promise(() => {}); // serve until interrupted
+  }
   if (cmd === 'search') {
     if (rest.length < 2) throw new UsageError('usage: videodoc search <query> <video|folder>...');
     const top = Number(a.top);
     if (!(top >= 1)) throw new UsageError(`--top takes a positive number, got '${a.top}'`);
     return out(search(ctx, rest[0], rest.slice(1), { top }));
   }
-  if (!['analyze', 'markdown', 'info'].includes(cmd)) throw new UsageError(`unknown command '${cmd}' (have: check, analyze, markdown, search, info, layers; see --help)`);
+  if (!['analyze', 'markdown', 'info'].includes(cmd)) throw new UsageError(`unknown command '${cmd}' (have: ui, check, analyze, markdown, search, info, layers; see --help)`);
   if (rest.length !== 1) throw new UsageError(`usage: videodoc ${cmd} <video>`);
   const common = { layers: list(a.layers), set: a.set, force: a.force, dryRun: a['dry-run'] };
   if (cmd === 'info') return out(info(ctx, rest[0]));

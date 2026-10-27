@@ -185,8 +185,11 @@ compute page stay warm between calls, so an agent's second query skips browser s
 load. Not yet: models loaded once (each call still creates its Whisper/YuNet sessions; files
 come from the browser's HTTP cache) and a persistent browser profile.
 
-**Demo web app.** Drag-and-drop a video, pick features, watch layers fill in, download the doc
-and outputs. Also the regression harness's UI.
+**Demo web app** (built: `app.html`, `videodoc ui`). Open a folder (File System Access: docs
+and keyframes read from and saved next to the videos, shared with the CLI and MCP server) or
+drop videos (docs in memory, downloadable); analyze in the browser; read the Markdown view
+rendered beside a player (timestamps, keyframes and hits seek); search across everything
+loaded. Reading and searching work without WebGPU.
 
 ## Developer-experience rules
 
@@ -218,8 +221,10 @@ and outputs. Also the regression harness's UI.
    MCP tool; `analyze <folder>`; `markdown --from/--to` to read around a hit~~ (built
    2026-10-27: `src/doc/search.ts`). Next: fuzzy matching for ASR errors, then embeddings
    (text, then image) and hybrid ranking.
-5. **Demo web app: read and search**, statically hosted: drop in videos, watch layers fill in,
-   read the Markdown view, search across them. Nothing leaves the machine.
+5. **Demo web app: read and search**, statically hosted: ~~drop in videos, watch layers fill in,
+   read the Markdown view, search across them. Nothing leaves the machine.~~ Built 2026-10-27
+   (`app.html`, `src/app/`, `videodoc ui`). Not yet: hosted build with a model registry (models
+   are served from `public/models`), analysis in a worker, OPFS persistence for dropped files.
 6. **Redact module**: output encoding, redaction log, plates, and a review UI (8.1% of faces
    are still missed against human labels, so a person must check the result).
 7. Captions with a small VLM, pulled in where they visibly improve search or the Markdown view.

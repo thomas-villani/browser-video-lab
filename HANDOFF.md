@@ -27,7 +27,8 @@ difference, denser visual analysis where nobody speaks.
   (`computeLayers`, browser `analyze()`, `frameImages`), `cli/lib.ts` (the commands),
   `cli/videodoc.ts` (CLI: `check`, `analyze`, `markdown`, `info`, `layers`), `cli/mcp.ts` (MCP
   server, same commands), `analyze.html` + `src/analyze-page.ts` (the compute page they drive).
-  42 tests pass (4 of them drive the MCP server over stdio); `tsc --noEmit` clean.
+  43 tests pass (4 of them drive the MCP server over stdio); `tsc --noEmit` clean. The app:
+  `app.html` + `src/app/`, served by `videodoc ui`.
 - Layers today: `speech` (Silero VAD), `transcript` (Whisper base via transformers.js; needs
   speech), `scenes` (GPU thumbnail scene score), `faces` (YuNet 640 + adaptive bisection +
   native-resolution tile refinement; needs scenes). Defaults live in `PRODUCERS`
@@ -75,12 +76,20 @@ difference, denser visual analysis where nobody speaks.
   measurements in NOTES.md "videodoc step 4".
 - Next for search: fuzzy matching for ASR errors; then embeddings.
 
-## Next: demo web app (read + search), then redaction
+## Done: roadmap step 5, the app (2026-10-27)
 
-Lead application decided 2026-10-27: search and read your videos privately (DESIGN.md
-roadmap). Next: a static web app that uses the browser `analyze()` and `src/doc` (markdown,
-search) directly: drop in videos, watch layers fill in, read, search. Then redaction with a
-review UI. Captions are pulled in where they help.
+- `app.html` + `src/app/` (`library.ts`, `render.ts`, `main.ts`, `style.css`), `videodoc ui`
+  (`npm run ui`; harness gained `serve()`). Open folder (File System Access, shares docs with
+  the CLI) or add/drop files; analyze in the page; reading view = toMarkdown rendered to HTML
+  beside a player; search across loaded docs; hits seek to `at` and mark the terms.
+- Silent videos now analyze (empty speech/transcript). 43 tests pass.
+- **Open folder is not tested automatically**: check it by hand in Chrome/Edge.
+
+## Next: redaction (step 6)
+
+Lead application decided 2026-10-27: search and read your videos privately; redaction follows
+(output encoding, redaction log, plates, review UI). Smaller follow-ups for the app: hosted
+build with a model registry, analysis in a worker, persistence for dropped files.
 
 ## Later: captions
 

@@ -4,6 +4,7 @@
 //
 // Compute runs in a headless Edge/Chrome (WebGPU) driving analyze.html; planning, caching and
 // reading docs run in Node, so commands with nothing to compute never touch a browser.
+import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, closeSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -46,6 +47,20 @@ async function harness() {
   // The harness builds and serves the pages from the repo root.
   process.chdir(ROOT);
   return import(new URL('../scripts/lib/harness.mjs', import.meta.url).href);
+}
+
+/** Build if needed and serve the app (app.html) until the process ends; resolves with its URL. */
+export async function serveApp(port = 4317): Promise<string> {
+  const { serve } = await harness();
+  const { base } = await serve({ build: 'auto', port });
+  return `${base}app.html`;
+}
+
+/** Open `url` in the system's default browser. */
+export function openUrl(url: string) {
+  const [cmd, args] =
+    process.platform === 'win32' ? ['cmd', ['/c', 'start', '""', url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
+  spawn(cmd as string, args as string[], { stdio: 'ignore', detached: true, windowsHide: true }).on('error', () => {}).unref();
 }
 
 /** A loaded compute page whose progress callback can be pointed at the current run. */
@@ -475,6 +490,7 @@ export function search(ctx: Context, query: string, paths: string[], o: SearchOp
       time: `${fmtTime(h.t0, long)}–${fmtTime(h.t1, long)}`,
       t0: h.t0,
       t1: h.t1,
+      at: h.at,
       score: h.score,
       snippet: h.snippet,
       ref: `transcript/${h.i0}`,

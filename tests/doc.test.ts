@@ -169,6 +169,7 @@ test('search: BM25 over overlapping windows, phrase bonus, no overlapping hits, 
   assert.match(hits[0].snippet, /\*\*school\*\* \*\*budget\*\*/);
   assert.deepEqual(hits[0].matched.sort(), ['budget', 'school']);
   assert.equal(hits[0].i0, 1);
+  assert.equal(hits[0].at, 5);
   // Words in query order score higher than the same words apart.
   const [ordered, apart] = search([said([[0, 3, 'school budget'], [30, 33, 'budget for the school']])], 'school budget', { window: 5 });
   assert.ok(ordered.t0 === 0 && ordered.score > apart.score);

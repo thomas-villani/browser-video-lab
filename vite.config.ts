@@ -51,7 +51,7 @@ export default defineConfig({
     // ORT and transformers.js are large by nature; the warning is noise here.
     chunkSizeWarningLimit: 4096,
     rollupOptions: {
-      input: { bench: 'index.html', pipeline: 'pipeline.html', transcribe: 'transcribe.html', label: 'label.html', analyze: 'analyze.html' },
+      input: { bench: 'index.html', pipeline: 'pipeline.html', transcribe: 'transcribe.html', label: 'label.html', analyze: 'analyze.html', app: 'app.html' },
     },
   },
 });

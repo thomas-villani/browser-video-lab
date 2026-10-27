@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "videodoc": "node cli/videodoc.ts",
     "mcp": "node cli/mcp.ts",
+    "ui": "node cli/videodoc.ts ui",
     "bench": "node scripts/bench.mjs",
     "pipeline": "node scripts/pipeline.mjs",
     "transcribe": "node scripts/transcribe.mjs",

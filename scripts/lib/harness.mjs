@@ -7,7 +7,7 @@ import { chromium } from 'playwright-core';
 import { preview } from 'vite';
 
 /** Build sources: anything newer than the last build means the build is stale. */
-const SOURCES = ['src', 'index.html', 'pipeline.html', 'transcribe.html', 'label.html', 'analyze.html', 'vite.config.ts'];
+const SOURCES = ['src', 'index.html', 'pipeline.html', 'transcribe.html', 'label.html', 'analyze.html', 'app.html', 'vite.config.ts'];
 
 function newest(path) {
   const s = statSync(path);
@@ -71,17 +71,26 @@ export async function newPage(browser) {
 }
 
 /**
- * Build if needed, serve the pages and launch a browser; resolves with { browser, base, files,
- * close }. `files` maps keys to local paths served at `${base}@file/<key>`; it is read on every
- * request, so long-lived callers can change it between runs. `build`: true, false, or 'auto'.
+ * Build if needed and serve the pages (cross-origin isolated, see vite.config.ts); resolves with
+ * the vite preview server and its base URL. `files` maps keys to local paths served at
+ * `${base}@file/<key>`; it is read on every request, so long-lived callers can change it.
+ * `build`: true, false, or 'auto' (when stale). `port` is a preference (the next free one is used).
  */
-export async function openBrowser({ build = true, browser = 'msedge', headed = false, files = {} }) {
+export async function serve({ build = true, files = {}, port = 4317 } = {}) {
   if (build === true || (build === 'auto' && buildIsStale())) {
     console.error('building...');
     execSync('npx vite build --logLevel warn', { stdio: ['ignore', 'ignore', 'inherit'] });
   }
-  const server = await preview({ preview: { port: 4317, strictPort: false }, logLevel: 'warn', plugins: [serveFiles(files)] });
-  const base = server.resolvedUrls.local[0];
+  const server = await preview({ preview: { port, strictPort: false }, logLevel: 'warn', plugins: [serveFiles(files)] });
+  return { server, base: server.resolvedUrls.local[0] };
+}
+
+/**
+ * Build if needed, serve the pages and launch a browser; resolves with { browser, base, files,
+ * close }. See serve() for `build` and `files`.
+ */
+export async function openBrowser({ build = true, browser = 'msedge', headed = false, files = {} }) {
+  const { server, base } = await serve({ build, files });
   let b;
   try {
     b = await chromium.launch({

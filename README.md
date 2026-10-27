@@ -35,6 +35,7 @@ document of time-indexed layers, then query it. Compute runs in a local headless
 (WebGPU); the video is served to it from disk, never uploaded.
 
 ```bash
+npm run ui                                                 # the app: open a folder or drop videos; analyze, read, search
 npm run videodoc -- check                                  # browser, WebGPU adapter, decoders, models
 npm run videodoc -- analyze talk.mp4                       # speech, transcript, scenes, keyframes -> talk.mp4.videodoc.json
 npm run videodoc -- analyze talk.mp4 --layers faces --set faces.every=4
@@ -55,6 +56,17 @@ npm run videodoc -- layers                                 # layers, dependencie
   Exit codes: 0 ok, 1 failure, 2 usage error.
 - The doc's format is `src/doc/schema.ts`; one layer item per line. `src/doc` is dependency-free
   and runs in Node; `analyze()` in `src/analyze.ts` is the same pipeline as a browser API.
+
+### The app (for people)
+
+`npm run ui` (`videodoc ui [--port n] [--no-open]`) serves `app.html` and opens it in your
+default browser (Chrome or Edge, for WebGPU). **Open folder** lists the videos in a folder
+(recursively), loads the docs the CLI already wrote, and saves new ones (and keyframe JPEGs)
+next to the videos, so the CLI, the MCP server and the app share one collection. **Add videos**
+or drag-and-drop works in any WebGPU browser (drop a `.videodoc.json` with its video to reuse
+it; docs then live in memory, with a download button). The reading view is the same Markdown
+agents get, beside a player: click a timestamp, keyframe or search hit to seek. Nothing is
+uploaded.
 
 ### MCP server (for agents)
 
@@ -157,6 +169,7 @@ npm test   # tracker unit tests (node:test)
 
 ## Layout
 
+- `app.html` + `src/app/` — the app (`library.ts`: folders and files, docs and keyframes on disk; `render.ts`: Markdown to HTML; `main.ts`: UI)
 - `cli/lib.ts` — the videodoc commands (shared); `cli/videodoc.ts` — CLI; `cli/mcp.ts` — MCP server (stdio, warm browser);
   `analyze.html` + `src/analyze-page.ts` — the compute page they drive
 - `src/doc/` — the VideoDoc: schema, planner (`PRODUCERS`), keyframe selection, Markdown view, transcript search (BM25), track linking/compression, hashing, load/save (pure TS)

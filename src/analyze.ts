@@ -61,7 +61,12 @@ export async function computeLayers(input: MediaInput, planned: PlannedLayer[], 
     };
   };
 
-  if (want.has('speech') || want.has('transcript')) {
+  if ((want.has('speech') || want.has('transcript')) && !info.audio) {
+    // No audio track (screen recordings, muted exports): nothing is said, so both layers are empty.
+    const all: [number, number][] = [[0, info.duration]];
+    if (want.has('speech')) layers.speech = layer('speech', [], 0, 'wasm', all, 'silero_vad v5');
+    if (want.has('transcript')) layers.transcript = layer('transcript', [], 0, want.get('transcript')!.config.device as 'webgpu' | 'wasm', all, want.get('transcript')!.config.model as string);
+  } else if (want.has('speech') || want.has('transcript')) {
     const t0 = performance.now();
     const step = (stage: string, done = 0, total = 1) => onProgress?.({ pass: 'audio', stage, done, total });
     step('decoding audio');
@@ -80,16 +85,20 @@ export async function computeLayers(input: MediaInput, planned: PlannedLayer[], 
       if (!speech) throw new Error('transcript needs the speech layer');
       const ta = performance.now();
       const c = want.get('transcript')!.config as { model: string; encoder: string; decoder: string; language: string; device: 'webgpu' | 'wasm' };
-      step(`loading ${c.model}`);
-      const asr = await Transcriber.create({ model: c.model, device: c.device, dtype: { encoder_model: c.encoder, decoder_model_merged: c.decoder } });
       const chunks = groupSpans(speech.map((s) => ({ start: s.t0, end: s.t1 })));
-      const segs = await asr.transcribeSpans(pcm, chunks, {
-        language: c.language,
-        onSpan: (i) => {
-          signal?.throwIfAborted();
-          step('transcribing', i, chunks.length);
-        },
-      });
+      // No speech, no Whisper (it takes seconds to load).
+      let segs: { start: number; end: number; text: string }[] = [];
+      if (chunks.length) {
+        step(`loading ${c.model}`);
+        const asr = await Transcriber.create({ model: c.model, device: c.device, dtype: { encoder_model: c.encoder, decoder_model_merged: c.decoder } });
+        segs = await asr.transcribeSpans(pcm, chunks, {
+          language: c.language,
+          onSpan: (i) => {
+            signal?.throwIfAborted();
+            step('transcribing', i, chunks.length);
+          },
+        });
+      }
       const items = segs.map((s) => ({ t0: s.start, t1: s.end, text: s.text }));
       layers.transcript = layer('transcript', items, performance.now() - ta, c.device, [span], c.model);
     }
