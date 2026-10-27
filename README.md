@@ -40,6 +40,9 @@ npm run videodoc -- analyze talk.mp4                       # speech, transcript,
 npm run videodoc -- analyze talk.mp4 --layers faces --set faces.every=4
 npm run videodoc -- markdown talk.mp4 > talk.md            # "read the video" (analyzes missing layers first)
 npm run videodoc -- markdown talk.mp4 --images --out talk.md   # + keyframe JPEGs in talk.mp4.keyframes/
+npm run videodoc -- markdown talk.mp4 --from 12:30 --to 15:00  # just that stretch
+npm run videodoc -- analyze videos/                        # every video in a folder (recursive)
+npm run videodoc -- search "budget cuts" videos/ --top 5    # where is it said? (transcripts, no browser)
 npm run videodoc -- info talk.mp4                          # summarize a saved doc (no browser)
 npm run videodoc -- layers                                 # layers, dependencies, settings + defaults (JSON)
 ```
@@ -56,7 +59,7 @@ npm run videodoc -- layers                                 # layers, dependencie
 ### MCP server (for agents)
 
 `npm run mcp` (or `node cli/mcp.ts [--browser chrome] [--headed]`) serves the same commands over
-MCP stdio: `markdown`, `analyze`, `info`, `layers`, `check`. The browser stays warm between
+MCP stdio: `markdown`, `search`, `analyze`, `info`, `layers`, `check`. The browser stays warm between
 calls (closed after `VIDEODOC_IDLE_MS` idle, default 10 min), calls run one at a time, long runs
 send progress notifications, and cancelling a call stops its work. `markdown` can also return
 keyframes as image content (`embedImages: n`). To add it to Claude Code:
@@ -156,7 +159,7 @@ npm test   # tracker unit tests (node:test)
 
 - `cli/lib.ts` — the videodoc commands (shared); `cli/videodoc.ts` — CLI; `cli/mcp.ts` — MCP server (stdio, warm browser);
   `analyze.html` + `src/analyze-page.ts` — the compute page they drive
-- `src/doc/` — the VideoDoc: schema, planner (`PRODUCERS`), keyframe selection, Markdown view, track linking/compression, hashing, load/save (pure TS)
+- `src/doc/` — the VideoDoc: schema, planner (`PRODUCERS`), keyframe selection, Markdown view, transcript search (BM25), track linking/compression, hashing, load/save (pure TS)
 - `src/analyze.ts` — `computeLayers` (one audio pass, one shared video decode), the browser `analyze()`, `frameImages` (seek-based keyframe JPEGs)
 - `src/main.ts` — benchmark loop (decode → preprocess → infer → readback → decode outputs), in-flight ring
 - `src/pipeline.ts` + `scripts/pipeline.mjs` — single-pass adaptive pipeline page and its headless runner

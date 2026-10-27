@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   boxesAt, deriveLayers, fingerprint, fmtTime, formatDoc, linkTracks, maxFaces, newDoc, parseDoc, parseSettings, plan, PlanError, PRODUCERS, resolve,
-  selectKeyframes, stableStringify, toMarkdown, withLayers,
+  search, selectKeyframes, stableStringify, stem, terms, toMarkdown, withLayers,
   type Box, type KeyframeConfig, type Layer, type SceneItem, type SourceInfo, type SpeechItem,
 } from '../src/doc/index.ts';
 
@@ -146,4 +146,42 @@ test('markdown: shots, timed paragraphs, silent gaps, keyframe images, faces', (
   ].join('\n'));
   assert.equal(fmtTime(3725, true), '1:02:05');
   assert.equal(maxFaces([{ id: 1, f0: 0, f1: 9, samples: [] }, { id: 2, f0: 10, f1: 19, samples: [] }], 0, 19), 1);
+});
+
+const said = (items: [number, number, string][]) =>
+  withLayers(newDoc(source), {
+    transcript: { producer: { configHash: 'h', config: {} }, items: items.map(([t0, t1, text]) => ({ t0, t1, text })) } as unknown as Layer<never>,
+  });
+
+test('search: terms are stemmed and stopwords dropped, alike for queries and passages', () => {
+  assert.deepEqual(terms("The budget cuts aren't hitting schools"), ['budget', 'cut', "aren't", 'hitt', 'school']);
+  assert.equal(stem('taxes'), stem('tax'));
+  assert.equal(stem('policies'), stem('policy'));
+});
+
+test('search: BM25 over overlapping windows, phrase bonus, no overlapping hits, across docs', () => {
+  const a = said([[0, 5, 'Welcome to the meeting.'], [5, 12, 'First item is the school budget.'], [12, 20, 'The budget for schools grows.'],
+    [40, 48, 'Next, the parks department.'], [48, 55, 'Park budgets are flat.']]);
+  const b = said([[0, 6, 'We talked about budget cuts at the school.']]);
+  const hits = search([a, b], 'school budget', { window: 10 });
+  // Both docs found; within doc 0 the two school+budget windows overlap, so only the best stays.
+  assert.deepEqual(hits.map((h) => [h.doc, h.t0]), [[0, 5], [1, 0], [0, 48]]);
+  assert.match(hits[0].snippet, /\*\*school\*\* \*\*budget\*\*/);
+  assert.deepEqual(hits[0].matched.sort(), ['budget', 'school']);
+  assert.equal(hits[0].i0, 1);
+  // Words in query order score higher than the same words apart.
+  const [ordered, apart] = search([said([[0, 3, 'school budget'], [30, 33, 'budget for the school']])], 'school budget', { window: 5 });
+  assert.ok(ordered.t0 === 0 && ordered.score > apart.score);
+  assert.deepEqual(search([a], 'the of'), []);
+  assert.deepEqual(search([a], 'zebra'), []);
+});
+
+test('markdown: an excerpt keeps the shots and passages overlapping [from, to)', () => {
+  const doc = withLayers(said([[0, 5, 'One.'], [10, 15, 'Two.'], [20, 25, 'Three.']]), {
+    scenes: { producer: { configHash: 'h', config: {} }, items: [scene(0, 8), scene(8, 30)] } as unknown as Layer<never>,
+  });
+  const md = toMarkdown(doc, { from: 12, to: 21 });
+  assert.match(md, /\*Excerpt 00:12–00:21 of the video\.\*/);
+  assert.doesNotMatch(md, /One\.|Shot 1 /);
+  assert.match(md, /## Shot 2 · 00:08–00:30\n\n\*\*\[00:10\]\*\* Two\.\n\n\*\*\[00:20\]\*\* Three\./);
 });

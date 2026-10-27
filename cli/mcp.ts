@@ -13,7 +13,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { LAYER_NAMES, PlanError, PRODUCERS, VERSION } from '../src/doc/index.ts';
 import {
-  analyze, check, DEFAULT_IMAGE_SIZE, DEFAULT_LAYERS, info, layers, MARKDOWN_LAYERS, markdown, UsageError, warmBrowser,
+  analyze, check, DEFAULT_IMAGE_SIZE, DEFAULT_LAYERS, info, layers, MARKDOWN_LAYERS, markdown, search, UsageError, warmBrowser,
   type Context, type Progress,
 } from './lib.ts';
 
@@ -65,6 +65,8 @@ const TOOLS = [
         embedImages: { type: 'integer', minimum: 0, description: 'Also return up to this many keyframes as image content, evenly spread over the video (implies images). Default 0.' },
         imageSize: { type: 'integer', minimum: 16, description: `Long side of extracted keyframes, px (default ${DEFAULT_IMAGE_SIZE}; existing files are reused).` },
         out: { type: 'string', description: 'Also write the Markdown to this path (image links relative to it).' },
+        from: { type: ['string', 'number'], description: 'Only render from this time: seconds, "mm:ss" or "h:mm:ss" (e.g. a search hit\'s start minus a minute).' },
+        to: { type: ['string', 'number'], description: 'Only render up to this time (same formats).' },
         set: SET,
         force: FORCE,
         dryRun: DRY_RUN,
@@ -73,14 +75,30 @@ const TOOLS = [
     },
   },
   {
-    name: 'analyze',
-    title: 'Analyze a video',
+    name: 'search',
+    title: 'Search videos',
     description:
-      'Compute layers into <video>.videodoc.json (saved next to the video) and return a summary per layer. ' +
+      'Find where something is said across videos: ranked transcript passages (keyword/BM25) with times, a highlighted snippet and the nearest keyframe. ' +
+      'Reads saved docs only (instant); videos not yet analyzed are listed, analyze them first. Follow up with markdown from/to around a hit.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Words to find; passages containing them in order rank higher.' },
+        paths: { type: 'array', items: { type: 'string' }, minItems: 1, description: 'Video files, .videodoc.json files or folders (searched recursively).' },
+        top: { type: 'integer', minimum: 1, description: 'Hits to return (default 10).' },
+      },
+      required: ['query', 'paths'],
+    },
+  },
+  {
+    name: 'analyze',
+    title: 'Analyze videos',
+    description:
+      'Compute layers into <video>.videodoc.json (saved next to the video) and return a summary per layer; given a folder, analyzes every video in it. ' +
       `Default layers: ${DEFAULT_LAYERS.join(', ')}. Cached layers are reused, so repeating a call is cheap.`,
     inputSchema: {
       type: 'object',
-      properties: { video: VIDEO, layers: LAYERS, set: SET, force: FORCE, dryRun: DRY_RUN },
+      properties: { video: { ...VIDEO, description: `${VIDEO.description} A folder analyzes every video in it.` }, layers: LAYERS, set: SET, force: FORCE, dryRun: DRY_RUN },
       required: ['video'],
     },
   },
@@ -110,7 +128,8 @@ const server = new Server(
     capabilities: { tools: {}, logging: {} },
     instructions:
       'videodoc analyzes local video files on this machine (in a headless browser with WebGPU) into a saved document of time-indexed layers, then answers from it. ' +
-      'To understand a video, call markdown (add images: true or embedImages to see keyframes). Analysis is cached per video and settings.',
+      'To understand a video, call markdown (add images: true or embedImages to see keyframes). To find where something is said across videos, ' +
+      'call search over files or folders, then markdown with from/to around a hit. Analysis is cached per video and settings; analyze takes a folder.',
   },
 );
 
@@ -170,6 +189,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra): Promise<Call
           out: args.out as string | undefined,
           images: Boolean(args.images) || embed > 0,
           imageSize: args.imageSize as number | undefined,
+          from: args.from as string | number | undefined,
+          to: args.to as string | number | undefined,
         });
         if (r.text === undefined) return { content: [{ type: 'text', text: json(r.summary) }] };
         const content: CallToolResult['content'] = [{ type: 'text', text: r.text }];
@@ -180,6 +201,11 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra): Promise<Call
         }
         content.push({ type: 'text', text: json(r.summary) });
         return { content };
+      }
+      case 'search': {
+        if (typeof args.query !== 'string') throw new UsageError('query is required');
+        if (!Array.isArray(args.paths) || !args.paths.length) throw new UsageError('paths is required: video files or folders to search');
+        return { content: [{ type: 'text', text: json(search(ctx, args.query, args.paths as string[], { top: args.top as number | undefined })) }] };
       }
       case 'analyze':
         return { content: [{ type: 'text', text: json(await analyze(ctx, video(), common)) }] };

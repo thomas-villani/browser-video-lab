@@ -4,12 +4,12 @@
 //
 // Compute runs in a headless Edge/Chrome (WebGPU) driving analyze.html; planning, caching and
 // reading docs run in Node, so commands with nothing to compute never touch a browser.
-import { existsSync, mkdirSync, openSync, readFileSync, readSync, closeSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, closeSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  deriveLayers, docPathFor, fingerprint, formatDoc, LAYER_NAMES, newDoc, parseDoc, parseSettings, plan, PRODUCERS, summarize,
-  toMarkdown, withLayers,
+  deriveLayers, docPathFor, fingerprint, fmtTime, formatDoc, LAYER_NAMES, newDoc, parseDoc, parseSettings, plan, PRODUCERS, search as searchDocs,
+  summarize, toMarkdown, withLayers,
   type KeyframeItem, type Layers, type Plan, type VideoDoc,
 } from '../src/doc/index.ts';
 
@@ -167,6 +167,38 @@ export interface MarkdownOptions extends Omit<AnalyzeOptions, 'doc'> {
   out?: string;
   images?: boolean;
   imageSize?: number;
+  /** Only [from, to): seconds, "mm:ss" or "h:mm:ss". */
+  from?: string | number;
+  to?: string | number;
+}
+
+/** Seconds from 83, "83.5", "1:23" or "1:01:23". */
+export function parseTime(v: string | number, what = 'time'): number {
+  if (typeof v === 'number') return v;
+  const parts = v.trim().split(':');
+  if (parts.length > 3 || parts.some((p) => !/^\d+(\.\d+)?$/.test(p))) throw new UsageError(`${what} takes seconds, mm:ss or h:mm:ss, got '${v}'`);
+  return parts.reduce((s, p) => s * 60 + Number(p), 0);
+}
+
+const VIDEO_EXT = /\.(mp4|m4v|mov|mkv|webm)$/i;
+
+/** Videos named by `paths`: video files as given, a doc file stands for its video, folders are
+ *  searched recursively for video files (sorted, so results are stable). */
+export function collect(ctx: Context, paths: string[]): string[] {
+  const out: string[] = [];
+  const walk = (dir: string) => {
+    for (const e of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (e.isDirectory() && !e.name.endsWith('.keyframes') && !e.name.startsWith('.')) walk(join(dir, e.name));
+      else if (e.isFile() && VIDEO_EXT.test(e.name)) out.push(join(dir, e.name));
+    }
+  };
+  for (const arg of paths) {
+    const p = userPath(ctx, arg);
+    if (!existsSync(p)) throw new UsageError(`no such file or folder: ${p}`);
+    if (statSync(p).isDirectory()) walk(p);
+    else out.push(p.endsWith('.videodoc.json') ? p.slice(0, -'.videodoc.json'.length) : p);
+  }
+  return [...new Set(out)];
 }
 
 const userPath = (ctx: Context, p: string) => (isAbsolute(p) ? p : resolve(ctx.cwd, p));
@@ -295,7 +327,32 @@ function logLayers(ctx: Context, doc: VideoDoc, p: Plan) {
   return summary;
 }
 
+/** Analyze a video, or every video in a folder (one after another; a failure is reported and
+ *  the rest continue). */
 export async function analyze(ctx: Context, videoArg: string, o: AnalyzeOptions = {}) {
+  const p = userPath(ctx, videoArg);
+  if (existsSync(p) && statSync(p).isDirectory()) {
+    if (o.doc) throw new UsageError('a doc path cannot be given when analyzing a folder');
+    const videos = collect(ctx, [p]);
+    if (!videos.length) throw new UsageError(`no video files (${VIDEO_EXT.source}) in ${p}`);
+    const results: unknown[] = [];
+    for (const [i, v] of videos.entries()) {
+      ctx.signal?.throwIfAborted();
+      ctx.report.log(`\n[${i + 1}/${videos.length}] ${v}`);
+      try {
+        results.push(await analyzeOne(ctx, v, o));
+      } catch (e) {
+        if (ctx.signal?.aborted) throw e;
+        ctx.report.log(`error: ${(e as Error).message}`);
+        results.push({ video: v, error: (e as Error).message });
+      }
+    }
+    return { folder: p, videos: results };
+  }
+  return analyzeOne(ctx, videoArg, o);
+}
+
+async function analyzeOne(ctx: Context, videoArg: string, o: AnalyzeOptions) {
   const video = videoPath(ctx, videoArg);
   const docPath = o.doc ? userPath(ctx, o.doc) : docPathFor(video);
   const r = await ensure(ctx, video, docPath, o.layers?.length ? o.layers : DEFAULT_LAYERS, o);
@@ -353,7 +410,9 @@ export async function markdown(ctx: Context, videoArg: string, o: MarkdownOption
   const { extracted, ms: imageMs } = o.images ? await extractImages(ctx, video, keyframes, o.imageSize ?? DEFAULT_IMAGE_SIZE) : { extracted: 0, ms: 0 };
   // Links are relative to the Markdown file, or absolute when there is none.
   const link = (p: string) => (mdPath ? relative(dirname(mdPath), p) : p).replace(/\\/g, '/');
-  const text = toMarkdown(r.doc, { image: o.images ? (k) => link(imagePath(video, k)) : undefined });
+  const from = o.from !== undefined ? parseTime(o.from, 'from') : undefined;
+  const to = o.to !== undefined ? parseTime(o.to, 'to') : undefined;
+  const text = toMarkdown(r.doc, { image: o.images ? (k) => link(imagePath(video, k)) : undefined, from, to });
   logLayers(ctx, r.doc, r.plan);
   if (o.images) ctx.report.log(`  images      ${keyframes.length} (${extracted} extracted${extracted ? ` in ${(imageMs / 1000).toFixed(1)} s` : ''}) in ${video}.keyframes`);
   if (mdPath) {
@@ -373,6 +432,60 @@ export async function markdown(ctx: Context, videoArg: string, o: MarkdownOption
     /** Keyframe image files in Markdown order (with images). */
     imageFiles: o.images ? keyframes.map((k) => imagePath(video, k)) : [],
   };
+}
+
+export interface SearchOptions {
+  top?: number;
+  /** Passage length, seconds. */
+  window?: number;
+}
+
+/**
+ * Keyword search over the transcripts of saved docs (no browser, no compute). Videos without a
+ * doc or a transcript are listed so the caller can analyze them.
+ */
+export function search(ctx: Context, query: string, paths: string[], o: SearchOptions = {}) {
+  if (!query.trim()) throw new UsageError('search needs a query');
+  const videos = collect(ctx, paths);
+  if (!videos.length) throw new UsageError(`no video files found in ${paths.join(', ')}`);
+  const docs: VideoDoc[] = [];
+  const found: string[] = [];
+  const notAnalyzed: string[] = [];
+  const noTranscript: string[] = [];
+  for (const v of videos) {
+    const doc = loadDoc(docPathFor(v));
+    if (!doc) notAnalyzed.push(v);
+    else if (!doc.layers.transcript) noTranscript.push(v);
+    else {
+      docs.push(doc);
+      found.push(v);
+    }
+  }
+  const t0 = performance.now();
+  const hits = searchDocs(docs, query, o);
+  const ms = Math.round(performance.now() - t0);
+  const results = hits.map((h) => {
+    const doc = docs[h.doc];
+    const video = found[h.doc];
+    const long = doc.source.duration >= 3600;
+    const k = h.keyframe !== undefined ? doc.layers.keyframes!.items[h.keyframe] : undefined;
+    const image = k && imagePath(video, k);
+    return {
+      video,
+      time: `${fmtTime(h.t0, long)}–${fmtTime(h.t1, long)}`,
+      t0: h.t0,
+      t1: h.t1,
+      score: h.score,
+      snippet: h.snippet,
+      ref: `transcript/${h.i0}`,
+      ...(k && { keyframe: { ref: `keyframes/${h.keyframe}`, t: k.t, ...(image && existsSync(image) && { image }) } }),
+    };
+  });
+  ctx.report.log(`"${query}": ${hits.length} hits in ${docs.length} transcripts (${ms} ms)`);
+  for (const r of results) ctx.report.log(`  ${r.score.toFixed(2).padStart(6)}  ${basename(r.video)}  ${r.time}  ${r.snippet.length > 160 ? `${r.snippet.slice(0, 157)}...` : r.snippet}`);
+  if (notAnalyzed.length) ctx.report.log(`  not analyzed (run videodoc analyze): ${notAnalyzed.join(', ')}`);
+  if (noTranscript.length) ctx.report.log(`  no transcript layer: ${noTranscript.join(', ')}`);
+  return { query, hits: results, searched: docs.length, ms, ...(notAnalyzed.length && { notAnalyzed }), ...(noTranscript.length && { noTranscript }) };
 }
 
 export function info(ctx: Context, arg: string) {

@@ -471,3 +471,39 @@ Findings:
 3. MCP progress values must increase while our stages restart their counts: the server sends a
    running step number and puts the stage and count in the message, at most ~2 per second plus
    every stage change.
+
+## videodoc step 4: transcript search across a collection (2026-10-27)
+
+New footage closer to the targets (yt-dlp, gitignored, 1080p H.264): `meeting.mp4` (River
+Falls school board, 65:09, 60 fps), `talkshow.mp4` (Meet the Press, 47:41, 148 shots),
+`bodycam.mp4` (traffic stop bodycam compilation with narration, 17:35). Default layers
+(speech, transcript whisper-base, scenes, keyframes), Iris Xe, Edge headless, AC + overlay:
+
+| Video | Wall | Speech | Transcript | Scenes pass | Shots | Keyframes |
+|---|---|---|---|---|---|---|
+| bodycam (17:35) | 311 s (3.4x real time) | 83% | 251 s, 2,792 words | 44 s | 44 | 57 (21 shot, 10 silence, 26 fill-in) |
+| talkshow (47:41) | 636 s (4.5x) | 95% | 473 s, 8,375 words | 132 s | 148 | 186 (141, 2, 43) |
+| meeting (65:09) | 1,324 s (3.0x) | 96% | 869 s, 11,726 words | 418 s (234k frames, ~560 fps) | 12 | 136 (8, 5, 123) |
+
+Whisper-base runs at 4.2–6.0x real time here; it dominates analysis everywhere except the
+60 fps meeting, where decoding every frame for scenes costs half as much again. Idea (not
+built): scenes at a lower sample rate for high-fps sources (every 2nd frame at 60 fps).
+
+`videodoc search` over `public/media` (5 transcripts, ~27k words): **24–28 ms** per query
+(index built per query), ~0.6 s per CLI call including Node start and loading the docs. Eleven
+realistic queries ("reading intervention", "promotion versus placement third grade", "tariffs
+Michigan", "Alaska Senate lawsuit", "Hawaii", "audio redacted", "pledge of allegiance", ...):
+the top hit was a relevant passage every time (read against the transcripts; several queries
+have more than one right answer, e.g. three "reading intervention" passages in the meeting).
+
+Findings:
+
+1. **Keyword search is already useful on meetings and talk shows**: their transcripts are
+   dense (95% speech) and the vocabulary is distinctive (names, programs, places).
+2. **ASR errors are real but partly absorbed**: "turn signal" still found the right passage
+   ("You didn't use your **turd** signal") through the other word and a nearby "turn". Whisper
+   wrote "plagues of Allegres" for the Pledge of Allegiance in the meeting intro (the pledge
+   itself, recited 10 s later, was found). Fuzzy/phonetic matching is the next step.
+3. **Narration compilations mix sources**: the bodycam video has a narrator, redacted audio
+   and several cameras. Search handles it; per-speaker or per-source labels would help later.
+4. Whisper's segments sometimes start mid-sentence, so snippets do too; acceptable for now.

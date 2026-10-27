@@ -8,7 +8,7 @@
 import { parseArgs } from 'node:util';
 import { DocError, LAYER_NAMES, PlanError } from '../src/doc/index.ts';
 import {
-  analyze, check, DEFAULT_IMAGE_SIZE, DEFAULT_LAYERS, info, layers, MARKDOWN_LAYERS, markdown, oneShotBrowser, UsageError,
+  analyze, check, DEFAULT_IMAGE_SIZE, DEFAULT_LAYERS, info, layers, MARKDOWN_LAYERS, markdown, oneShotBrowser, search, UsageError,
   type Context, type Progress,
 } from './lib.ts';
 
@@ -18,11 +18,15 @@ Usage: videodoc <command> [options]
 
 Commands:
   check                  What this machine can run: browser, WebGPU adapter, decoders, models.
-  analyze <video>        Compute layers into <video>.videodoc.json. Layers already in the doc with
-                         the same settings are reused; with nothing to compute, no browser starts.
+  analyze <video|folder> Compute layers into <video>.videodoc.json (a folder: every video in it).
+                         Layers already in the doc with the same settings are reused; with nothing
+                         to compute, no browser starts.
   markdown <video>       Read the video: shots, timed transcript paragraphs, silent gaps and
                          (with --images) keyframe JPEGs, as Markdown. Analyzes missing layers first
                          (${MARKDOWN_LAYERS.join(', ')} and their dependencies, plus any --layers).
+  search <query> <paths...>
+                         Find where something is said: ranked transcript passages across videos
+                         and folders, with times and the nearest keyframe (no browser; analyze first).
   info <video|doc>       Summarize a saved doc (no browser).
   layers                 Layers, their dependencies and settings with defaults (JSON).
 
@@ -40,7 +44,11 @@ markdown options:
   --images               Link keyframe JPEGs, extracting missing ones into <video>.keyframes/
                          (named by frame; delete the folder to re-extract at another size).
   --image-size <px>      Long side of extracted keyframes (default ${DEFAULT_IMAGE_SIZE}).
+  --from, --to <time>    Only this stretch (seconds, mm:ss or h:mm:ss), e.g. around a search hit.
   --layers, --set, --force   As for analyze (e.g. --layers faces adds faces per shot).
+
+search options:
+  --top <n>              Hits to return (default 10).
 
 Common options:
   --browser msedge|chrome   (default msedge)   --headed   --help
@@ -58,6 +66,9 @@ const { values: a, positionals } = parseArgs({
     'dry-run': { type: 'boolean', default: false },
     images: { type: 'boolean', default: false },
     'image-size': { type: 'string', default: String(DEFAULT_IMAGE_SIZE) },
+    from: { type: 'string' },
+    to: { type: 'string' },
+    top: { type: 'string', default: '10' },
     browser: { type: 'string', default: 'msedge' },
     headed: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
@@ -126,14 +137,20 @@ async function main() {
     return;
   }
   if (cmd === 'layers') return out(layers());
-  if (!['analyze', 'markdown', 'info'].includes(cmd)) throw new UsageError(`unknown command '${cmd}' (have: check, analyze, markdown, info, layers; see --help)`);
+  if (cmd === 'search') {
+    if (rest.length < 2) throw new UsageError('usage: videodoc search <query> <video|folder>...');
+    const top = Number(a.top);
+    if (!(top >= 1)) throw new UsageError(`--top takes a positive number, got '${a.top}'`);
+    return out(search(ctx, rest[0], rest.slice(1), { top }));
+  }
+  if (!['analyze', 'markdown', 'info'].includes(cmd)) throw new UsageError(`unknown command '${cmd}' (have: check, analyze, markdown, search, info, layers; see --help)`);
   if (rest.length !== 1) throw new UsageError(`usage: videodoc ${cmd} <video>`);
   const common = { layers: list(a.layers), set: a.set, force: a.force, dryRun: a['dry-run'] };
   if (cmd === 'info') return out(info(ctx, rest[0]));
   if (cmd === 'analyze') return out(await analyze(ctx, rest[0], { ...common, doc: a.out }));
   const size = Number(a['image-size']);
   if (!Number.isFinite(size)) throw new UsageError(`--image-size takes a number of pixels, got '${a['image-size']}'`);
-  const r = await markdown(ctx, rest[0], { ...common, out: a.out, images: a.images, imageSize: size });
+  const r = await markdown(ctx, rest[0], { ...common, out: a.out, images: a.images, imageSize: size, from: a.from, to: a.to });
   if (r.text !== undefined && !a.out) process.stdout.write(r.text);
   else out(r.summary);
 }

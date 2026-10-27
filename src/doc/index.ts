@@ -6,4 +6,5 @@ export * from './plan.ts';
 export * from './tracks.ts';
 export * from './keyframes.ts';
 export * from './markdown.ts';
+export * from './search.ts';
 export * from './doc.ts';

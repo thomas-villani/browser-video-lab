@@ -27,7 +27,7 @@ difference, denser visual analysis where nobody speaks.
   (`computeLayers`, browser `analyze()`, `frameImages`), `cli/lib.ts` (the commands),
   `cli/videodoc.ts` (CLI: `check`, `analyze`, `markdown`, `info`, `layers`), `cli/mcp.ts` (MCP
   server, same commands), `analyze.html` + `src/analyze-page.ts` (the compute page they drive).
-  36 tests pass (3 of them drive the MCP server over stdio); `tsc --noEmit` clean.
+  42 tests pass (4 of them drive the MCP server over stdio); `tsc --noEmit` clean.
 - Layers today: `speech` (Silero VAD), `transcript` (Whisper base via transformers.js; needs
   speech), `scenes` (GPU thumbnail scene score), `faces` (YuNet 640 + adaptive bisection +
   native-resolution tile refinement; needs scenes). Defaults live in `PRODUCERS`
@@ -65,7 +65,24 @@ difference, denser visual analysis where nobody speaks.
 - Measurements: NOTES.md "videodoc step 3". Warm calls skip ~1.7 s of browser start.
 - Not yet: model sessions kept alive between calls (each call re-creates Whisper/YuNet).
 
-## Next: captions
+## Done: roadmap step 4, transcript search (2026-10-27)
+
+- `src/doc/search.ts`: BM25 over overlapping ~20 s transcript windows, crude stemming,
+  stopwords, phrase bonus, overlapping/touching hits collapsed; pure TS (web app can reuse).
+- `videodoc search <query> <paths...>` and MCP `search`; `analyze <folder>`; `markdown --from/--to`
+  (MCP `from`/`to`) to read around a hit. 42 tests pass.
+- New footage `meeting.mp4`, `talkshow.mp4`, `bodycam.mp4` analyzed (docs next to them);
+  measurements in NOTES.md "videodoc step 4".
+- Next for search: fuzzy matching for ASR errors; then embeddings.
+
+## Next: demo web app (read + search), then redaction
+
+Lead application decided 2026-10-27: search and read your videos privately (DESIGN.md
+roadmap). Next: a static web app that uses the browser `analyze()` and `src/doc` (markdown,
+search) directly: drop in videos, watch layers fill in, read, search. Then redaction with a
+review UI. Captions are pulled in where they help.
+
+## Later: captions
 
 Captions with a small in-browser VLM (Florence-2 / SmolVLM class via transformers.js) over the
 keyframe images, as a `captions` layer (`{ keyframe, text }`) whose pass is a seek pass;

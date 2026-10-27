@@ -178,7 +178,7 @@ Commands that only read a doc (`markdown` from complete layers, `search` over ca
 embeddings except the query vector) never need the GPU and return instantly.
 
 **MCP server.** stdio, same implementation as the CLI (`cli/lib.ts`), one tool per command
-(built: `markdown`, `analyze`, `info`, `layers`, `check`; later `search`, `redact`, `estimate`).
+(built: `markdown`, `search`, `analyze`, `info`, `layers`, `check`; later `redact`, `estimate`).
 Tool schemas are generated from `PRODUCERS`, like the CLI help. Long runs report MCP progress
 notifications; cancellation closes the compute page, which stops the work. The browser and
 compute page stay warm between calls, so an agent's second query skips browser start and page
@@ -213,9 +213,23 @@ and outputs. Also the regression harness's UI.
    captions with a small VLM.
 3. ~~**MCP server** with a warm browser.~~ Done 2026-10-27 (`cli/mcp.ts`, shared `cli/lib.ts`).
    Follow-up: keep model sessions alive in the warm page.
-4. **Redact module**: output encoding, redaction log, plates.
-5. **Search**: text + image embeddings, hybrid ranking.
-6. Worker-by-default runtime, single shared GPU device (detector + Whisper), packaging/publishing.
+4. **Search across a collection**, transcript-first: ~~a folder of videos and their docs, keyword
+   (BM25) ranking over transcripts, hits resolved to time ranges and keyframes; CLI command and
+   MCP tool; `analyze <folder>`; `markdown --from/--to` to read around a hit~~ (built
+   2026-10-27: `src/doc/search.ts`). Next: fuzzy matching for ASR errors, then embeddings
+   (text, then image) and hybrid ranking.
+5. **Demo web app: read and search**, statically hosted: drop in videos, watch layers fill in,
+   read the Markdown view, search across them. Nothing leaves the machine.
+6. **Redact module**: output encoding, redaction log, plates, and a review UI (8.1% of faces
+   are still missed against human labels, so a person must check the result).
+7. Captions with a small VLM, pulled in where they visibly improve search or the Markdown view.
+8. Worker-by-default runtime, single shared GPU device (detector + Whisper), packaging/publishing.
+
+**Lead application (decided 2026-10-27): search and read your videos privately.** It is more
+generally useful than redaction and shows every core claim: browser-only and private, analyze
+once / query many, agent-first, transcript-first. Redaction follows as the privacy showcase.
+Test footage should match the targets (meetings, interviews, bodycam-like first-person video:
+several speakers, long silent stretches), not only the briefing / music video / street walk.
 
 ## Open questions
 

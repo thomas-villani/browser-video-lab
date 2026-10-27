@@ -14,6 +14,9 @@ export interface MarkdownOptions {
   silence?: number;
   /** Start a new paragraph when speech pauses this long, seconds. */
   pause?: number;
+  /** Render only [from, to) seconds (e.g. around a search hit); shots and passages overlapping it. */
+  from?: number;
+  to?: number;
 }
 
 /** 83.4 -> "01:23"; with `long`, "0:01:23". */
@@ -61,6 +64,10 @@ export function toMarkdown(doc: VideoDoc, opts: MarkdownOptions = {}): string {
   keyframes?.items.forEach((k, i) => events.push({ t: k.t, kind: 'image', k, i }));
   if (speech?.items.length) for (const [t, t1] of silentGaps(speech.items, source.duration, silence)) events.push({ t, kind: 'silence', t1 });
   events.sort((a, b) => a.t - b.t || ORDER[a.kind] - ORDER[b.kind]);
+  const from = opts.from ?? 0;
+  const to = opts.to ?? Infinity;
+  const excerpt = opts.from !== undefined || opts.to !== undefined;
+  const inRange = (ev: Event) => (ev.kind === 'image' ? ev.t >= from && ev.t < to : ev.t < to && ev.t1 > from);
 
   // Header: what the video is and which layers this view was made from.
   const words = transcript?.items.reduce((n, x) => n + x.text.split(/\s+/).filter(Boolean).length, 0);
@@ -76,12 +83,14 @@ export function toMarkdown(doc: VideoDoc, opts: MarkdownOptions = {}): string {
   ].filter(Boolean);
   const made = Object.entries(layers).map(([n, l]) => `${n}${l.producer.model ? ` (${l.producer.model})` : ''}`);
   const out = [`# ${source.name}`, '', facts.join(' · '), `<!-- ${doc.schema} · ${made.join(' · ')} -->`];
+  if (excerpt) out.push('', `*Excerpt ${ts(from)}–${ts(opts.to ?? source.duration)} of the video.*`);
 
   let e = 0;
   scenes.forEach((s, si) => {
     const last = si === scenes.length - 1;
     const mine: Event[] = [];
-    while (e < events.length && (last || events[e].t < s.t1)) mine.push(events[e++]);
+    while (e < events.length && (last || events[e].t < s.t1)) if (inRange(events[e++])) mine.push(events[e - 1]);
+    if (excerpt && (s.t1 <= from || s.t0 >= to)) return;
     const nFaces = faces && maxFaces(faces.items, s.f0, s.f1);
     const tail = nFaces === undefined ? '' : nFaces ? ` · up to ${nFaces} ${nFaces === 1 ? 'face' : 'faces'}` : ' · no faces';
     out.push('', `## ${scenes.length > 1 ? `Shot ${si + 1} · ` : ''}${ts(s.t0)}–${ts(s.t1)}${tail}`);
