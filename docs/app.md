@@ -1,0 +1,71 @@
+# The app
+
+```bash
+npm run ui          # or: node cli/videodoc.ts ui [--port 4317] [--no-open]
+```
+
+This serves the app on localhost and opens it in your default browser. Use Chrome or Edge:
+analysis needs WebGPU. Reading and searching docs that already exist work in any browser.
+Everything runs in the page; nothing is uploaded.
+
+## Adding videos
+
+- **Open folder** (Chrome and Edge): pick a folder; every video in it and its subfolders is
+  listed. Docs the CLI or the app wrote before are loaded, so those videos are ready at once.
+  New docs, keyframe images and face reviews are saved next to the videos. This is the same
+  collection the CLI and the MCP server use.
+- **Add videos**, or drop files anywhere on the page: works in any browser. Drop a video's
+  `.videodoc.json` (and `.redact.json`) with it to reuse them. Docs then live in the tab;
+  **Download doc** saves one.
+
+Videos without a doc show how long analysis will take; **Analyze** (one video) or **Analyze all**
+queues them. They are analyzed one at a time, with each step shown as it runs (Listening →
+Transcribing → Finding shots). You can read and search the others meanwhile.
+
+**What to analyze** (top right) chooses the layers for new analyses: speech, shots and keyframes
+always; the transcript (on by default; needed for search); faces (off by default; about doubles
+the time). **Add layers** on an analyzed video computes the ones ticked and missing.
+
+## Reading
+
+Selecting a video shows the player beside its reading view: the same Markdown an agent gets,
+with a picture for each shot and each silent stretch. Click a time, a picture or a shot heading
+to jump the video there; while it plays, the paragraph being said is highlighted. **Copy
+Markdown** puts the text on the clipboard (to paste into a chat or notes).
+
+## Searching
+
+Type in the search box (or press `/`) to search what is said in every loaded video. Hits show the
+video, the time, the passage with the words marked, and the nearest picture; click one to open
+the video at the moment the words are said. When nothing matches, the app suggests queries from
+the transcripts (names and places that come up).
+
+## Face review and redaction
+
+**Review faces** (on a video with faces; on one without, it finds them first) turns the player
+into a review tool:
+
+- Boxes over the video show what the copy will cover, with the blur previewed live. **Preview**
+  off shows the boxes only.
+- **Click a face** to leave it visible; click again to cover it.
+- **Drag a box** over a face the detector missed. Step forward and drag it again where the person
+  moved to, and the box follows. The selected face's bar has **Starts here**, **Ends here** and
+  **Delete**.
+- The panel lists the faces shot by shot, longest first, with thumbnails; click one to jump to it.
+  Crowded shots list 24 faces, then more on request.
+- **Cover with** picks blur, pixelate or solid boxes.
+- Keys: Space plays, ← → step a frame (Shift: 10), `[` `]` previous / next shot, Esc deselects,
+  Delete removes a hand-drawn face.
+
+The review is saved next to the video as `<video>.redact.json` (folder mode) and used by
+**Blur faces…**, which makes the copy: next to the video in folder mode, else where you choose
+(or as a download), with its redaction log. When the copy was saved to a file, **Watch it** in the
+toast that follows plays it. See [redaction](redaction.md) for what is covered and the file formats.
+
+## Notes
+
+- Analysis runs in the page itself (a worker is planned): keep the tab open, and a laptop
+  plugged in, while it works.
+- Dropped videos and their docs are gone when the tab closes, unless downloaded; folders keep
+  everything on disk.
+- Models are served by `videodoc ui` from `public/models`; there is no hosted version yet.

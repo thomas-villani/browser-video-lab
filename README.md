@@ -1,223 +1,172 @@
-# browser-video-lab
+# videodoc
 
-Spike for a browser-only video understanding runtime: WebCodecs decode → zero-copy WebGPU
-preprocessing → ONNX Runtime Web inference, with no server. Findings and design notes are in
-[NOTES.md](NOTES.md).
+**Read, search and redact your videos without uploading them.** videodoc analyzes a video once,
+on your own machine's GPU inside a web browser, into a small document of what happens in it:
+when people speak and what they say, where the shots change, which frames are worth looking
+at, where the faces are. Everything after that (reading the video as text, finding where
+something was said across hundreds of hours, blurring every face before you share a clip)
+reads from that document and takes milliseconds to seconds.
 
-## Setup
+It is built for people and for AI agents alike: a desktop-style app in the browser, a CLI
+that prints JSON, and an MCP server so an agent like Claude can "watch" a video by reading it.
 
-```bash
-npm install            # also copies ORT wasm files into public/ort
+> Status: early and working. The format is `videodoc/0`; the code runs from this repository
+> (not yet published to npm). Measurements below are from a laptop with an integrated Intel
+> Iris Xe GPU.
+
+## Why
+
+Video is the most opaque thing most of us keep. A folder of meeting recordings, interviews,
+lectures or bodycam footage can't be searched, skimmed or quoted without someone watching it,
+and the usual way around that (uploading it to a cloud service) is exactly what you can't do
+with footage that is sensitive, confidential, evidentiary, or just someone else's privacy.
+
+Three observations shape videodoc:
+
+1. **The transcript carries most of the meaning.** In earlier work on semantic search over
+   evidence footage, the transcript alone reached about 80% of full video-understanding
+   performance. So videodoc is transcript-first: speech detection and Whisper run first, and
+   visual analysis is spent where nobody is talking.
+2. **Browsers can now do the heavy lifting.** WebCodecs decodes video in hardware, WebGPU runs
+   neural networks, and ONNX Runtime Web ties them together. A laptop transcribes at 3–6x
+   real time and finds faces at around real time, with nothing to install but a browser and
+   nothing leaving the machine.
+3. **Analyze once, ask many times.** Analysis is the expensive part, so it is saved next to the
+   video as `<video>.videodoc.json`: versioned, with every setting and model recorded, and reused
+   whenever the same question comes up again. Reading, searching and redaction plans need no GPU.
+
+## What you can do with it
+
+**Find where something was said, across a whole collection.** Point it at a folder of school
+board meetings, depositions, user interviews or lectures and search: "reading intervention",
+"budget cuts", a person's name. You get ranked passages with timestamps and a picture of the
+moment; click one and the video plays from there. Searching 27,000 words of transcript takes
+about 25 ms.
+
+**Let an agent read a video.** Agents can't watch video, but they read well. `videodoc markdown`
+(or the MCP `markdown` tool) renders a video as Markdown: one section per shot, timestamped
+paragraphs of speech, silent stretches marked, keyframe images where they help. An agent can
+summarize a 65-minute meeting, answer questions about it, or quote it with times, and follow up
+with `search` and a `from`/`to` window around a hit.
+
+**Blur faces before you share a video.** For public records requests, journalism, research
+footage or a neighborhood watch clip: `videodoc redact` writes a copy with every detected face
+blurred, pixelated or blacked out, sound kept, and a log of every face it covered. In the app,
+**Review faces** shows exactly what will be covered over the playing video; click a face to
+leave it visible (the official at the podium), drag a box over one the detector missed. Detection
+misses some faces (8.1% of hand-labeled faces on a crowded street), so a person reviews the
+result; the tools say so.
+
+**Skim a long recording.** The reading view puts the transcript beside the player with a frame
+for each shot and each silent gap, so a two-hour recording becomes a page you can scroll.
+
+On the roadmap: license plates and spoken names in redaction, captions for keyframes from a
+small vision model, audio-only files (podcasts, lectures), and transcript-driven editing
+(finding the "um"s and long pauses in a podcast or YouTube video and cutting them).
+
+## What a video looks like as a document
+
+```markdown
+# council-2026-10-14.mp4
+
+1:12:40 · 1920×1080 · 30 fps · 9 shots · 94% speech · 11,204 words
+<!-- videodoc/0 · speech (silero_vad v5) · transcript (onnx-community/whisper-base) · scenes · keyframes -->
+
+## Shot 3 · 0:14:05–0:31:50
+
+![0:14:05](council-2026-10-14.mp4.keyframes/025365.jpg)
+
+**[0:14:05]** Item four is the sidewalk repair contract. Staff recommends approval…
+
+**[0:14:41]** I have a question about the timeline. When would the work on Elm Street start?
+
+*(no speech 0:22:10–0:23:02)*
+
+![0:22:36](council-2026-10-14.mp4.keyframes/040680.jpg)
 ```
 
-Models and media are not committed. Fetch them into `public/`:
+The doc itself is JSON with one item per line, so it greps and diffs well. See
+[the format](docs/format.md).
 
-| File | Source | License |
-|---|---|---|
-| `public/models/yunet_face.onnx` | huggingface.co/opencv/face_detection_yunet (`face_detection_yunet_2023mar.onnx`) | MIT |
-| `public/models/yunet_plate.onnx` | huggingface.co/opencv/license_plate_detection_yunet | see repo LICENSE |
-| `public/models/rfdetr_nano.onnx`, `rfdetr_nano_fp16.onnx` | huggingface.co/onnx-community/rfdetr_nano-ONNX | Apache-2.0 |
-| `public/models/silero_vad.onnx` | github.com/snakers4/silero-vad (`src/silero_vad/data/silero_vad.onnx`) | MIT |
-| `public/models/onnx-community/whisper-*/` | `node scripts/fetch-model.mjs onnx-community/whisper-base encoder_model decoder_model_merged_q4` | Apache-2.0 (OpenAI Whisper: MIT) |
-| `public/media/pan1080.mp4` | any 1080p H.264 clip | — |
+## Quick start
 
-Then relax YuNet's fixed 640x640 input so it runs at any multiple of 32 (outputs are
-identical at 640x640; smaller inputs enable 640x384 for 16:9 frames and small ROI crops):
+You need Node 24+, Chrome or Edge with WebGPU (any recent version on Windows, macOS or
+ChromeOS; Linux may need a flag), and about 200 MB of models.
 
 ```bash
-uv run --with onnx --with onnxruntime python tools/dynamic_yunet.py public/models/yunet_face.onnx public/models/yunet_face_dyn.onnx
+npm install
+# models: see docs/getting-started.md (YuNet, Silero VAD, Whisper; all fetched into public/models)
+npm run videodoc -- check        # browser, WebGPU adapter, decoders, models: what is missing and how to fix it
+npm run ui                       # the app: open a folder of videos, analyze, read, search, redact
 ```
 
-## videodoc CLI
-
-The library taking shape (see [DESIGN.md](DESIGN.md)): analyze a video once into a saved
-document of time-indexed layers, then query it. Compute runs in a local headless Edge/Chrome
-(WebGPU); the video is served to it from disk, never uploaded.
+From the command line:
 
 ```bash
-npm run ui                                                 # the app: open a folder or drop videos; analyze, read, search
-npm run videodoc -- check                                  # browser, WebGPU adapter, decoders, models
-npm run videodoc -- analyze talk.mp4                       # speech, transcript, scenes, keyframes -> talk.mp4.videodoc.json
-npm run videodoc -- analyze talk.mp4 --layers faces --set faces.every=4
-npm run videodoc -- markdown talk.mp4 > talk.md            # "read the video" (analyzes missing layers first)
-npm run videodoc -- markdown talk.mp4 --images --out talk.md   # + keyframe JPEGs in talk.mp4.keyframes/
-npm run videodoc -- markdown talk.mp4 --from 12:30 --to 15:00  # just that stretch
-npm run videodoc -- analyze videos/                        # every video in a folder (recursive)
-npm run videodoc -- search "budget cuts" videos/ --top 5    # where is it said? (transcripts, no browser)
-npm run videodoc -- redact bodycam.mp4                     # every face blurred -> bodycam.redacted.mp4 + redaction log
-npm run videodoc -- redact bodycam.mp4 --style fill --keep 3,7   # solid boxes; leave face tracks 3 and 7 visible
-npm run videodoc -- info talk.mp4                          # summarize a saved doc (no browser)
-npm run videodoc -- layers                                 # layers, dependencies, settings + defaults (JSON)
+npm run videodoc -- analyze videos/                          # transcribe and index every video in a folder
+npm run videodoc -- search "sidewalk contract" videos/       # where was it said? (no GPU, instant)
+npm run videodoc -- markdown videos/council.mp4 --from 14:00 --to 20:00   # read that stretch
+npm run videodoc -- redact videos/bodycam.mp4                # every face blurred -> bodycam.redacted.mp4
 ```
 
-- Layers: `speech` (Silero VAD), `transcript` (Whisper), `scenes` (shots), `keyframes` (frames
-  worth looking at, derived from scenes + speech in Node), `faces` (tracks).
-  Dependencies are added automatically; layers already in the doc with the same settings are
-  reused, and with nothing left to compute no browser starts. `--dry-run` prints the plan.
-- stdout: one JSON object per command (agents); stderr: progress and a summary (people).
-  Exit codes: 0 ok, 1 failure, 2 usage error.
-- `redact` finds faces first if the doc has none, re-encodes H.264 at about the source bitrate
-  (audio copied), and writes `<out>.redactions.json`: settings, totals and every face track
-  (id, times, kept or not). Regions are the face boxes grown by a margin, held 0.3 s past each
-  track within its shot. Detection misses some faces: review the output before release.
-  A review made in the app (`<video>.redact.json`: faces left visible, faces added by hand,
-  style) is used when it sits next to the video; flags given on the command line override it,
-  `--no-plan` ignores it.
-- The doc's format is `src/doc/schema.ts`; one layer item per line. `src/doc` is dependency-free
-  and runs in Node; `analyze()` in `src/analyze.ts` is the same pipeline as a browser API.
-
-### The app (for people)
-
-`npm run ui` (`videodoc ui [--port n] [--no-open]`) serves `app.html` and opens it in your
-default browser (Chrome or Edge, for WebGPU). **Open folder** lists the videos in a folder
-(recursively), loads the docs the CLI already wrote, and saves new ones (and keyframe JPEGs)
-next to the videos, so the CLI, the MCP server and the app share one collection. **Add videos**
-or drag-and-drop works in any WebGPU browser (drop a `.videodoc.json` with its video to reuse
-it; docs then live in memory, with a download button). The reading view is the same Markdown
-agents get, beside a player: click a timestamp, keyframe or search hit to seek. **Review faces**
-draws what will be covered over the player, previewing the blur live, with a frame-accurate
-transport (Space, arrow keys, `[` `]` for shots) and a list of faces per shot with thumbnails:
-click a face to leave it visible, drag a box over a face the detector missed (draw it again
-further on and it follows). The review is saved next to the video as `<video>.redact.json`.
-**Blur faces…** saves a redacted copy as reviewed (next to the video in a folder, else where
-you choose) with its log. Nothing is uploaded.
-
-### MCP server (for agents)
-
-`npm run mcp` (or `node cli/mcp.ts [--browser chrome] [--headed]`) serves the same commands over
-MCP stdio: `markdown`, `search`, `analyze`, `redact`, `info`, `layers`, `check`. The browser stays warm between
-calls (closed after `VIDEODOC_IDLE_MS` idle, default 10 min), calls run one at a time, long runs
-send progress notifications, and cancelling a call stops its work. `markdown` can also return
-keyframes as image content (`embedImages: n`). To add it to Claude Code:
+For an agent (Claude Code shown; any MCP client works):
 
 ```bash
 claude mcp add videodoc -- node /path/to/browser-video-lab/cli/mcp.ts
 ```
 
-## Run
+Then ask it things like "what did the board decide about the sidewalk contract in the videos
+in ~/meetings?"
 
-Interactive: `npm run dev`, then open the printed URL. Preset links are on the page; every
-option is a URL query parameter (see the header of `src/main.ts`).
+## How it works
 
-Headless (for agents and CI):
-
-```bash
-npm run bench -- --model yunet --path gpu --outloc batch --depth 2 --stride 1,10
+```
+video file ──► WebCodecs decode ──► WebGPU ───────────────► layers ──► <video>.videodoc.json
+               (in a browser:        Silero VAD   speech               │
+                the app, or a        Whisper      transcript           ├─► markdown   read it
+                headless Edge or     scene score  scenes               ├─► search     find it
+                Chrome driven by     YuNet        faces                ├─► redact     blur it
+                the CLI)             (derived)    keyframes            └─► your code
 ```
 
-- **stdout**: one JSON result per run (JSONL): config, adapter, fps, per-stage ms stats,
-  first-frame detections.
-- **stderr**: progress and a summary table.
-- Comma-separated values form a matrix. All options are listed in the header of `scripts/bench.mjs`.
-- `--screenshot` saves `results/<name>.png` showing first-frame detections.
+- Audio is decoded once for speech and transcript; video is decoded once for every frame
+  consumer (shots and faces share a pass). Keyframe images seek to the chosen frames only.
+- A planner works out which layers a request needs and which are already in the doc with the
+  same settings, so repeating a request costs nothing and changing one setting recomputes only
+  what depends on it.
+- The CLI and MCP server plan in Node and only start a headless browser when something has to
+  be computed; the video is served to it from disk over localhost.
 
-For stable numbers, run on AC power with the performance power mode, and compare medians of
-several runs.
+Typical times on an integrated GPU: default analysis (speech, transcript, shots, keyframes)
+3–4.5x faster than real time; faces about real time (slower in crowds); redaction 40–80 fps;
+search ~25 ms; Markdown of an analyzed video ~0.5 s. Details are in [NOTES.md](NOTES.md).
 
-### Single-pass adaptive pipeline
+## Documentation
 
-```bash
-npm run pipeline -- --video /media/<clip>.mp4 --longside 640 --dump
-```
+- [Getting started](docs/getting-started.md): install, models, the first video
+- [The app](docs/app.md): folders, analysis, reading, search, face review
+- [CLI](docs/cli.md): every command and option, output, exit codes
+- [MCP server](docs/mcp.md): tools for agents, setup, behavior
+- [The VideoDoc format](docs/format.md): layers, settings, caching, files next to a video
+- [Library API](docs/library.md): using videodoc from TypeScript, in Node and in the browser
+- [Redaction](docs/redaction.md): how regions are chosen, review, the plan and the log, limits
+- [The lab](docs/lab.md): benchmarks, evaluation scripts and labeling tools behind the numbers
 
-Decodes the video once; every frame is retained on the GPU for one keyframe window and
-thumbnailed for scene-cut scoring; the adaptive scheduler picks which frames the detector
-runs on (`pipeline.html` in the browser, same URL params). stdout: one JSON summary per run
-(calls %, input megapixels/frame, fps, cuts); `--dump` writes per-frame boxes, sampled
-frames, and scene scores to `results/<clip>-pipeline-<name>.json`. Score it with:
+Design and history: [DESIGN.md](DESIGN.md) (design and roadmap), [NOTES.md](NOTES.md) (every
+measurement and what it taught), [HANDOFF.md](HANDOFF.md) (current state for contributors).
 
-```bash
-node scripts/eval-track.ts --dump results/<clip>.dets.json --pred results/<clip>-pipeline-<name>.json --pads 0.15
-node scripts/eval-cuts.ts --pred results/<clip>-pipeline-<name>.json --ref results/<clip>.cuts.txt
-```
+## Limits worth knowing
 
-### Transcript (Whisper + VAD in the browser)
-
-```bash
-npm run transcribe -- --video /media/<clip>.mp4 [--seconds 120] [--model onnx-community/whisper-small]
-```
-
-Decodes the audio track (16 kHz mono), finds speech with Silero VAD, and transcribes only
-the speech spans with Whisper on WebGPU (transformers.js). stdout: one JSON summary per run
-(speed vs real time, words, speech coverage %, silent gaps); segments and speech spans go to
-`results/<clip>-transcript-<name>.json`. Score against reference captions (e.g. YouTube
-auto-captions via `yt-dlp --write-auto-subs --sub-format vtt --skip-download`):
-
-```bash
-node scripts/eval-transcript.ts --pred results/<clip>-transcript-<name>.json --ref results/ref/<clip>.en.vtt
-```
-
-### Face labels (human ground truth)
-
-Model-proposed, human-verified labels, so detectors and strategies can be scored against
-people rather than against the dense YuNet pass:
-
-```bash
-npm run label:select      # choose ~300 frames (seeded) and extract JPEGs to public/label/
-npm run label:bootstrap   # RetinaFace-R50 at native resolution + flip (Python via uv, CPU)
-npm run label:tasks       # merge RetinaFace + YuNet candidates, most uncertain frames first
-npm run dev               # then open http://localhost:5173/label.html
-npm run eval:labels       # score YuNet / RetinaFace / --pred pipeline runs against the labels
-```
-
-The review page saves every frame to `results/labels/faces.jsonl` (append-only; last line
-per frame wins) through a dev-server endpoint, and resumes at the first unlabeled frame.
-Label definition: any visible face, including profile and angled; not the back of a head;
-faces under ~10 px tall are marked uncertain (ignored in scoring).
-
-The labels, the frame list (`public/label/frames.json`) and the RetinaFace bootstrap
-(`public/label/retina.json`) are committed; with the clips in place, `label:select` re-extracts
-the same JPEGs and you can skip `label:bootstrap`.
-
-### Tracking / sparse-detection evaluation
-
-```bash
-# 1. Dump every frame's detections (low threshold keeps weak boxes for ByteTrack/hysteresis)
-npm run bench -- --model yunet --path gpu --outloc batch --depth 2 --frames 0 --dump --score 0.3 --video /media/<clip>.mp4
-# 2. Optional: scene cuts via ffmpeg (writes results/<clip>.cuts.txt, one frame index per line)
-npm run cuts -- public/media/<clip>.mp4
-# 3. Evaluate strategies against the dense pass (JSONL on stdout, table on stderr)
-npm run eval:track -- --dump results/<clip>-<name>.dets.json --cuts results/<clip>.cuts.txt --modes hold,offline,adaptive
-npm test   # tracker unit tests (node:test)
-```
-
-## Layout
-
-- `app.html` + `src/app/` — the app (`library.ts`: folders and files, docs, keyframes and reviews on disk; `render.ts`: Markdown to HTML; `review.ts`: face review over the player; `main.ts`: UI)
-- `cli/lib.ts` — the videodoc commands (shared); `cli/videodoc.ts` — CLI; `cli/mcp.ts` — MCP server (stdio, warm browser);
-  `analyze.html` + `src/analyze-page.ts` — the compute page they drive
-- `src/doc/` — the VideoDoc: schema, planner (`PRODUCERS`), keyframe selection, Markdown view, transcript search (BM25), redaction regions and log, track linking/compression, hashing, load/save (pure TS)
-- `src/redact.ts` — `redact()`: decode, cover regions (blur, pixelate, fill), encode MP4 with mediabunny `Conversion` (audio copied)
-- `src/analyze.ts` — `computeLayers` (one audio pass, one shared video decode), the browser `analyze()`, `frameImages` (seek-based keyframe JPEGs)
-- `src/main.ts` — benchmark loop (decode → preprocess → infer → readback → decode outputs), in-flight ring
-- `src/pipeline.ts` + `scripts/pipeline.mjs` — single-pass adaptive pipeline page and its headless runner
-- `src/runtime/` — reusable building blocks:
-  `detector.ts` (`Detector`: any frame or retained texture, optional crop and input size, pipelined),
-  `source.ts` (`VideoSource`: indexed frames over mediabunny),
-  `ingest.ts` (`FrameIngest`: GPU frame retention + thumbnails, one readback per window),
-  `stream.ts` (`adaptiveStream`: decode once, cut-aware adaptive detection)
-- `src/scene.ts` — ffmpeg-style scene score from thumbnails
-- `src/runtime/audio.ts` (`decodeAudio`: mono PCM at 16 kHz), `vad.ts` (Silero VAD), `transcribe.ts`
-  (`Transcriber`: Whisper via transformers.js, whole-file or per speech span)
-- `src/transcript.ts` — VAD spans, Whisper chunk packing, speech coverage and silent gaps (pure TS)
-- `src/transcribe-page.ts` + `scripts/transcribe.mjs` — transcript page and its headless runner
-- `scripts/eval-transcript.ts` — WER against a reference WebVTT; `scripts/fetch-model.mjs` — local HF model download
-- `src/preprocess.ts` — `GpuPreprocessor` (VideoFrame or GPUTexture, crop, any input size) and `CpuPreprocessor` baseline
-- `src/readback.ts` — per-tensor vs batched single-map GPU readback
-- `src/models.ts` — model specs + output decoders (YuNet, RF-DETR), NMS
-- `scripts/bench.mjs` — headless matrix runner for the bench page; `scripts/lib/harness.mjs` — shared build/serve/browser harness
-- `scripts/eval-cuts.ts` — scene-cut precision/recall vs reference cuts
-- `tools/dynamic_yunet.py` — make YuNet's input size dynamic
-- Labeling kit: `scripts/label-select.mjs`, `tools/bootstrap_faces.py`, `scripts/label-tasks.mjs`,
-  `label.html` + `src/label.ts` (review page; label store in `vite.config.ts`), `scripts/eval-labels.ts`
-- `src/track/` — dependency-free TS (runs in browser, worker, and Node):
-  `bytetrack.ts` (ByteTrack port), `kalman.ts`, `assignment.ts` (Hungarian),
-  `sparse.ts` (hold/online/offline sparse detection, scene-aware), `adaptive.ts`
-  (divide-and-conquer scheduler), `coverage.ts` (redaction coverage metrics)
-- `scripts/eval-track.ts` — strategy evaluation against a dense detection dump
-- `tests/` — `node:test` unit tests
+- Chromium-based browsers only for analysis (WebGPU + WebCodecs); reading and searching work
+  anywhere.
+- Whisper makes mistakes ("turd signal" for "turn signal"); search absorbs some of them, fuzzy
+  matching is planned. English is the default language (`--set transcript.language=...`).
+- Speech detection finds no speech in sung vocals, so music has an empty transcript.
+- Face detection misses some faces, especially small, turned or occluded ones; face tracks are
+  for covering and counting, not yet for telling who is who.
+- No captions of what is on screen yet; the Markdown view shows the keyframes instead.
 
 ## License
 
-[MIT](LICENSE). Models and test media are not distributed with this repo; they keep their
-own licenses (see the table under Setup).
+[MIT](LICENSE). Models and test media are not distributed with this repository; they keep their
+own licenses (see [Getting started](docs/getting-started.md)).

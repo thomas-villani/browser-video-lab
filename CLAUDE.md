@@ -11,4 +11,5 @@ step, traps), then NOTES.md (measurements, checklist) and DESIGN.md (design, roa
 - Tools print JSON on stdout, progress and summaries on stderr.
 - In Git Bash, prefix commands that pass `/media/...` URL paths with `MSYS_NO_PATHCONV=1`.
 - Benchmark on AC power with the "Best performance" power overlay only.
-- Record new measurements in NOTES.md; keep DESIGN.md's roadmap current.
+- Record new measurements in NOTES.md; keep DESIGN.md's roadmap current, and docs/ (user
+  documentation: CLI, MCP, format, library API, redaction) in step with what the code does.

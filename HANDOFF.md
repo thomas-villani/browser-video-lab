@@ -119,6 +119,13 @@ difference, denser visual analysis where nobody speaks.
   from the player as faces pass and from a hidden second `<video>` for list items in view.
 - `videodoc redact` / MCP `redact` use the plan when present (`--no-plan` / `plan: false`).
 
+## Done: README rewrite and docs/ (2026-10-28)
+
+README.md now leads with motivation and use cases; user documentation lives in `docs/`
+(getting started, app, CLI, MCP, format, library API, redaction, and `lab.md` for the
+benchmarks and evaluation tools that used to fill the README). Keep it current with changes.
+`check` no longer fails when the optional whisper-small is absent.
+
 ## Next
 
 Plates (a detector for license plates, as a second region source), then audio redaction

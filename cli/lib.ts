@@ -638,7 +638,8 @@ export async function check(ctx: Context, browserName: string) {
   if (!env.webgpu) problems.push('no WebGPU adapter: faces and scenes need it (try --browser chrome, or update GPU drivers)');
   if (!env.crossOriginIsolated) problems.push('page is not cross-origin isolated: wasm runs single-threaded');
   if (!env.decode.h264) problems.push('no H.264 decoder in this browser');
-  for (const [m, ok] of Object.entries(models)) if (!ok) problems.push(`model not found: public/models/${m}`);
+  // whisper-small is optional (--set transcript.model=...): listed, never a problem.
+  for (const [m, ok] of Object.entries(models)) if (!ok && !m.endsWith('whisper-small')) problems.push(`model not found: public/models/${m}`);
   const gpu = env.webgpu ? `${env.webgpu.vendor} ${env.webgpu.architecture}${env.webgpu.description ? ` (${env.webgpu.description})` : ''}` : 'none';
   ctx.report.log(`browser   ${browserName}: ${env.userAgent.match(/(Edg|Chrome)\/[\d.]+/g)?.join(' ') ?? env.userAgent}`);
   ctx.report.log(`webgpu    ${gpu}${env.webgpu?.shaderF16 ? ', shader-f16' : ''}`);
