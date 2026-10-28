@@ -134,7 +134,7 @@ The compute code loads models and runtimes by URL from the page's origin:
 
 | URL | Contents |
 |---|---|
-| `/models/silero_vad.onnx`, `/models/yunet_face_dyn.onnx` | VAD and face models |
+| `/models/silero_vad.onnx`, `/models/yunet_face_dyn.onnx`, `/models/yolo_plate_t640.onnx` | VAD, face and plate models |
 | `/models/onnx-community/whisper-*/` | Whisper (transformers.js `localModelPath`); never fetched from the Hub |
 | `/ort/`, `/ort-hf/` | ONNX Runtime Web wasm files (copied by `npm install`) |
 
@@ -166,8 +166,8 @@ The regions themselves are pure and can be computed in Node:
 
 | Function | |
 |---|---|
-| `cursorFor(doc, options, added?)` | A `RedactionCursor` for the doc's faces plus hand tracks. |
-| `cursor.regions(frame)` / `cursor.at(frame)` | Regions on a frame (`{ id, box, held }`) / just the boxes. Fast in increasing frame order; going back restarts the sweep. |
+| `cursorFor(doc, options, added?)` | A `RedactionCursor` for the doc's covered layers (`options.cover`: faces, plates) less the kept tracks, plus hand tracks. |
+| `cursor.regions(frame)` / `cursor.at(frame)` | Regions on a frame (`{ id, kind, box, held }`, `kind` 'faces' or 'plates') / just the boxes. Fast in increasing frame order; going back restarts the sweep. |
 | `redactionLog(doc, options, output?, added?)` | The log, totals computed by sweeping every frame. `formatLog` serializes it. |
 | `newPlan`, `checkPlan`, `parsePlan`, `formatPlan`, `planPathFor` | The review plan (`<video>.redact.json`). |
 | `handTrack`, `setBox`, `setEnd` | Build and edit hand-drawn tracks. |

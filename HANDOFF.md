@@ -126,10 +126,29 @@ README.md now leads with motivation and use cases; user documentation lives in `
 benchmarks and evaluation tools that used to fill the README). Keep it current with changes.
 `check` no longer fails when the optional whisper-small is absent.
 
+## Done: license plates (2026-10-28)
+
+- Detector: YOLOv9-t-640 from open-image-models (`public/models/yolo_plate_t640.onnx`, NMS
+  inside the model), chosen over OpenCV's LPD-YuNet on three clips (NOTES.md). `ModelSpec`
+  gained `pad` (gray letterbox); readback skips empty outputs.
+- `src/runtime/stream.ts`: `multiStream(source, heads, opts)` runs several detectors over one
+  decode, each with its own adaptive sampling (`Head.maxStride` must divide the shared one);
+  `adaptiveStream` is the one-head wrapper. Detector runs are serialized across all sessions:
+  two ORT WebGPU sessions running at once hang (the first faces+plates run never left frame 0).
+- `plates` layer (`PRODUCERS.plates`): hysteresis (`lowScore`), and `linkTracks` with
+  `maxShift` (match by predicted motion, not IoU: passing plates move most of their width per
+  frame) and `maxGap` (bridge missed frames). Dashcam: 363 -> 92 tracks, median 1 -> 6 frames.
+- Redaction: `cover` (default faces and plates), `keepPlates`, `Region.kind`, log `detectors`
+  per layer and `layer` per track, plan `plates` hash; CLI `--keep-plates`, `--cover`; MCP
+  likewise. Review: tracks keyed `f:<id>` / `p:<id>`, plates in cyan, listed after faces.
+  The app finds plates whenever it reviews or blurs.
+- Trap: `check` now requires the plate model (redaction covers plates by default).
+
 ## Next
 
-Plates (a detector for license plates, as a second region source), then audio redaction
-(bleep spoken names using word timestamps). Lead application (decided 2026-10-27) stays search
+Audio redaction (bleep spoken names and chosen words, with word lists the user configures:
+DESIGN.md step 6 sketch). Then pluggable models and a pipeline builder in the app (DESIGN.md
+step 9, user direction 2026-10-28). Lead application (decided 2026-10-27) stays search
 and read. Smaller follow-ups for the app: hosted build with a model registry, analysis in a
 worker, persistence for dropped files. Ideas noted in DESIGN.md (not scheduled): audio-only
 files (lectures, podcasts) and transcript-driven editing (filler words, cuts).

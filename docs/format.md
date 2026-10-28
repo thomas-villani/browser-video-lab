@@ -12,7 +12,7 @@ reads them. The TypeScript types are in `src/doc/schema.ts`; this page describes
 interface VideoDoc {
   schema: 'videodoc/0';
   source: SourceInfo;
-  layers: Partial<{ speech; transcript; scenes; keyframes; faces }>;
+  layers: Partial<{ speech; transcript; scenes; keyframes; faces; plates }>;
 }
 
 interface SourceInfo {
@@ -63,6 +63,7 @@ interface Layer<T> {
 | `scenes` | `{ t0, t1, f0, f1, score }` (a shot; frames inclusive) | — | frames | GPU thumbnails, ffmpeg-style scene score |
 | `keyframes` | `{ t, frame, scene, why: 'scene' \| 'silence' \| 'coverage' }` | scenes, speech | pure | derived in Node or the browser, no decode |
 | `faces` | `Track` (below) | scenes | frames | YuNet with adaptive sampling and native-resolution tiles |
+| `plates` | `Track` (below) | scenes | frames | YOLOv9-t license plates (open-image-models), adaptive sampling, motion-linked |
 
 **Passes.** Audio is decoded once for speech and transcript. Every frame layer shares one video
 decode. Pure layers are computed from other layers without touching the video.
@@ -71,7 +72,8 @@ decode. Pure layers are computed from other layers without touching the video.
 every silent gap of 4 s or more (nobody is saying what is on screen there), and fill-ins so no
 stretch of a shot goes 30 s without one. `scene` indexes the scenes layer.
 
-**Tracks.** A face track covers frames `[f0, f1]` with sampled boxes:
+**Tracks.** A face (or plate) track covers frames `[f0, f1]` with sampled boxes; ids are per
+layer:
 
 ```ts
 interface Track { id: number; f0: number; f1: number; samples: number[][] }  // [frame, x, y, w, h]
@@ -80,9 +82,11 @@ interface Track { id: number; f0: number; f1: number; samples: number[][] }  // 
 Boxes are in source pixels; between samples they are linearly interpolated (`trackBox(t, frame)`
 and `boxesAt(tracks, frame)` in `src/doc/tracks.ts`). Samples are kept only where interpolation
 would drift more than max(1 px, 2% of the box) from what the detector found, so a long, steady
-face costs a few samples. Tracks never cross a shot boundary. They are linked by box overlap
-only, so they fragment under fast motion: fine for covering and counting faces, not for
-identifying people across a video. Ids are stable for the same input and settings.
+face costs a few samples. Tracks never cross a shot boundary. Face tracks are linked by box
+overlap only, so they fragment under fast motion: fine for covering and counting faces, not for
+identifying people across a video. Plate tracks are linked by where their motion predicts them
+and bridge a few missed frames (interpolated), since plates are small and move fast. Ids are
+stable for the same input and settings.
 
 ## Settings
 
@@ -113,6 +117,12 @@ or `settings` (library). `videodoc layers` prints this table as JSON.
 | `faces.every` | 2 | refine every Nth frame |
 | `faces.trigger` | 0.3 | reduced-pass score that marks a tile for refinement |
 | `faces.small` | 120 | only faces shorter than this (px) mark tiles; 0 = any |
+| `plates.maxStride` | 8 | coarsest spacing between detected frames; must divide `faces.maxStride` when both run |
+| `plates.minIou` | 0.2 | overlap for detections at both ends of a sampling interval to count as the same plate |
+| `plates.minScore` | 0.4 | detection score threshold |
+| `plates.lowScore` | 0.2 | a plate seen at `minScore` at one end still matches this weak a detection at the other |
+| `plates.maxShift` | 1 | link a plate to a track whose motion puts it at most this many plate sizes away |
+| `plates.maxGap` | 6 | frames a plate track may go undetected and continue (interpolated); 0 = none |
 
 ## Caching: analyze once
 
@@ -166,5 +176,5 @@ paragraphs overlapping the window are rendered, under a note saying it is an exc
 
 ## Other files
 
-The face review (`<video>.redact.json`, `videodoc-redact/0`) and the redaction log
+The review (`<video>.redact.json`, `videodoc-redact/0`) and the redaction log
 (`<out>.redactions.json`, `videodoc-redactions/0`) are described in [redaction](redaction.md).

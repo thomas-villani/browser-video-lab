@@ -1,5 +1,8 @@
 // Per-frame boxes <-> compact tracks. Linking: boxes in consecutive frames are matched by IoU
-// (optimal assignment), never across a scene cut. Compression: a track keeps only the samples
+// (optimal assignment), never across a scene cut; with `maxShift`, by distance from where the
+// track's velocity puts it instead (small, fast objects: a passing car's plate moves most of its
+// own width per frame, so consecutive boxes barely overlap); with `maxGap`, a track survives
+// that many frames without a match and the gap is interpolated. Compression: a track keeps only the samples
 // needed for linear interpolation to reproduce every frame's box within a tolerance. Pure TS.
 import { linearAssignment } from '../track/assignment.ts';
 import type { Box, Track } from './schema.ts';
@@ -16,6 +19,31 @@ export interface TrackOptions {
   minIou: number;
   /** Interpolation error allowed per coordinate: max(px, rel x box size). */
   tolerance: { px: number; rel: number };
+  /** Frames a track may go unmatched and still continue (a detector that flickers); 0 = none. */
+  maxGap?: number;
+  /** Match by center distance from the track's predicted box (last box plus its velocity)
+   *  instead of IoU: at most this many box sizes away, sizes within 2x. */
+  maxShift?: number;
+}
+
+type Open = { id: number; f0: number; boxes: Box[]; miss: number };
+
+/** Where track t's box should be in the next frame: its last box moved by its last velocity. */
+function predict(t: Open): Box {
+  const n = t.boxes.length;
+  const last = t.boxes[n - 1];
+  if (n < 2) return last;
+  const p = t.boxes[n - 2];
+  const k = t.miss + 1;
+  return [last[0] + (last[0] - p[0]) * k, last[1] + (last[1] - p[1]) * k, last[2], last[3]];
+}
+
+/** Center distance in units of the predicted box's size; Infinity when the sizes differ over 2x. */
+function shift(p: Box, b: Box): number {
+  const ratio = (b[2] * b[3]) / (p[2] * p[3] || 1);
+  if (ratio > 4 || ratio < 0.25) return Infinity;
+  const d = Math.hypot(b[0] + b[2] / 2 - (p[0] + p[2] / 2), b[1] + b[3] / 2 - (p[1] + p[3] / 2));
+  return d / Math.max(p[2], p[3], 1);
 }
 
 export const DEFAULT_TRACKS: TrackOptions = { minIou: 0.3, tolerance: { px: 1, rel: 0.02 } };
@@ -23,21 +51,38 @@ export const DEFAULT_TRACKS: TrackOptions = { minIou: 0.3, tolerance: { px: 1, r
 /** Link per-frame boxes (frame 0 first) into tracks; `cuts` are frames that start a new shot. */
 export function linkTracks(frames: Box[][], cuts: number[] = [], opts: TrackOptions = DEFAULT_TRACKS): Track[] {
   const cutSet = new Set(cuts);
-  const done: { id: number; f0: number; boxes: Box[] }[] = [];
-  let open: typeof done = [];
+  const maxGap = opts.maxGap ?? 0;
+  // `miss`: frames since the track's last box (its boxes end before them).
+  const done: Open[] = [];
+  let open: Open[] = [];
+  const s = opts.maxShift;
   let nextId = 1;
   frames.forEach((boxes, f) => {
     const prev = cutSet.has(f) ? [] : open;
     if (prev !== open) done.push(...open);
-    const cost = prev.map((t) => boxes.map((b) => 1 - iou(t.boxes[t.boxes.length - 1], b)));
-    const a = linearAssignment(cost, 1 - opts.minIou, boxes.length);
+    const cost = s
+      ? prev.map((t) => {
+        const p = predict(t);
+        return boxes.map((b) => shift(p, b) / s);
+      })
+      : prev.map((t) => boxes.map((b) => 1 - iou(t.boxes[t.boxes.length - 1], b)));
+    const a = linearAssignment(cost, s ? 1 : 1 - opts.minIou, boxes.length);
     const next: typeof done = [];
     for (const [ti, bi] of a.matches) {
-      prev[ti].boxes.push(boxes[bi]);
-      next.push(prev[ti]);
+      const t = prev[ti];
+      const last = t.boxes[t.boxes.length - 1];
+      for (let k = 1; k <= t.miss; k++) t.boxes.push(lerp(last, boxes[bi], k / (t.miss + 1)) as Box);
+      t.boxes.push(boxes[bi]);
+      t.miss = 0;
+      next.push(t);
     }
-    for (const ti of a.unmatchedRows) done.push(prev[ti]);
-    for (const bi of a.unmatchedCols) next.push({ id: 0, f0: f, boxes: [boxes[bi]] });
+    for (const ti of a.unmatchedRows) {
+      if (prev[ti].miss < maxGap) {
+        prev[ti].miss++;
+        next.push(prev[ti]);
+      } else done.push(prev[ti]);
+    }
+    for (const bi of a.unmatchedCols) next.push({ id: 0, f0: f, boxes: [boxes[bi]], miss: 0 });
     open = next;
   });
   done.push(...open);

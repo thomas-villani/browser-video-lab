@@ -11,7 +11,7 @@ import { parseArgs } from 'node:util';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { LAYER_NAMES, PlanError, PRODUCERS, REDACT_DEFAULTS, REDACT_STYLES, VERSION } from '../src/doc/index.ts';
+import { LAYER_NAMES, PlanError, PRODUCERS, REDACT_DEFAULTS, REDACT_KINDS, REDACT_STYLES, VERSION } from '../src/doc/index.ts';
 import {
   analyze, check, DEFAULT_IMAGE_SIZE, DEFAULT_LAYERS, info, layers, MARKDOWN_LAYERS, markdown, redact, search, UsageError, warmBrowser,
   type Context, type Progress,
@@ -104,12 +104,12 @@ const TOOLS = [
   },
   {
     name: 'redact',
-    title: 'Blur faces in a video',
+    title: 'Blur faces and license plates in a video',
     description:
-      'Write a copy of the video with every detected face blurred (or pixelated, or filled), audio copied, plus a redaction log (<out>.redactions.json) listing every face track and which were kept visible. ' +
-      'Analyzes faces first if needed (slow: roughly 2-12x real time on an integrated GPU, crowds slowest). Detection misses some faces, so a person must review the output before release; ' +
-      'say so when reporting the result. Track ids for keep come from a previous log or the doc. ' +
-      'A review saved in the app (<video>.redact.json: kept faces, faces added by hand) is used when present; options given here override it.',
+      'Write a copy of the video with every detected face and license plate blurred (or pixelated, or filled), audio copied, plus a redaction log (<out>.redactions.json) listing every track and which were kept visible. ' +
+      'Analyzes faces and plates first if needed (slow: roughly 2-12x real time on an integrated GPU, crowds slowest). Detection misses some faces and plates, so a person must review the output before release; ' +
+      'say so when reporting the result. Track ids for keep and keepPlates come from a previous log or the doc. ' +
+      'A review saved in the app (<video>.redact.json: kept tracks, regions added by hand) is used when present; options given here override it.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -119,6 +119,8 @@ const TOOLS = [
         margin: { type: 'number', minimum: 0, maximum: 2, description: `Grow each face box by this fraction on every side (default ${REDACT_DEFAULTS.margin}).` },
         hold: { type: 'number', minimum: 0, maximum: 10, description: `Seconds to keep covering before and after each face track, within its shot (default ${REDACT_DEFAULTS.hold}).` },
         keep: { type: 'array', items: { type: 'integer', minimum: 1 }, description: "Face track ids to leave visible (replaces the review's)." },
+        keepPlates: { type: 'array', items: { type: 'integer', minimum: 1 }, description: "Plate track ids to leave visible, e.g. a sign taken for a plate (replaces the review's)." },
+        cover: { type: 'array', items: { type: 'string', enum: REDACT_KINDS }, description: 'What to cover (default faces and plates; faces is required).' },
         plan: { type: 'boolean', description: 'false: ignore <video>.redact.json (default true).' },
         set: SET,
         force: FORCE,
@@ -245,7 +247,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra): Promise<Call
                   set: common.set, force: common.force, dryRun: common.dryRun,
                   out: args.out as string | undefined, style: args.style as string | undefined,
                   margin: args.margin as number | undefined, hold: args.hold as number | undefined, keep: args.keep as number[] | undefined,
-                  plan: args.plan as boolean | undefined,
+                  keepPlates: args.keepPlates as number[] | undefined, cover: args.cover as string[] | undefined, plan: args.plan as boolean | undefined,
                 }),
               ),
             },

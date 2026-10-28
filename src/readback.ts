@@ -22,7 +22,10 @@ export class BatchedReadback {
   constructor(private device: GPUDevice) {}
 
   async read(outputs: Outputs): Promise<Record<string, Float32Array>> {
-    const items = Object.entries(outputs).map(([name, t]) => ({ name, buf: t.gpuBuffer, bytes: t.size * 4 }));
+    // Empty outputs (a detector with NMS inside that found nothing) have nothing to copy.
+    const empty = Object.entries(outputs).filter(([, t]) => !t.size).map(([name]) => [name, new Float32Array(0)] as const);
+    const items = Object.entries(outputs).filter(([, t]) => t.size).map(([name, t]) => ({ name, buf: t.gpuBuffer, bytes: t.size * 4 }));
+    if (!items.length) return Object.fromEntries(empty);
     // copyBufferToBuffer offsets must be 4-byte aligned; float32 sizes always are.
     let total = 0;
     const offsets = items.map((it) => {
@@ -41,6 +44,6 @@ export class BatchedReadback {
     // Copy out before unmapping: the mapped range is detached on unmap.
     const all = new Float32Array(this.staging.getMappedRange(0, total).slice(0));
     this.staging.unmap();
-    return Object.fromEntries(items.map((it, i) => [it.name, all.subarray(offsets[i] / 4, (offsets[i] + it.bytes) / 4)]));
+    return Object.fromEntries([...empty, ...items.map((it, i) => [it.name, all.subarray(offsets[i] / 4, (offsets[i] + it.bytes) / 4)] as const)]);
   }
 }

@@ -3,8 +3,9 @@
 //   const det = await Detector.create({ model: 'yunet' });
 //   const boxes = await det.detect(frameOrTexture, { crop, longSide: 320 });
 //
-// Calls may overlap: session.run is serialized (ORT runs one at a time per session), while
-// readback and decoding of up to `depth` calls proceed concurrently.
+// Calls may overlap: session.run is serialized across every detector (ORT Web runs one session at
+// a time; two sessions running at once on the WebGPU device hang), while readback and decoding of
+// up to `depth` calls per detector proceed concurrently.
 import * as ort from 'onnxruntime-web/webgpu';
 import { geometryFor, MODELS, type Detection, type GeometryOptions, type ModelSpec } from '../models';
 import { GpuPreprocessor, type FrameSource } from '../preprocess';
@@ -12,6 +13,9 @@ import { BatchedReadback } from '../readback';
 
 ort.env.wasm.wasmPaths = '/ort/';
 ort.env.logLevel = 'error';
+
+/** Every detector's session.run, one after another (see the header). */
+let runChain: Promise<unknown> = Promise.resolve();
 
 export interface DetectorOptions {
   model: string | ModelSpec;
@@ -35,7 +39,6 @@ export class Detector {
   readonly stats: DetectorStats = { calls: 0, inputPixels: 0, submitMs: 0, resultMs: 0 };
   private next = 0;
   private busy: Promise<void>[];
-  private runChain: Promise<unknown> = Promise.resolve();
 
   private constructor(
     readonly spec: ModelSpec,
@@ -77,10 +80,10 @@ export class Detector {
     const [w, h] = 'displayWidth' in source ? [source.displayWidth, source.displayHeight] : [source.width, source.height];
     const geo = geometryFor(this.spec, w, h, opts);
     const t0 = performance.now();
-    const run = this.runChain.then(() =>
+    const run = runChain.then(() =>
       this.session.run({ [this.spec.inputName]: this.pre.run(source, geo, slot) }),
     );
-    this.runChain = run.catch(() => undefined);
+    runChain = run.catch(() => undefined);
     let outputs: ort.InferenceSession.OnnxValueMapType;
     try {
       outputs = await run;

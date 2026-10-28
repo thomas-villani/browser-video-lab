@@ -160,6 +160,8 @@ body.dragging .drop-hint { display: flex; }
 .face img, .face .ph { width: 72px; height: 72px; border-radius: 4px; object-fit: cover; background: var(--line); display: block; }
 .face .lab { color: var(--muted); font-variant-numeric: tabular-nums; }
 .face .state { font-weight: 600; }
+.faces + .faces { margin-top: 6px; }
+.face.plate { border-color: #0891b2; }
 .face.kept { border-color: #22c55e; }
 .face.kept .state { color: #15803d; }
 .face.hand { border-color: #f59e0b; }

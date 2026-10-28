@@ -23,7 +23,7 @@ be in place first ([getting started](getting-started.md)); the `check` tool says
 | `markdown` | The video as Markdown (shots, timed speech, silences, keyframes); analyzes missing layers first | `video`, `from`, `to`, `images`, `embedImages`, `imageSize`, `layers`, `out` |
 | `search` | Where something is said across videos: ranked passages with times, snippet, nearest keyframe | `query`, `paths` (files or folders), `top` |
 | `analyze` | Compute layers into the doc (a folder: every video) and summarize them | `video`, `layers`, `set`, `force`, `dryRun` |
-| `redact` | A copy with faces covered, audio copied, plus the redaction log | `video`, `out`, `style`, `margin`, `hold`, `keep`, `plan` |
+| `redact` | A copy with faces and license plates covered, audio copied, plus the redaction log | `video`, `out`, `style`, `margin`, `hold`, `keep`, `keepPlates`, `cover`, `plan` |
 | `info` | Summarize a saved doc (no compute) | `video` |
 | `layers` | Layers, dependencies, every setting with its default | — |
 | `check` | Browser, WebGPU, decoders, model files | — |
@@ -37,8 +37,8 @@ The server's instructions tell the agent the usual flow:
 1. To understand a video: `markdown` (with `images: true` or `embedImages: 4` to see frames).
 2. To find something across videos: `search` over a folder, then `markdown` with `from`/`to`
    around the hit's `at`.
-3. To share a video without faces: `redact`, then tell the user to watch it (the result carries
-   a caveat that detection misses some faces).
+3. To share a video without faces or plates: `redact`, then tell the user to watch it (the
+   result carries a caveat that detection misses some faces and plates).
 
 `embedImages: n` returns up to n keyframes as image content, spread evenly over the video (or the
 `from`/`to` window), for agents that can see images; `images: true` only links them by path.

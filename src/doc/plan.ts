@@ -89,6 +89,22 @@ export const PRODUCERS: Record<LayerName, ProducerSpec> = {
       small: 'only faces shorter than this (px) mark tiles; 0 = any',
     },
   },
+  plates: {
+    name: 'plates',
+    needs: ['scenes'],
+    pass: 'frames',
+    description: 'License plate tracks (YOLOv9-t, open-image-models; adaptive sampling, shares the decode with faces).',
+    defaults: { model: 'yolo-plate', maxStride: 8, minIou: 0.2, minScore: 0.4, lowScore: 0.2, maxShift: 1, maxGap: 6 },
+    help: {
+      model: 'detector model',
+      maxStride: 'coarsest spacing between detected frames (must divide faces.maxStride when both run)',
+      minIou: 'overlap for two detections to count as the same plate (plates are small and move fast)',
+      minScore: 'detection score threshold',
+      lowScore: 'a plate seen at minScore on one side of an interval still matches this weak a detection on the other (scores flicker)',
+      maxShift: 'link a plate to a track whose motion puts it at most this many plate sizes away (passing cars move fast)',
+      maxGap: 'frames a plate track may go undetected and continue (interpolated); 0 = none',
+    },
+  },
 };
 
 export type Overrides = Partial<Record<LayerName, Record<string, ConfigValue>>>;

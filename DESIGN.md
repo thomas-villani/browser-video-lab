@@ -55,7 +55,8 @@ interface VideoDoc {
     scenes: Layer<{ t0: number; t1: number; f0: number; f1: number; score: number }>;
     keyframes: Layer<{ t: number; frame: number; scene: number; why: 'scene' | 'silence' | 'coverage' }>;
     captions: Layer<{ keyframe: number; text: string }>;
-    faces: Layer<Track>;                                        // also: plates, objects
+    faces: Layer<Track>;
+    plates: Layer<Track>;                                       // also later: objects
     objects: Layer<Track & { label: string }>;
     embeddings: Layer<{ ref: Ref; offset: number }>;           // vectors live in the sidecar
   }>;
@@ -123,7 +124,7 @@ passes, and expected time from a per-device calibration (device class × measure
 |---|---|---|---|
 | **markdown** | transcript, scenes, keyframes, captions? | Markdown (+ keyframe JPEGs) | Works without captions or an LLM; captions enrich it. The agent-facing "read the video" view. |
 | **search** | embeddings (+ transcript text) | ranked hits with time ranges and refs | Hybrid: BM25 over transcript/captions + vector similarity. Query-time text encoding runs in the browser too. |
-| **redact** | faces (+ scenes; plates later) | encoded video + redaction log (JSON) | Built: mediabunny `Conversion` with a per-frame `process` hook, audio copied. Regions = track boxes grown by a margin, held 0.3 s within the shot; drawn per strength level (one downscaled copy of the frame per level, one clipped draw). A review (`RedactPlan`, from the app) adds hand-drawn tracks and keep ids. |
+| **redact** | faces, plates (+ scenes) | encoded video + redaction log (JSON) | Built: mediabunny `Conversion` with a per-frame `process` hook, audio copied. Regions = track boxes grown by a margin, held 0.3 s within the shot; drawn per strength level (one downscaled copy of the frame per level, one clipped draw). A review (`RedactPlan`, from the app) adds hand-drawn tracks and keep ids (per layer: `keep`, `keepPlates`); `cover` picks the layers. |
 | **count** | objects / faces tracks | counts per label, per scene, over time | Mostly aggregation over tracks. |
 | **summarize** | markdown | text | The only LLM-dependent module; takes a pluggable `llm(prompt) => text` (WebLLM, a bring-your-own-key API, or the calling agent). |
 
@@ -233,9 +234,12 @@ loaded. Reading and searching work without WebGPU.
    app's Blur faces). ~~Review UI~~ built 2026-10-28 (`src/app/review.ts`: regions over the
    player with a live preview of the cover, keep a face by clicking it, add a missed face by
    dragging a box, faces listed per shot with thumbnails; saved as `<video>.redact.json`, a
-   `RedactPlan`, which `videodoc redact` and MCP `redact` also use). Next: plates, and audio
-   redaction. 8.1% of faces are still missed against human labels, so a person must check
-   the result.
+   `RedactPlan`, which `videodoc redact` and MCP `redact` also use). ~~Plates~~ built
+   2026-10-28: a `plates` layer (YOLOv9-t from open-image-models, chosen over OpenCV's
+   LPD-YuNet, NOTES.md), computed in the same decode as faces (`multiStream`: several detector
+   heads, each with its own adaptive sampling), linked by predicted motion; redaction and the
+   review cover both. Next: audio redaction. 8.1% of faces are still missed against human
+   labels, and some plates, so a person must check the result.
 
    Audio redaction (sketch, 2026-10-28): bleep or mute words using word-level timestamps, from
    lists the user configures: names (suggested from the transcript's recurring proper nouns),
@@ -252,6 +256,19 @@ loaded. Reading and searching work without WebGPU.
    held up to a camera. Plan in NOTES.md ("On-screen text: plan", 2026-10-28): a text detector
    on every keyframe screens, recognition runs only where it found text.
 8. Worker-by-default runtime, single shared GPU device (detector + Whisper), packaging/publishing.
+9. **Pluggable models and pipelines** (user direction, 2026-10-28). Library: let people plug in
+   their own models without forking. A frame layer is already a `ModelSpec` (input geometry,
+   normalization, a `decode` to boxes) plus tracking settings, and `multiStream` runs any
+   number of detector heads over one decode; what is missing is a registry, so a layer's
+   producer can name a model that the caller registers (`registerModel(spec)`, or a URL to an
+   ONNX file plus a decoder preset: YOLO end-to-end, YuNet, DETR-style), and custom track
+   layers (e.g. `objects`, `logos`, `screens`) that redaction and the review can cover like
+   faces and plates. The planner's config hash already includes the model name; it should
+   include a hash of the model file too. App: a straightforward way to build a processing
+   pipeline for a video or a folder (choose layers and models, see the order and the decode
+   passes they share, the time estimate, save it as a preset, run it on many videos), built on
+   the planner (`plan()` already resolves dependencies and passes) rather than a free-form
+   graph editor. Presets double as CLI/MCP input (`--pipeline preset.json`).
 
 Ideas for later applications (2026-10-27, not scheduled):
 
@@ -272,9 +289,15 @@ several speakers, long silent stretches), not only the briefing / music video / 
 ## Open questions
 
 - Package scope: `videodoc` was free on npm on 2026-10-26 (alternative considered: framebase).
-- Track storage: sampled + interpolated, with `boxesAt(frame)` (built). Open: tracks are linked
-  from per-frame boxes by IoU only, so fast motion fragments them (music video: median track
-  13 frames); good enough for redaction and counting per frame, not yet for "who is this".
+- Track storage: sampled + interpolated, with `boxesAt(frame)` (built). Open: face tracks are
+  linked from per-frame boxes by IoU only, so fast motion fragments them (music video: median
+  track 13 frames); good enough for redaction and counting per frame, not yet for "who is
+  this". Plate tracks use predicted motion and gap bridging (`maxShift`, `maxGap` in
+  `linkTracks`); worth trying on faces too, measured against the hand labels.
+- Plates: the 640 px detector input misses plates under about 40 px wide in 1080p; native
+  tiles (as for faces) would help distant plates at a cost. Plates' adaptive sampling rarely
+  agrees across 8 frames in traffic (plates move fast), so it detects most frames: about real
+  time on a busy street. A motion-compensated agreement test would cut that.
 - Speech gating: Silero VAD finds no speech in sung vocals (music video: 0 spans), so the
   transcript is empty there. Needs a lyrics mode (lower threshold or no gating).
 - Sidecar format for embeddings: raw float16 + offsets, or a small Parquet/Arrow file.

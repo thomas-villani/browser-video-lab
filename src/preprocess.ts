@@ -12,7 +12,7 @@ const shader = (external: boolean) => /* wgsl */ `
 struct Params {
   dstW: u32, dstH: u32,
   contentW: u32, contentH: u32,
-  scale: f32, bgr: u32, _p0: u32, _p1: u32,
+  scale: f32, bgr: u32, pad: f32, _p1: u32,
   mean: vec4f, stdev: vec4f,
   crop: vec4f, // uv origin (xy) and size (zw) of the region to sample
 };
@@ -24,7 +24,7 @@ struct Params {
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) id: vec3u) {
   if (id.x >= p.dstW || id.y >= p.dstH) { return; }
-  var rgb = vec3f(0.0);
+  var rgb = vec3f(p.pad);
   if (id.x < p.contentW && id.y < p.contentH) {
     let uv = p.crop.xy + (vec2f(id.xy) + 0.5) / vec2f(f32(p.contentW), f32(p.contentH)) * p.crop.zw;
     rgb = ${external ? 'textureSampleBaseClampToEdge(src, samp, uv)' : 'textureSampleLevel(src, samp, uv, 0.0)'}.rgb;
@@ -51,6 +51,7 @@ function params(spec: ModelSpec, geo: InputGeometry): ArrayBuffer {
   u.set([geo.inW, geo.inH, geo.contentW, geo.contentH]);
   f[4] = spec.scale;
   u[5] = spec.bgr ? 1 : 0;
+  f[6] = spec.pad ?? 0;
   // Mean/std are in RGB order; the shader swaps to BGR after normalizing.
   f.set([...spec.mean, 0], 8);
   f.set([...spec.std, 1], 12);
@@ -141,7 +142,8 @@ export class CpuPreprocessor implements Preprocessor {
     const { scale, mean, std, bgr } = this.spec;
     const { inW: W, inH: H, crop } = geo;
     if (this.canvas.width !== W || this.canvas.height !== H) [this.canvas.width, this.canvas.height] = [W, H];
-    this.ctx.fillStyle = 'black';
+    const g = Math.round((this.spec.pad ?? 0) * 255);
+    this.ctx.fillStyle = `rgb(${g},${g},${g})`;
     this.ctx.fillRect(0, 0, W, H);
     this.ctx.drawImage(source, crop.x, crop.y, crop.w, crop.h, 0, 0, geo.contentW, geo.contentH);
     const px = this.ctx.getImageData(0, 0, W, H).data;

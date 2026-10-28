@@ -1,7 +1,7 @@
 // videodoc app (app.html): open a folder or drop videos, analyze them in this browser, read them
 // (the same Markdown view agents get, with a player beside it) and search across them. Nothing
 // is uploaded: analysis runs here on WebGPU, docs are saved next to the videos or kept in memory.
-// Faces can be reviewed over the player (review.ts) and blurred into a copy.
+// Faces and license plates can be reviewed over the player (review.ts) and blurred into a copy.
 import { formatLog, highlight, REDACT_DEFAULTS, redactionLog, search, toMarkdown, type LayerName } from '../doc/index.ts';
 import { analyze, frameImages } from '../analyze';
 import { redact } from '../redact';
@@ -61,13 +61,15 @@ let current: { e: Entry; ctl: AbortController } | undefined;
 function layersWanted(e?: Entry): LayerName[] {
   const layers: LayerName[] = ['speech', 'scenes', 'keyframes'];
   if ($<HTMLInputElement>('#opt-transcript').checked) layers.push('transcript');
-  // Redaction needs faces; a video analyzed before keeps the layers it has.
-  if ($<HTMLInputElement>('#opt-faces').checked || e?.redactTo || e?.reviewAfter || e?.doc?.layers.faces) layers.push('faces');
+  // Redaction needs faces and plates; a video analyzed before keeps the layers it has.
+  const redacting = e?.redactTo || e?.reviewAfter;
+  if ($<HTMLInputElement>('#opt-faces').checked || redacting || e?.doc?.layers.faces) layers.push('faces');
+  if ($<HTMLInputElement>('#opt-plates').checked || (redacting && (e?.plan?.options.cover ?? REDACT_DEFAULTS.cover).includes('plates')) || e?.doc?.layers.plates) layers.push('plates');
   return layers;
 }
 
 const timeFor = (seconds: number) =>
-  estimate(seconds, { transcript: $<HTMLInputElement>('#opt-transcript').checked, faces: $<HTMLInputElement>('#opt-faces').checked });
+  estimate(seconds, { transcript: $<HTMLInputElement>('#opt-transcript').checked, faces: $<HTMLInputElement>('#opt-faces').checked, plates: $<HTMLInputElement>('#opt-plates').checked });
 
 /** Queue every video not analyzed yet (or failed), saying what happens next. */
 function analyzeAll() {
@@ -94,7 +96,7 @@ async function runQueue() {
     const e = queue.shift()!;
     e.status = 'analyzing';
     e.progress = '';
-    e.steps = [...analysisSteps(layersWanted(e), new Set(Object.keys(e.doc?.layers ?? {}))), ...(e.redactTo ? ['Blurring faces'] : [])];
+    e.steps = [...analysisSteps(layersWanted(e), new Set(Object.keys(e.doc?.layers ?? {}))), ...(e.redactTo ? ['Blurring'] : [])];
     e.step = -1;
     renderList();
     if (state.selected === e && !e.doc) renderPending(e);
@@ -121,7 +123,7 @@ async function runQueue() {
         const more = queue.length ? ` ${queue.length} more to go.` : '';
         const said = e.doc.layers.transcript?.items.length;
         if (e.reviewAfter) {
-          if (state.selected !== e) toast(`Faces found in <b>${esc(e.name)}</b>.${more}`, { action: 'Review them', onAction: () => void openReview(e), ms: 0 });
+          if (state.selected !== e) toast(`Faces and plates found in <b>${esc(e.name)}</b>.${more}`, { action: 'Review them', onAction: () => void openReview(e), ms: 0 });
         } else toast(`<b>${esc(e.name)}</b> is ready to read${said ? ' and search' : said === 0 ? ' (no speech found, so nothing to search)' : ''}.${more}`, state.selected === e ? {} : { action: 'Open', onAction: () => void showEntry(e) });
       }
     } catch (err) {
@@ -144,9 +146,9 @@ async function runQueue() {
     renderList();
     if (state.selected === e && review.entry !== e) {
       await showEntry(e);
-      if (e.reviewAfter && e.doc?.layers.faces) await openReview(e);
+      if (e.reviewAfter && reviewable(e)) await openReview(e);
     }
-    if (e.doc?.layers.faces) e.reviewAfter = undefined;
+    if (reviewable(e)) e.reviewAfter = undefined;
     if (state.query) renderResults();
   }
   running = false;
@@ -166,16 +168,22 @@ function cancelJob(e: Entry) {
 
 // ---- redaction ----
 
-/** Ask where to save a redacted copy of e (from the click), then queue it: faces first if needed. */
+/** Whether e's doc has every layer its redaction covers (faces, and plates unless left out). */
+function reviewable(e: Entry) {
+  const cover = e.plan?.options.cover ?? REDACT_DEFAULTS.cover;
+  return !!e.doc?.layers.faces && (!cover.includes('plates') || !!e.doc.layers.plates);
+}
+
+/** Ask where to save a redacted copy of e (from the click), then queue it: faces and plates first if needed. */
 async function startRedact(e: Entry) {
   const to = await redactTarget(e);
   if (!to) return;
   e.redactTo = to;
   if (e.status === 'ready') e.status = 'new';
   enqueue(e);
-  const faces = e.doc?.layers.faces ? '' : ' Faces are found first, which takes a while.';
-  const kept = e.plan?.options.keep.length;
-  const what = kept ? `faces covered except the ${plural(kept, 'one')} you left visible` : 'every face covered';
+  const faces = reviewable(e) ? '' : ' Faces and plates are found first, which takes a while.';
+  const kept = (e.plan?.options.keep.length ?? 0) + (e.plan?.options.keepPlates.length ?? 0);
+  const what = kept ? `faces and plates covered except the ${plural(kept, 'one')} you left visible` : 'every face and plate covered';
   toast(`Making <b>${esc(to.name)}</b>: ${what}, sound kept.${faces} Progress shows in the list.`);
 }
 
@@ -204,7 +212,7 @@ async function redactEntry(e: Entry, onProgress: (p: { pass: string; stage: stri
   } else download(`${to.name}.redactions.json`, log, 'application/json');
   const where = e.dir ? ' next to the video' : '';
   const watch = to.file ? { action: 'Watch it', onAction: async () => playFile(await to.file!.getFile()) } : {};
-  toast(`Saved <b>${esc(to.name)}</b>${where}, with its redaction log. Detection misses some faces: watch it before you share it.`, { ms: 0, ...watch });
+  toast(`Saved <b>${esc(to.name)}</b>${where}, with its redaction log. Detection misses some faces and plates: watch it before you share it.`, { ms: 0, ...watch });
 }
 
 // ---- face review ----
@@ -224,14 +232,14 @@ const review = new Review({
 });
 let planTimer: ReturnType<typeof setTimeout> | undefined;
 
-/** Review the faces of e over the player; finds them first when the doc has none. */
+/** Review the faces and plates of e over the player; finds them first when the doc lacks them. */
 async function openReview(e: Entry) {
-  if (!e.doc?.layers.faces) {
-    if (state.gpu === false) return void toast('Finding faces needs WebGPU (Chrome or Edge).');
+  if (!reviewable(e)) {
+    if (state.gpu === false) return void toast('Finding faces and plates needs WebGPU (Chrome or Edge).');
     e.reviewAfter = true;
     e.status = 'new';
     enqueue(e);
-    toast(`Finding the faces in <b>${esc(e.name)}</b> first (about as long as the video, or longer for crowds). The review opens when they are found.`);
+    toast(`Finding the ${e.doc?.layers.faces ? 'plates' : 'faces and plates'} in <b>${esc(e.name)}</b> first (about as long as the video, or longer for crowds). The review opens when they are found.`);
     return;
   }
   for (const w of await loadPlan(e)) toast(esc(w), { ms: 0 });
@@ -362,8 +370,8 @@ async function showEntry(e: Entry, at?: number, marked: string[] = []) {
   const faces = !!e.doc?.layers.faces;
   $('#doc-actions').innerHTML = e.doc
     ? `<button id="copy-md">Copy Markdown</button><button id="dl-doc">Download doc</button>${ready ? '<button id="reanalyze" title="Compute the layers ticked above that are missing">Add layers</button>' : ''}${
-        ready && (faces || state.gpu !== false) ? `<button id="review-faces" title="See what gets blurred over the video; leave faces visible or cover missed ones">Review faces</button>` : ''}${
-        ready && state.gpu !== false ? `<button id="redact" title="Save a copy with the faces blurred (sound kept) and a redaction log${e.plan ? ', as reviewed' : ''}">Blur faces…</button>` : ''}`
+        ready && (faces || state.gpu !== false) ? `<button id="review-faces" title="See what gets blurred over the video; leave faces or plates visible, cover missed ones">Review faces and plates</button>` : ''}${
+        ready && state.gpu !== false ? `<button id="redact" title="Save a copy with faces and plates blurred (sound kept) and a redaction log${e.plan ? ', as reviewed' : ''}">Blur faces and plates…</button>` : ''}`
     : '';
   $('#tip').hidden = !e.doc || tipSeen();
   $('#read-status').textContent = '';
@@ -566,7 +574,7 @@ function wire() {
     await addEntries(await fromFiles(files));
   });
   // Time estimates depend on what is analyzed.
-  for (const id of ['#opt-transcript', '#opt-faces'])
+  for (const id of ['#opt-transcript', '#opt-faces', '#opt-plates'])
     $(id).addEventListener('change', () => {
       renderList();
       if (state.selected && !state.selected.doc && !state.query) renderPending(state.selected);

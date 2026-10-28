@@ -69,11 +69,13 @@ export interface Layers {
   scenes: Layer<SceneItem>;
   keyframes: Layer<KeyframeItem>;
   faces: Layer<Track>;
+  /** License plates, tracked like faces (ids are per layer). */
+  plates: Layer<Track>;
 }
 
 export type LayerName = keyof Layers;
 /** In dependency order. */
-export const LAYER_NAMES: LayerName[] = ['speech', 'transcript', 'scenes', 'keyframes', 'faces'];
+export const LAYER_NAMES: LayerName[] = ['speech', 'transcript', 'scenes', 'keyframes', 'faces', 'plates'];
 
 export interface VideoDoc {
   schema: typeof SCHEMA;

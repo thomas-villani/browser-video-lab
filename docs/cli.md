@@ -27,7 +27,7 @@ Computes layers into `<video>.videodoc.json`. Given a folder, analyzes every vid
 subfolders (`.mp4 .m4v .mov .mkv .webm`) one after another.
 
 - `--layers`: default `speech,transcript,scenes,keyframes`; available `speech, transcript,
-  scenes, keyframes, faces`. Dependencies are added (`keyframes` brings `scenes` and `speech`).
+  scenes, keyframes, faces, plates` (faces and plates share one decode). Dependencies are added (`keyframes` brings `scenes` and `speech`).
 - `--set`: override a setting, repeatable: `--set faces.every=4 --set transcript.language=de`.
   `videodoc layers` lists every setting with its default; unknown keys and wrong types are
   rejected with the list of valid ones.
@@ -83,12 +83,13 @@ transcript, so a caller can analyze them and search again.
 ## redact
 
 ```bash
-videodoc redact <video> [--out file.mp4] [--style blur|pixelate|fill] [--margin f] [--hold s] [--keep ids] [--no-plan] [--set ...] [--force]
+videodoc redact <video> [--out file.mp4] [--style blur|pixelate|fill] [--margin f] [--hold s] [--keep ids] [--keep-plates ids] [--cover faces,plates] [--no-plan] [--set ...] [--force]
 ```
 
-Writes a copy with every face covered (H.264 MP4, audio copied) and a redaction log next to it
-(`<out>.redactions.json`). Finds faces first if the doc has none (about real time on an
-integrated GPU, slower in crowds).
+Writes a copy with every face and license plate covered (H.264 MP4, audio copied) and a
+redaction log next to it (`<out>.redactions.json`). Finds faces and plates first if the doc
+lacks them (one decode; on an integrated GPU faces take about real time, slower in crowds, and
+plates up to about real time again in busy traffic).
 
 - `--out`: default `<name>.redacted.mp4` next to the video; must be `.mp4` and not the input.
   The file is written as `<out>.part` and renamed when complete.
@@ -97,12 +98,15 @@ integrated GPU, slower in crowds).
 - `--hold`: keep covering this many seconds before and after each face track, within its shot
   (default 0.3), for faces turning away or entering.
 - `--keep 3,7`: face track ids to leave visible (ids are in the log, the doc and the app).
+- `--keep-plates 2`: plate track ids to leave visible (a sign taken for a plate). Ids are per
+  layer: face 2 and plate 2 are different tracks.
+- `--cover faces`: cover faces only (default `faces,plates`).
 - A review saved by the app (`<video>.redact.json`) is used when present; options given here
   override it, `--no-plan` ignores it.
 
 stdout includes the output and log paths, the settings used, totals (tracks, kept, added by
-hand, frames with regions, regions, most per frame), and a caveat: detection misses some faces,
-so watch the output before release. See [redaction](redaction.md).
+hand, plate tracks, frames with regions, regions, most per frame), and a caveat: detection
+misses some faces and plates, so watch the output before release. See [redaction](redaction.md).
 
 ## info
 

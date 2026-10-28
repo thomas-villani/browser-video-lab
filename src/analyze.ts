@@ -1,17 +1,17 @@
 // Compute planned layers in the browser: one audio pass (speech, transcript) and one video
-// decode shared by every frame consumer (scenes, faces); keyframe images seek to selected frames
+// decode shared by every frame consumer (scenes, faces, plates); keyframe images seek to selected frames
 // only. Planning, merging and pure layers live in src/doc, so the same code serves the JS API
 // (analyze below) and the CLI (which plans in Node).
 import { CanvasSink } from 'mediabunny';
 import {
-  deriveLayers, fingerprint, newDoc, plan, VERSION, withLayers, linkTracks,
+  deriveLayers, fingerprint, newDoc, plan, VERSION, withLayers, linkTracks, DEFAULT_TRACKS,
   type Box, type Layer, type LayerName, type Layers, type Overrides, type PlannedLayer, type SpeechItem, type VideoDoc,
 } from './doc/index.ts';
 import { decodeAudio } from './runtime/audio';
 import { Detector } from './runtime/detector';
 import { sceneStream } from './runtime/scenes';
 import { openInput, probe, VideoSource, type MediaInput, type Probe } from './runtime/source';
-import { adaptiveStream } from './runtime/stream';
+import { multiStream, type Head } from './runtime/stream';
 import { Transcriber } from './runtime/transcribe';
 import { Vad } from './runtime/vad';
 import { groupSpans } from './transcript';
@@ -37,7 +37,7 @@ export interface Computed {
   adapter?: { vendor: string; architecture: string; description: string };
 }
 
-const MODEL_NAMES: Record<string, string> = { yunet: 'yunet_face_dyn (2023mar)' };
+const MODEL_NAMES: Record<string, string> = { yunet: 'yunet_face_dyn (2023mar)', 'yolo-plate': 'yolo-v9-t-640-license-plates (open-image-models)' };
 
 /** Compute every layer of `planned` with status 'compute'. Cached ones only supply configs. */
 export async function computeLayers(input: MediaInput, planned: PlannedLayer[], opts: ComputeOptions = {}): Promise<Computed> {
@@ -104,35 +104,48 @@ export async function computeLayers(input: MediaInput, planned: PlannedLayer[], 
     }
   }
 
-  if (want.has('scenes') || want.has('faces')) {
+  const tracked = (['faces', 'plates'] as const).filter((n) => want.has(n));
+  if (want.has('scenes') || tracked.length) {
     const t0 = performance.now();
     const source = await VideoSource.open(input);
     const threshold = cfg.get('scenes')!.config.threshold as number;
     const times: number[] = [];
     const scores: number[] = [];
-    const boxes: Box[][] = [];
+    const boxes: Box[][][] = tracked.map(() => []);
     const tick = (f: number) => {
       if (f % 30 === 0) {
         signal?.throwIfAborted();
-        onProgress?.({ pass: 'frames', stage: want.has('faces') ? 'scenes + faces' : 'scenes', done: f, total: info.frames });
+        onProgress?.({ pass: 'frames', stage: ['scenes', ...tracked].join(' + '), done: f, total: info.frames });
       }
     };
-    if (want.has('faces')) {
-      const c = want.get('faces')!.config as {
-        model: string; longSide: number; maxStride: number; minIou: number; minScore: number; refine: boolean; tile: string; every: number; trigger: number; small: number;
-      };
-      const [tileW, tileH] = c.tile.split('x').map(Number);
-      const detector = await Detector.create({ model: c.model, depth: 2, score: Math.min(c.minScore, c.refine ? c.trigger : 1) });
-      adapter = detector.adapter;
-      for await (const r of adaptiveStream(source, detector, {
-        maxStride: c.maxStride, minIou: c.minIou, minScore: c.minScore, cutThreshold: threshold,
-        detect: c.longSide ? { longSide: c.longSide } : undefined,
-        ingest: { maxSide: 1920 },
-        refine: c.refine ? { tileW, tileH, overlap: 32, trigger: c.trigger, grow: 0, every: c.every, small: c.small } : undefined,
-      })) {
+    if (tracked.length) {
+      const heads: Head[] = [];
+      for (const name of tracked) {
+        if (name === 'faces') {
+          const c = want.get('faces')!.config as {
+            model: string; longSide: number; maxStride: number; minIou: number; minScore: number; refine: boolean; tile: string; every: number; trigger: number; small: number;
+          };
+          const [tileW, tileH] = c.tile.split('x').map(Number);
+          heads.push({
+            detector: await Detector.create({ model: c.model, depth: 2, score: Math.min(c.minScore, c.refine ? c.trigger : 1) }),
+            maxStride: c.maxStride, minIou: c.minIou, minScore: c.minScore,
+            detect: c.longSide ? { longSide: c.longSide } : undefined,
+            refine: c.refine ? { tileW, tileH, overlap: 32, trigger: c.trigger, grow: 0, every: c.every, small: c.small } : undefined,
+          });
+        } else {
+          const c = want.get('plates')!.config as { model: string; maxStride: number; minIou: number; minScore: number; lowScore: number };
+          heads.push({
+            detector: await Detector.create({ model: c.model, depth: 2, score: Math.min(c.minScore, c.lowScore) }),
+            maxStride: c.maxStride, minIou: c.minIou, minScore: c.minScore, lowScore: c.lowScore,
+          });
+        }
+      }
+      adapter = heads[0].detector.adapter;
+      const maxStride = Math.max(...heads.map((h) => h.maxStride!));
+      for await (const r of multiStream(source, heads, { maxStride, cutThreshold: threshold, ingest: { maxSide: 1920 } })) {
         times.push(r.t);
         scores.push(r.sceneScore);
-        boxes.push(r.boxes);
+        r.heads.forEach((h, i) => boxes[i].push(h.boxes));
         tick(r.frame);
       }
     } else {
@@ -163,10 +176,12 @@ export async function computeLayers(input: MediaInput, planned: PlannedLayer[], 
       });
       layers.scenes = layer('scenes', n ? items : [], ms, 'webgpu', [[0, end]]);
     }
-    if (want.has('faces')) {
-      const model = want.get('faces')!.config.model as string;
-      layers.faces = layer('faces', linkTracks(boxes, cuts), ms, 'webgpu', [[0, end]], MODEL_NAMES[model] ?? model);
-    }
+    tracked.forEach((name, i) => {
+      const c = want.get(name)!.config;
+      const model = c.model as string;
+      const link = name === 'plates' ? { ...DEFAULT_TRACKS, maxShift: c.maxShift as number, maxGap: c.maxGap as number } : DEFAULT_TRACKS;
+      layers[name] = layer(name, linkTracks(boxes[i], cuts, link), ms, 'webgpu', [[0, end]], MODEL_NAMES[model] ?? model);
+    });
     // The decoded frame count is the truth when the container's packet count disagrees.
     info.frames = n;
   }

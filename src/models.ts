@@ -48,6 +48,8 @@ export interface ModelSpec {
   std: [number, number, number];
   /** Preserve aspect ratio with padding (true) or stretch to fill (false). */
   letterbox: boolean;
+  /** Padding value in [0,1] pixel units (gray 114/255 for YOLO); default 0. */
+  pad?: number;
   /** Returns boxes in source-frame pixels. `minScore` overrides the model's default threshold. */
   decode(outputs: Record<string, Float32Array>, geo: InputGeometry, minScore?: number): Detection[];
 }
@@ -134,7 +136,39 @@ export const yunetFace: ModelSpec = {
   },
 };
 
-const COCO: Record<number, string> = { 1: 'person', 2: 'bicycle', 3: 'car', 4: 'motorcycle', 6: 'bus', 8: 'truck' };
+/**
+ * YOLOv9-t license plates (open-image-models, `yolo-v9-t-640-license-plates-end2end`): NMS is
+ * inside the model, so the output is already the final list, rows of
+ * [batch, x1, y1, x2, y2, class, score] in input pixels. Trained on gray (114) padding.
+ */
+export const yoloPlate: ModelSpec = {
+  id: 'yolo-plate',
+  url: '/models/yolo_plate_t640.onnx',
+  inputName: 'images',
+  width: 640,
+  height: 640,
+  scale: 1,
+  bgr: false,
+  mean: [0, 0, 0],
+  std: [1, 1, 1],
+  letterbox: true,
+  pad: 114 / 255,
+  decode(out, geo, minScore) {
+    const threshold = minScore ?? 0.4;
+    const rows = out.output0;
+    const toSrc = geo.crop.w / geo.contentW;
+    const dets: Detection[] = [];
+    for (let i = 0; i + 7 <= rows.length; i += 7) {
+      const score = rows[i + 6];
+      if (score < threshold) continue;
+      const [x1, y1, x2, y2] = [rows[i + 1], rows[i + 2], rows[i + 3], rows[i + 4]];
+      dets.push({ x: geo.crop.x + x1 * toSrc, y: geo.crop.y + y1 * toSrc, w: (x2 - x1) * toSrc, h: (y2 - y1) * toSrc, score, label: 'plate' });
+    }
+    return dets;
+  },
+};
+
+const COCO: Record<number, string> ={ 1: 'person', 2: 'bicycle', 3: 'car', 4: 'motorcycle', 6: 'bus', 8: 'truck' };
 
 function rfdetr(id: string, file: string): ModelSpec {
   return {
@@ -179,6 +213,7 @@ function rfdetr(id: string, file: string): ModelSpec {
 
 export const MODELS: Record<string, ModelSpec> = {
   yunet: yunetFace,
+  'yolo-plate': yoloPlate,
   rfdetr: rfdetr('rfdetr', 'rfdetr_nano.onnx'),
   rfdetr16: rfdetr('rfdetr16', 'rfdetr_nano_fp16.onnx'),
 };

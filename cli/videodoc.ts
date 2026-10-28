@@ -29,11 +29,11 @@ Commands:
   search <query> <paths...>
                          Find where something is said: ranked transcript passages across videos
                          and folders, with times and the nearest keyframe (no browser; analyze first).
-  redact <video>         Blur every face: writes <name>.redacted.mp4 (audio copied) and a redaction
-                         log (<out>.redactions.json: every face track, which were kept visible).
-                         Analyzes faces first if needed. Uses <video>.redact.json when there (a review
-                         made in the app: kept faces, faces added by hand). Watch the output before
-                         release: detection misses some faces.
+  redact <video>         Blur every face and license plate: writes <name>.redacted.mp4 (audio copied)
+                         and a redaction log (<out>.redactions.json: every track, which were kept
+                         visible). Analyzes faces and plates first if needed. Uses <video>.redact.json
+                         when there (a review made in the app: kept tracks, regions added by hand).
+                         Watch the output before release: detection misses some faces and plates.
   info <video|doc>       Summarize a saved doc (no browser).
   layers                 Layers, their dependencies and settings with defaults (JSON).
 
@@ -60,9 +60,11 @@ redact options:
   --margin <f>           Grow each face box by this fraction on every side (default ${REDACT_DEFAULTS.margin}).
   --hold <s>             Keep covering this long before and after each face track (default ${REDACT_DEFAULTS.hold}).
   --keep <ids>           Face track ids to leave visible, e.g. 3,7 (ids are in the log and the doc).
-                         Style, margin, hold and keep given here override the review's.
+  --keep-plates <ids>    Plate track ids to leave visible (a sign taken for a plate; ids are per layer).
+  --cover <list>         What to cover: faces,plates (default) or faces.
+                         Options given here override the review's.
   --no-plan              Ignore <video>.redact.json.
-  --set, --force         As for analyze (face detection settings, e.g. --set faces.every=1).
+  --set, --force         As for analyze (detection settings, e.g. --set faces.every=1).
 
 search options:
   --top <n>              Hits to return (default 10).
@@ -94,6 +96,8 @@ const { values: a, positionals } = parseArgs({
     margin: { type: 'string' },
     hold: { type: 'string' },
     keep: { type: 'string' },
+    'keep-plates': { type: 'string' },
+    cover: { type: 'string' },
     port: { type: 'string', default: '4317' },
     'no-open': { type: 'boolean', default: false },
     'no-plan': { type: 'boolean', default: false },
@@ -202,7 +206,7 @@ async function main() {
       if (!Number.isFinite(n)) throw new UsageError(`--${what} takes a number, got '${v}'`);
       return n;
     };
-    return out(await redact(ctx, rest[0], { set: a.set, force: a.force, dryRun: a['dry-run'], out: a.out, style: a.style, margin: num(a.margin, 'margin'), hold: num(a.hold, 'hold'), keep: a.keep, plan: !a['no-plan'] }));
+    return out(await redact(ctx, rest[0], { set: a.set, force: a.force, dryRun: a['dry-run'], out: a.out, style: a.style, margin: num(a.margin, 'margin'), hold: num(a.hold, 'hold'), keep: a.keep, keepPlates: a['keep-plates'], cover: a.cover, plan: !a['no-plan'] }));
   }
   const size = Number(a['image-size']);
   if (!Number.isFinite(size)) throw new UsageError(`--image-size takes a number of pixels, got '${a['image-size']}'`);

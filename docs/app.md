@@ -26,7 +26,8 @@ kept (a cancelled blurred copy is not saved, and a file created for it is remove
 
 **What to analyze** (top right) chooses the layers for new analyses: speech, shots and keyframes
 always; the transcript (on by default; needed for search); faces (off by default; about doubles
-the time). **Add layers** on an analyzed video computes the ones ticked and missing.
+the time); license plates (off by default; found anyway when you review or blur). **Add layers**
+on an analyzed video computes the ones ticked and missing.
 
 ## Reading
 
@@ -42,25 +43,26 @@ video, the time, the passage with the words marked, and the nearest picture; cli
 the video at the moment the words are said. When nothing matches, the app suggests queries from
 the transcripts (names and places that come up).
 
-## Face review and redaction
+## Review and redaction
 
-**Review faces** (on a video with faces; on one without, it finds them first) turns the player
-into a review tool:
+**Review faces and plates** (on a video with both; on one without, it finds what is missing
+first) turns the player into a review tool:
 
-- Boxes over the video show what the copy will cover, with the blur previewed live. **Preview**
-  off shows the boxes only.
-- **Click a face** to leave it visible; click again to cover it.
-- **Drag a box** over a face the detector missed. Step forward and drag it again where the person
-  moved to, and the box follows. The selected face's bar has **Starts here**, **Ends here** and
+- Boxes over the video show what the copy will cover (plates in cyan), with the blur previewed
+  live. **Preview** off shows the boxes only.
+- **Click a box** to leave it visible (a face that may be shown, a sign taken for a plate); click
+  again to cover it.
+- **Drag a box** over anything the detector missed. Step forward and drag it again where it moved
+  to, and the box follows. The selected box's bar has **Starts here**, **Ends here** and
   **Delete**.
-- The panel lists the faces shot by shot, longest first, with thumbnails; click one to jump to it.
-  Crowded shots list 24 faces, then more on request.
+- The panel lists faces, then plates, shot by shot, longest first, with thumbnails; click one to
+  jump to it. Crowded shots list 24, then more on request.
 - **Cover with** picks blur, pixelate or solid boxes.
 - Keys: Space plays, ← → step a frame (Shift: 10), `[` `]` previous / next shot, Esc deselects,
-  Delete removes a hand-drawn face.
+  Delete removes a hand-drawn box.
 
 The review is saved next to the video as `<video>.redact.json` (folder mode) and used by
-**Blur faces…**, which makes the copy: next to the video in folder mode, else where you choose
+**Blur faces and plates…**, which makes the copy: next to the video in folder mode, else where you choose
 (or as a download), with its redaction log. When the copy was saved to a file, **Watch it** in the
 toast that follows plays it. See [redaction](redaction.md) for what is covered and the file formats.
 

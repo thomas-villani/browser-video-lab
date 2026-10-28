@@ -49,18 +49,19 @@ paragraphs of speech, silent stretches marked, keyframe images where they help. 
 summarize a 65-minute meeting, answer questions about it, or quote it with times, and follow up
 with `search` and a `from`/`to` window around a hit.
 
-**Blur faces before you share a video.** For public records requests, journalism, research
-footage or a neighborhood watch clip: `videodoc redact` writes a copy with every detected face
-blurred, pixelated or blacked out, sound kept, and a log of every face it covered. In the app,
-**Review faces** shows exactly what will be covered over the playing video; click a face to
-leave it visible (the official at the podium), drag a box over one the detector missed. Detection
-misses some faces (8.1% of hand-labeled faces on a crowded street), so a person reviews the
+**Blur faces and plates before you share a video.** For public records requests, journalism,
+research footage or a neighborhood watch clip: `videodoc redact` writes a copy with every
+detected face and license plate blurred, pixelated or blacked out, sound kept, and a log of
+everything it covered. In the app, **Review faces and plates** shows exactly what will be
+covered over the playing video; click a box to leave it visible (the official at the podium),
+drag a box over anything the detector missed. Detection misses some faces (8.1% of hand-labeled
+faces on a crowded street) and some plates (angled, blurred or distant), so a person reviews the
 result; the tools say so.
 
 **Skim a long recording.** The reading view puts the transcript beside the player with a frame
 for each shot and each silent gap, so a two-hour recording becomes a page you can scroll.
 
-On the roadmap: license plates and spoken names in redaction, captions for keyframes from a
+On the roadmap: spoken names and chosen words (profanity) in redaction, captions for keyframes from a
 small vision model, audio-only files (podcasts, lectures), and transcript-driven editing
 (finding the "um"s and long pauses in a podcast or YouTube video and cutting them).
 
@@ -106,7 +107,7 @@ From the command line:
 npm run videodoc -- analyze videos/                          # transcribe and index every video in a folder
 npm run videodoc -- search "sidewalk contract" videos/       # where was it said? (no GPU, instant)
 npm run videodoc -- markdown videos/council.mp4 --from 14:00 --to 20:00   # read that stretch
-npm run videodoc -- redact videos/bodycam.mp4                # every face blurred -> bodycam.redacted.mp4
+npm run videodoc -- redact videos/bodycam.mp4                # faces and plates blurred -> bodycam.redacted.mp4
 ```
 
 For an agent (Claude Code shown; any MCP client works):
@@ -126,11 +127,12 @@ video file ──► WebCodecs decode ──► WebGPU ────────�
                 the app, or a        Whisper      transcript           ├─► markdown   read it
                 headless Edge or     scene score  scenes               ├─► search     find it
                 Chrome driven by     YuNet        faces                ├─► redact     blur it
-                the CLI)             (derived)    keyframes            └─► your code
+                the CLI)             YOLOv9-t     plates               └─► your code
+                                     (derived)    keyframes
 ```
 
 - Audio is decoded once for speech and transcript; video is decoded once for every frame
-  consumer (shots and faces share a pass). Keyframe images seek to the chosen frames only.
+  consumer (shots, faces and plates share a pass). Keyframe images seek to the chosen frames only.
 - A planner works out which layers a request needs and which are already in the doc with the
   same settings, so repeating a request costs nothing and changing one setting recomputes only
   what depends on it.
@@ -144,7 +146,7 @@ search ~25 ms; Markdown of an analyzed video ~0.5 s. Details are in [NOTES.md](N
 ## Documentation
 
 - [Getting started](docs/getting-started.md): install, models, the first video
-- [The app](docs/app.md): folders, analysis, reading, search, face review
+- [The app](docs/app.md): folders, analysis, reading, search, face and plate review
 - [CLI](docs/cli.md): every command and option, output, exit codes
 - [MCP server](docs/mcp.md): tools for agents, setup, behavior
 - [The VideoDoc format](docs/format.md): layers, settings, caching, files next to a video
@@ -163,7 +165,8 @@ measurement and what it taught), [HANDOFF.md](HANDOFF.md) (current state for con
   matching is planned. English is the default language (`--set transcript.language=...`).
 - Speech detection finds no speech in sung vocals, so music has an empty transcript.
 - Face detection misses some faces, especially small, turned or occluded ones; face tracks are
-  for covering and counting, not yet for telling who is who.
+  for covering and counting, not yet for telling who is who. Plate detection misses angled,
+  blurred and distant plates.
 - No captions of what is on screen yet; the Markdown view shows the keyframes instead.
 
 ## License

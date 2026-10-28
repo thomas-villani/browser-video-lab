@@ -377,7 +377,7 @@ Every tool here should be as usable by agents as by humans:
       frame — 50.8% → 8.0% misses at 30 fps on the walk.
 - [ ] Batch a frame's tiles into one detector call (dynamic batch dim or a tile mosaic).
 - [~] Library shape: see DESIGN.md (VideoDoc, planner, modules, CLI + MCP). Step 1 (doc + planner + CLI `analyze`/`check`) done 2026-10-26; step 2 keyframes + markdown done 2026-10-27; next: captions.
-- [ ] Plate model (YuNet LPD, prior-box decoding).
+- [x] Plate model: YOLOv9-t (open-image-models) over LPD-YuNet; `plates` layer, redaction and review (2026-10-28).
 - [ ] Run the bench in a Worker (OffscreenCanvas) to keep the UI thread free.
 - [ ] Re-test on a discrete GPU, a phone, and Firefox/Safari.
 
@@ -651,3 +651,66 @@ transcript, hits marked as on-screen text.
 To check first: detector recall on small text at 768 px keyframes (may need the full-resolution
 frame, which the seek pass can provide); recognition on stylized slide fonts; Florence-2 speed
 and memory alongside Whisper in one page.
+
+## License plates: choosing a detector (2026-10-28)
+
+Python reference runs (ONNX Runtime CPU, one thread pool, same frames, scripts not kept) on
+three clips: the night bodycam (106 frames, no readable plates), a 70mai rear dashcam in
+Bangalore (30 frames every 2 s, plates mostly pre-masked by the uploader), and a US LPR camera
+demo with a parking-lot camera and an NVR screen (56 frames every 6 s, Oklahoma plates, many
+tiny plates in thumbnails). Hits were checked by eye on contact sheets.
+
+| Model | Size | Input | CPU ms/frame | Real plates found | False hits |
+|---|---|---|---|---|---|
+| LPD-YuNet 2023mar (OpenCV zoo), dynamic, 1920 long side, score ≥ 0.85 | 0.4 MB | any ×64 | ~850 | most large ones; missed several plates YOLO found (e.g. the dashcam motorcycle plates) | constant: giant quads (several hundred px to wider than the frame) on most frames, vest patches, police lettering, shop signs, slide titles |
+| YOLOv9-t-640 (open-image-models, end-to-end NMS), score ≥ 0.4 | 7.8 MB | 640² letterbox | ~180 | everything YuNet found that was a plate, plus more (motorcycles, small thumbnails down to ~40×30 px) | none seen on any of the three clips |
+| YOLOv9-s-608, score ≥ 0.4 | 28.6 MB | 608² | ~600 | a few more thumbnail plates than t-640 | one (a hardware photo on a title card) |
+
+Findings:
+
+1. **LPD-YuNet is not usable as is.** Trained on CCPD (Chinese parking-lot plates), it treats
+   any plate-shaped text as a plate and produces huge low-quality quads; a size filter would
+   remove the giants but not the text hits or the misses.
+2. **YOLOv9-t-640 wins:** higher recall, no false hits seen, 4-5x faster on CPU, and a plain
+   conv net (Conv/Sigmoid/Concat plus one NonMaxSuppression at the end) that ORT Web runs.
+   Input RGB 0-1, 640×640 letterbox (pad 114); output `[n, 7]` = batch, x1, y1, x2, y2, class,
+   score, already NMSed.
+3. Both still miss plates (angled, motion-blurred, small in the distance), so plates need the
+   same treatment as faces: dense enough sampling, tracking with hold, and the review UI to add
+   what the detector missed.
+4. **License:** open-image-models is MIT and the weights are published under that repo's
+   releases with no separate terms. They were trained with the YOLOv9 codebase (GPL-3.0); the
+   training data is not documented. Worth a note in docs; not a blocker for local use.
+5. Not yet measured: plates in real US driving footage (the NYC drive download stalled), and
+   the model's speed on WebGPU in the browser.
+
+## License plates: the plates layer in the browser (2026-10-28)
+
+Iris Xe, Edge headless, AC, "Best performance" overlay. `videodoc analyze --layers plates`
+(YOLOv9-t-640, maxStride 8, minScore 0.4):
+
+| Clip | Frames | Plates pass | Tracks | Median track | Note |
+|---|---|---|---|---|---|
+| Dashcam, Bangalore, 1:00, busy traffic | 1,801 | 59 s (1.0x real time) | 92 | 6 frames | plates alone, scenes cached |
+| Same, faces + plates in one decode | 1,801 | 88 s | 720 faces, 92 plates | | faces alone: 36 s, identical tracks |
+| LPR camera demo, 5:39, parking lot + NVR screens | 10,156 | 129 s (2.6x faster than real time) | 46 | 50 frames | |
+
+Findings:
+
+1. **IoU linking shattered plate tracks.** First run: 499 tracks, median 1 frame, though the
+   single-frame tracks were nearly all real plates. A passing car's plate (45 px wide) moves
+   25-35 px per frame, so consecutive boxes overlap with IoU under 0.2. Hysteresis
+   (`lowScore` 0.2) and bridging 6 missed frames gave 363 tracks (median still 1); linking by
+   distance from the velocity-predicted box (`maxShift` 1 plate size) gave **92 tracks, median
+   6, 34 single-frame** (close motorcycles jumping around, a few boxes at the frame edge).
+   The redaction hold (0.3 s) covers each sighting either way.
+2. **Two ORT WebGPU sessions running at once hang.** Faces + plates never left frame 0 until
+   `session.run` was serialized across all detectors (it had been per detector). Cost: the
+   heads' runs no longer overlap, so faces + plates (88 s) is about faces (36 s) + plates (53 s).
+3. **Plates sampling is dense in traffic**: plates move too far in 8 frames for the endpoint
+   test (minIou 0.2) to agree, so bisection goes down to most frames there. On calm footage
+   (parking lot) it stays sparse: 2.6x faster than real time.
+4. Our letterbox (top-left, gray 114 padding) scores like the training letterbox (centered):
+   same plates found on 86 frames, scores within a few hundredths.
+5. Redacting the dashcam clip: 720 face + 92 plate tracks on 1,544 of 1,801 frames, 39 s
+   (46 fps); plates visibly blurred in sampled output frames.

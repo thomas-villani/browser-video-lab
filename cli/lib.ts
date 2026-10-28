@@ -10,8 +10,8 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { fileURLToPath } from 'node:url';
 import {
   deriveLayers, docPathFor, fingerprint, fmtTime, formatDoc, formatLog, LAYER_NAMES, newDoc, parseDoc, parseKeep, parseSettings, plan, PRODUCERS,
-  parsePlan, planPathFor, REDACT_DEFAULTS, REDACT_STYLES, redactionLog, search as searchDocs, summarize, toMarkdown, withLayers,
-  type KeyframeItem, type Layers, type Plan, type RedactOptions as RedactSettings, type RedactStyle, type Track, type VideoDoc,
+  parsePlan, planPathFor, REDACT_DEFAULTS, REDACT_KINDS, REDACT_STYLES, redactionLog, search as searchDocs, summarize, toMarkdown, withLayers,
+  type KeyframeItem, type Layers, type Plan, type RedactKind, type RedactOptions as RedactSettings, type RedactStyle, type Track, type VideoDoc,
 } from '../src/doc/index.ts';
 
 export const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -225,6 +225,8 @@ function videoPath(ctx: Context, arg: string) {
   return video;
 }
 
+const PLATE_MODEL_URL = 'https://github.com/ankandrew/open-image-models/releases/download/assets/yolo-v9-t-640-license-plates-end2end.onnx';
+
 /** Model files each layer needs (dev layout: public/models), with how to get them. */
 function missingModels(p: Plan): string[] {
   const need: [string, string][] = [];
@@ -232,6 +234,7 @@ function missingModels(p: Plan): string[] {
     if (l.status !== 'compute') continue;
     if (l.name === 'speech') need.push(['public/models/silero_vad.onnx', 'see README (Silero VAD v5)']);
     if (l.name === 'faces') need.push([`public/models/yunet_face_dyn.onnx`, 'see README (YuNet, dynamic shape)']);
+    if (l.name === 'plates') need.push(['public/models/yolo_plate_t640.onnx', `curl -L -o public/models/yolo_plate_t640.onnx ${PLATE_MODEL_URL}`]);
     if (l.name === 'transcript') {
       const { model, encoder, decoder } = l.config as Record<string, string>;
       const suffix = (d: string) => (d === 'fp32' ? '' : d === 'q8' ? '_quantized' : `_${d}`);
@@ -456,8 +459,12 @@ export interface RedactOptions extends Omit<AnalyzeOptions, 'layers' | 'doc'> {
   style?: string;
   margin?: number;
   hold?: number;
-  /** Track ids to leave visible: "3,7" or [3, 7]. Replaces the review plan's. */
+  /** Face track ids to leave visible: "3,7" or [3, 7]. Replaces the review plan's. */
   keep?: string | number[];
+  /** Plate track ids to leave visible, likewise. */
+  keepPlates?: string | number[];
+  /** Layers to cover: "faces,plates" (default) or "faces". */
+  cover?: string | string[];
   /** false: ignore <video>.redact.json (the app's review). */
   plan?: boolean;
 }
@@ -472,12 +479,17 @@ export function redactSettings(o: RedactOptions, base: RedactSettings = REDACT_D
     return n;
   };
   let keep: number[];
+  let keepPlates: number[];
   try {
     keep = o.keep === undefined ? base.keep : parseKeep(o.keep);
+    keepPlates = o.keepPlates === undefined ? base.keepPlates : parseKeep(o.keepPlates);
   } catch (e) {
     throw new UsageError((e as Error).message);
   }
-  return { style, margin: num(o.margin, base.margin, 'margin', 2), hold: num(o.hold, base.hold, 'hold', 10), keep };
+  const cover = o.cover === undefined ? base.cover : (Array.isArray(o.cover) ? o.cover : o.cover.split(',')).map((k) => k.trim());
+  const bad = cover.find((k) => !REDACT_KINDS.includes(k as RedactKind));
+  if (bad !== undefined || !cover.includes('faces')) throw new UsageError(`cover takes faces or faces,plates, got '${cover.join(',')}'`);
+  return { style, margin: num(o.margin, base.margin, 'margin', 2), hold: num(o.hold, base.hold, 'hold', 10), keep, keepPlates, cover: cover as RedactKind[] };
 }
 
 /**
@@ -492,12 +504,22 @@ export async function redact(ctx: Context, videoArg: string, o: RedactOptions = 
   const out = o.out ? userPath(ctx, o.out) : join(dirname(video), `${basename(video).replace(/\.[^.]+$/, '')}.redacted.mp4`);
   if (resolve(out) === resolve(video)) throw new UsageError('the output would overwrite the video; pass another --out');
   if (!/\.mp4$/i.test(out)) throw new UsageError(`the output is MP4; name it .mp4, got ${out}`);
-  const r = await ensure(ctx, video, docPathFor(video), ['faces'], o);
-  if ('dryRun' in r) return r.dryRun;
+  // The review's cover applies only when no --cover is given, so read it before deciding layers.
   const planPath = planPathFor(video);
+  const usePlan = o.plan !== false && existsSync(planPath);
+  let cover = settings.cover;
+  if (o.cover === undefined && usePlan) {
+    try {
+      const c = (JSON.parse(readFileSync(planPath, 'utf8')) as { options?: { cover?: RedactKind[] } }).options?.cover;
+      if (Array.isArray(c)) cover = c.filter((k) => REDACT_KINDS.includes(k));
+    } catch {
+      // parsePlan below reports it.
+    }
+  }
+  const r = await ensure(ctx, video, docPathFor(video), cover.includes('plates') ? ['faces', 'plates'] : ['faces'], o);
+  if ('dryRun' in r) return r.dryRun;
   let added: Track[] = [];
   const warnings: string[] = [];
-  const usePlan = o.plan !== false && existsSync(planPath);
   if (usePlan) {
     let p: ReturnType<typeof parsePlan>;
     try {
@@ -511,14 +533,17 @@ export async function redact(ctx: Context, videoArg: string, o: RedactOptions = 
     ctx.report.log(`review: ${planPath}`);
     for (const w of p.warnings) ctx.report.log(`  warning: ${w}`);
   }
-  const t = redactionLog(r.doc, settings, undefined, added).totals;
-  ctx.report.log(`redacting ${t.redacted} face tracks${t.added ? ` (${t.added} added by hand)` : ''}${t.kept ? `, keeping ${t.kept} visible,` : ''} on ${t.framesWithRegions} of ${r.doc.source.frames} frames (${settings.style})`);
+  const pre = redactionLog(r.doc, settings, undefined, added);
+  const t = pre.totals;
+  const n = (k: RedactKind) => pre.tracks.filter((x) => x.layer === k && !x.kept).length;
+  const what = `${n('faces')} face${pre.detectors.plates ? ` and ${n('plates')} plate` : ''} tracks`;
+  ctx.report.log(`redacting ${what}${t.added ? ` (${t.added} added by hand)` : ''}${t.kept ? `, keeping ${t.kept} visible,` : ''} on ${t.framesWithRegions} of ${r.doc.source.frames} frames (${settings.style})`);
   const part = `${out}.part`;
   writeFileSync(part, '');
   let result: { frames: number; ms: number };
   try {
     // The page gets the doc without the layers it does not need (a transcript can be large).
-    const doc = { ...r.doc, layers: { faces: r.doc.layers.faces, scenes: r.doc.layers.scenes } };
+    const doc = { ...r.doc, layers: { faces: r.doc.layers.faces, plates: r.doc.layers.plates, scenes: r.doc.layers.scenes } };
     result = await ctx.browser.run(
       { video, out: part },
       (page, base) =>
@@ -535,7 +560,7 @@ export async function redact(ctx: Context, videoArg: string, o: RedactOptions = 
   }
   if (result.frames !== r.doc.source.frames) {
     rmSync(part, { force: true });
-    throw new Error(`decoded ${result.frames} frames but the faces layer has ${r.doc.source.frames}; the regions would not line up (re-analyze with --force)`);
+    throw new Error(`decoded ${result.frames} frames but the doc has ${r.doc.source.frames}; the regions would not line up (re-analyze with --force)`);
   }
   renameSync(part, out);
   const log = redactionLog(r.doc, settings, { name: basename(out), frames: result.frames, ms: result.ms }, added);
@@ -632,13 +657,14 @@ export function layers() {
 export async function check(ctx: Context, browserName: string) {
   const problems: string[] = [];
   const models = Object.fromEntries(
-    ['yunet_face_dyn.onnx', 'silero_vad.onnx', ...['whisper-base', 'whisper-small'].map((m) => `onnx-community/${m}`)].map((m) => [m, existsSync(join(ROOT, 'public/models', m))]),
+    ['yunet_face_dyn.onnx', 'silero_vad.onnx', 'yolo_plate_t640.onnx', ...['whisper-base', 'whisper-small'].map((m) => `onnx-community/${m}`)].map((m) => [m, existsSync(join(ROOT, 'public/models', m))]),
   );
   const env: Awaited<ReturnType<Window['videodoc']['check']>> = await ctx.browser.run({}, (page) => page.evaluate(() => window.videodoc.check()), undefined, ctx.signal);
   if (!env.webgpu) problems.push('no WebGPU adapter: faces and scenes need it (try --browser chrome, or update GPU drivers)');
   if (!env.crossOriginIsolated) problems.push('page is not cross-origin isolated: wasm runs single-threaded');
   if (!env.decode.h264) problems.push('no H.264 decoder in this browser');
-  // whisper-small is optional (--set transcript.model=...): listed, never a problem.
+  // whisper-small is optional (--set transcript.model=...): listed, never a problem. The plate
+  // model is required: redaction covers plates by default.
   for (const [m, ok] of Object.entries(models)) if (!ok && !m.endsWith('whisper-small')) problems.push(`model not found: public/models/${m}`);
   const gpu = env.webgpu ? `${env.webgpu.vendor} ${env.webgpu.architecture}${env.webgpu.description ? ` (${env.webgpu.description})` : ''}` : 'none';
   ctx.report.log(`browser   ${browserName}: ${env.userAgent.match(/(Edg|Chrome)\/[\d.]+/g)?.join(' ') ?? env.userAgent}`);

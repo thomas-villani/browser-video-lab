@@ -28,6 +28,7 @@ npm install            # also copies ONNX Runtime's wasm files into public/ort
 | `public/models/silero_vad.onnx` | speech detection | github.com/snakers4/silero-vad (`src/silero_vad/data/silero_vad.onnx`) | MIT |
 | `public/models/onnx-community/whisper-base/` | transcript | `node scripts/fetch-model.mjs onnx-community/whisper-base encoder_model decoder_model_merged_q4` | Apache-2.0 (OpenAI Whisper: MIT) |
 | `public/models/yunet_face_dyn.onnx` | faces | huggingface.co/opencv/face_detection_yunet (`face_detection_yunet_2023mar.onnx`), then the step below | MIT |
+| `public/models/yolo_plate_t640.onnx` | license plates (redaction) | `curl -L -o public/models/yolo_plate_t640.onnx https://github.com/ankandrew/open-image-models/releases/download/assets/yolo-v9-t-640-license-plates-end2end.onnx` | MIT (open-image-models; trained with the GPL-3.0 YOLOv9 code, training data not documented) |
 
 YuNet ships with a fixed 640x640 input. Relax it so it runs at any multiple of 32 (outputs are
 identical at 640x640; 16:9 frames then run at 640x384, and small crops for crowds work):
@@ -88,9 +89,9 @@ the CLI and the MCP server share it:
 |---|---|---|
 | `<video>.videodoc.json` | analyze (all surfaces) | the doc: every layer, its settings and provenance ([format](format.md)) |
 | `<video>.keyframes/<frame>.jpg` | markdown `--images`, the app | keyframe images, named by frame number; delete the folder to re-extract at another size |
-| `<video>.redact.json` | the app's face review | which faces to leave visible, faces added by hand, the cover style ([redaction](redaction.md)) |
+| `<video>.redact.json` | the app's review | which faces and plates to leave visible, regions added by hand, the cover style ([redaction](redaction.md)) |
 | `<name>.redacted.mp4` | redact | the redacted copy |
-| `<name>.redacted.mp4.redactions.json` | redact | the redaction log: settings, totals, every face covered |
+| `<name>.redacted.mp4.redactions.json` | redact | the redaction log: settings, totals, every face and plate covered |
 
 Deleting any of them is safe: they are recomputed when needed.
 

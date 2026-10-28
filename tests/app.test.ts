@@ -40,7 +40,9 @@ test('guidance: estimates, analysis steps, search suggestions', () => {
   assert.deepEqual(analysisSteps(['speech', 'scenes', 'keyframes', 'transcript'], new Set()), ['Listening', 'Transcribing', 'Finding shots']);
   // Adding faces to an analyzed video: only the frames pass runs.
   const steps = analysisSteps(['speech', 'scenes', 'keyframes', 'transcript', 'faces'], new Set(['speech', 'transcript', 'scenes', 'keyframes']));
-  assert.deepEqual(steps, ['Shots and faces']);
+  assert.deepEqual(steps, ['Finding faces']);
+  assert.deepEqual(analysisSteps(['scenes', 'faces', 'plates'], new Set(['scenes', 'faces'])), ['Finding plates']);
+  assert.equal(stepOf({ pass: 'frames', stage: 'scenes + plates' }, ['Finding plates', 'Blurring']), 0);
   const full = ['Listening', 'Transcribing', 'Finding shots'];
   assert.equal(stepOf({ pass: 'probe', stage: 'reading container' }, full), -1);
   assert.equal(stepOf({ pass: 'audio', stage: 'voice activity' }, full), 0);

@@ -1,5 +1,5 @@
-// Redaction, the pure half: which regions to cover on each frame (from the faces layer and faces
-// added by hand), the review plan a person saves (<video>.redact.json) and the redaction log
+// Redaction, the pure half: which regions to cover on each frame (from the faces and plates layers
+// and regions added by hand), the review plan a person saves (<video>.redact.json) and the redaction log
 // written next to the output. The browser half (src/redact.ts) decodes, draws over these
 // regions and encodes. Node computes the log without decoding anything.
 import type { Box, Track, VideoDoc } from './schema.ts';
@@ -7,6 +7,9 @@ import { trackBox } from './tracks.ts';
 
 export type RedactStyle = 'blur' | 'pixelate' | 'fill';
 export const REDACT_STYLES: RedactStyle[] = ['blur', 'pixelate', 'fill'];
+/** Layers of tracks that redaction covers. */
+export type RedactKind = 'faces' | 'plates';
+export const REDACT_KINDS: RedactKind[] = ['faces', 'plates'];
 
 export interface RedactOptions {
   /** blur: strong Gaussian blur; pixelate: coarse blocks; fill: solid color (nothing left to undo). */
@@ -16,13 +19,21 @@ export interface RedactOptions {
   /** Keep covering this many seconds before a track starts and after it ends: faces turning,
    *  entering or leaving are where the detector loses them for a few frames. */
   hold: number;
-  /** Track ids to leave visible (e.g. a public official, after review). */
+  /** Face track ids to leave visible (e.g. a public official, after review). */
   keep: number[];
+  /** Plate track ids to leave visible (a sign the detector took for a plate, a plate meant to be seen). */
+  keepPlates: number[];
+  /** Which layers to cover, each when the doc has it (faces is required). */
+  cover: RedactKind[];
 }
 
-export const REDACT_DEFAULTS: RedactOptions = { style: 'blur', margin: 0.15, hold: 0.3, keep: [] };
+export const REDACT_DEFAULTS: RedactOptions = { style: 'blur', margin: 0.15, hold: 0.3, keep: [], keepPlates: [], cover: ['faces', 'plates'] };
 
-export interface CursorOptions extends Omit<RedactOptions, 'style' | 'hold'> {
+/** A track to cover and the layer it comes from (hand-drawn tracks count as faces). */
+export interface CoverTrack { track: Track; kind: RedactKind }
+
+export interface CursorOptions {
+  margin: number;
   /** `hold` in frames. */
   holdFrames: number;
   /** First frames of shots (after the first): a hold never crosses a cut. */
@@ -31,9 +42,9 @@ export interface CursorOptions extends Omit<RedactOptions, 'style' | 'hold'> {
   height: number;
 }
 
-/** A region to cover on one frame: the track it comes from (negative ids: added by hand), its
- *  box grown by the margin, and whether the track is only held there (before or after it). */
-export interface Region { id: number; box: Box; held: boolean }
+/** A region to cover on one frame: the track it comes from (negative ids: added by hand) and its
+ *  layer, its box grown by the margin, and whether the track is only held there (before or after it). */
+export interface Region { id: number; kind: RedactKind; box: Box; held: boolean }
 
 /**
  * The regions to cover, frame by frame. Built for frames in increasing order (decode order):
@@ -41,16 +52,16 @@ export interface Region { id: number; box: Box; held: boolean }
  * crowded street has 25k tracks). Going back (a seek in the review UI) restarts the sweep.
  */
 export class RedactionCursor {
-  private order: Track[];
+  private order: CoverTrack[];
   private next = 0;
-  private active: Track[] = [];
+  private active: CoverTrack[] = [];
   private last = -1;
   private o: CursorOptions;
 
-  constructor(tracks: Track[], o: CursorOptions) {
+  /** Every track given is covered (cursorFor leaves kept ones out); plain tracks are faces. */
+  constructor(tracks: (Track | CoverTrack)[], o: CursorOptions) {
     this.o = o;
-    const keep = new Set(o.keep);
-    this.order = tracks.filter((t) => !keep.has(t.id)).sort((a, b) => a.f0 - b.f0);
+    this.order = tracks.map((t) => ('track' in t ? t : { track: t, kind: 'faces' as const })).sort((a, b) => a.track.f0 - b.track.f0);
   }
 
   at(frame: number): Box[] {
@@ -64,20 +75,20 @@ export class RedactionCursor {
     }
     this.last = frame;
     const h = this.o.holdFrames;
-    while (this.next < this.order.length && this.order[this.next].f0 - h <= frame) this.active.push(this.order[this.next++]);
-    this.active = this.active.filter((t) => t.f1 + h >= frame);
+    while (this.next < this.order.length && this.order[this.next].track.f0 - h <= frame) this.active.push(this.order[this.next++]);
+    this.active = this.active.filter((c) => c.track.f1 + h >= frame);
     const live: Region[] = [];
     const held: Region[] = [];
-    for (const t of this.active) {
+    for (const { track: t, kind } of this.active) {
       if (t.f0 - h > frame) continue;
       const isLive = frame >= t.f0 && frame <= t.f1;
       if (!isLive && this.shot(frame) !== this.shot(t.f0)) continue;
       // Held frames reuse the track's first or last box.
-      (isLive ? live : held).push({ id: t.id, box: trackBox(t, Math.min(Math.max(frame, t.f0), t.f1))!, held: !isLive });
+      (isLive ? live : held).push({ id: t.id, kind, box: trackBox(t, Math.min(Math.max(frame, t.f0), t.f1))!, held: !isLive });
     }
-    // A held box over a live one is the same face picked up by a new track (tracks fragment
-    // under motion): it is covered already.
-    const extra = held.filter((b) => !live.some((l) => overlap(b.box, l.box) > 0.3));
+    // A held box over a live one of its kind is the same face (or plate) picked up by a new
+    // track (tracks fragment under motion): it is covered already.
+    const extra = held.filter((b) => !live.some((l) => l.kind === b.kind && overlap(b.box, l.box) > 0.3));
     const out: Region[] = [];
     for (const r of [...live, ...extra]) {
       const g = this.grow(r.box);
@@ -116,13 +127,27 @@ function overlap(a: Box, b: Box): number {
   return w > 0 && h > 0 ? (w * h) / Math.min(a[2] * a[3], b[2] * b[3]) : 0;
 }
 
-/** The cursor for `doc`'s faces plus faces `added` by hand (a plan's). */
+/** The layers `o` covers that `doc` has (faces is required). */
+export function covered(doc: VideoDoc, o: Pick<RedactOptions, 'cover'>): RedactKind[] {
+  if (!doc.layers.faces) throw new Error('the doc has no faces layer');
+  return REDACT_KINDS.filter((k) => o.cover.includes(k) && doc.layers[k]);
+}
+
+/** The tracks to cover: the covered layers' tracks less the kept ones, plus tracks `added` by hand. */
+export function coverTracks(doc: VideoDoc, o: RedactOptions, added: Track[] = []): CoverTrack[] {
+  const out: CoverTrack[] = [];
+  for (const kind of covered(doc, o)) {
+    const keep = new Set(kind === 'faces' ? o.keep : o.keepPlates);
+    for (const track of doc.layers[kind]!.items) if (!keep.has(track.id)) out.push({ track, kind });
+  }
+  for (const track of added) out.push({ track, kind: 'faces' });
+  return out;
+}
+
+/** The cursor for `doc`'s covered layers plus regions `added` by hand (a plan's). */
 export function cursorFor(doc: VideoDoc, o: RedactOptions, added: Track[] = []): RedactionCursor {
-  const faces = doc.layers.faces;
-  if (!faces) throw new Error('the doc has no faces layer');
-  return new RedactionCursor([...faces.items, ...added], {
+  return new RedactionCursor(coverTracks(doc, o, added), {
     margin: o.margin,
-    keep: o.keep,
     holdFrames: Math.round(o.hold * doc.source.fps),
     cuts: (doc.layers.scenes?.items ?? []).slice(1).map((s) => s.f0),
     width: doc.source.width,
@@ -134,25 +159,27 @@ export interface RedactionLog {
   schema: 'videodoc-redactions/0';
   source: { name: string; fingerprint: string; frames: number; fps: number; width: number; height: number };
   output?: { name: string; frames: number; ms: number };
-  /** Where the regions came from: the faces layer's producer. */
-  detector: { model?: string; configHash: string; device: string; createdAt: string };
+  /** Where the regions came from: each covered layer's producer. */
+  detectors: Partial<Record<RedactKind, { model?: string; configHash: string; device: string; createdAt: string }>>;
   options: RedactOptions;
-  totals: { tracks: number; redacted: number; kept: number; added: number; framesWithRegions: number; regions: number; maxPerFrame: number };
+  /** `plates`: how many of `tracks` are plate tracks. */
+  totals: { tracks: number; redacted: number; kept: number; added: number; plates: number; framesWithRegions: number; regions: number; maxPerFrame: number };
   caveat: string;
-  /** Every face track: kept ones were left visible; added ones were drawn by hand (negative ids). Times in seconds. */
-  tracks: { id: number; t0: number; t1: number; frames: number; kept: boolean; added?: true }[];
+  /** Every track of the covered layers (`layer` says which; ids are per layer): kept ones were
+   *  left visible; added ones were drawn by hand (negative ids). Times in seconds. */
+  tracks: { id: number; layer: RedactKind; t0: number; t1: number; frames: number; kept: boolean; added?: true }[];
 }
 
 export const REDACTION_CAVEAT =
-  'Regions come from automatic face detection, which misses some faces (on a crowded street, ' +
-  '8.1% of hand-labeled faces, mostly small ones in the background) and does not cover other ' +
-  'identifying details (plates, screens, tattoos, voices). Review the output before release.';
+  'Regions come from automatic detection, which misses some faces (on a crowded street, 8.1% of ' +
+  'hand-labeled faces, mostly small ones in the background) and some plates (angled, blurred or ' +
+  'distant ones), and does not cover other identifying details (screens, tattoos, voices). ' +
+  'Review the output before release.';
 
 /** The redaction log for `doc` with `o` (and faces `added` by hand): totals are computed here
  *  by sweeping every frame. */
 export function redactionLog(doc: VideoDoc, o: RedactOptions, output?: RedactionLog['output'], added: Track[] = []): RedactionLog {
-  const faces = doc.layers.faces;
-  if (!faces) throw new Error('the doc has no faces layer');
+  const kinds = covered(doc, o);
   const cursor = cursorFor(doc, o, added);
   let framesWithRegions = 0;
   let regions = 0;
@@ -163,20 +190,28 @@ export function redactionLog(doc: VideoDoc, o: RedactOptions, output?: Redaction
     regions += n;
     maxPerFrame = Math.max(maxPerFrame, n);
   }
-  const keep = new Set(o.keep);
   const fps = doc.source.fps;
   const r3 = (v: number) => Math.round(v * 1000) / 1000;
-  const tracks: RedactionLog['tracks'] = faces.items.map((t) => ({ id: t.id, t0: r3(t.f0 / fps), t1: r3((t.f1 + 1) / fps), frames: t.f1 - t.f0 + 1, kept: keep.has(t.id) }));
-  for (const t of added) tracks.push({ id: t.id, t0: r3(t.f0 / fps), t1: r3((t.f1 + 1) / fps), frames: t.f1 - t.f0 + 1, kept: false, added: true });
+  const entry = (t: Track, layer: RedactKind, kept: boolean) => ({ id: t.id, layer, t0: r3(t.f0 / fps), t1: r3((t.f1 + 1) / fps), frames: t.f1 - t.f0 + 1, kept });
+  const tracks: RedactionLog['tracks'] = [];
+  const detectors: RedactionLog['detectors'] = {};
+  for (const kind of kinds) {
+    const l = doc.layers[kind]!;
+    const keep = new Set(kind === 'faces' ? o.keep : o.keepPlates);
+    for (const t of l.items) tracks.push(entry(t, kind, keep.has(t.id)));
+    detectors[kind] = { model: l.producer.model, configHash: l.producer.configHash, device: l.device, createdAt: l.createdAt };
+  }
+  for (const t of added) tracks.push({ ...entry(t, 'faces', false), added: true });
   const kept = tracks.filter((t) => t.kept).length;
+  const plates = tracks.filter((t) => t.layer === 'plates').length;
   const s = doc.source;
   return {
     schema: 'videodoc-redactions/0',
     source: { name: s.name, fingerprint: s.fingerprint, frames: s.frames, fps: s.fps, width: s.width, height: s.height },
     ...(output && { output }),
-    detector: { model: faces.producer.model, configHash: faces.producer.configHash, device: faces.device, createdAt: faces.createdAt },
+    detectors,
     options: o,
-    totals: { tracks: tracks.length, redacted: tracks.length - kept, kept, added: added.length, framesWithRegions, regions, maxPerFrame },
+    totals: { tracks: tracks.length, redacted: tracks.length - kept, kept, added: added.length, plates, framesWithRegions, regions, maxPerFrame },
     caveat: REDACTION_CAVEAT,
     tracks,
   };
@@ -212,6 +247,8 @@ export interface RedactPlan {
   source: { name: string; fingerprint: string };
   /** The faces layer's configHash: keep ids name its tracks, and other settings number them differently. */
   faces: string;
+  /** The plates layer's configHash, when the doc had one (for keepPlates, likewise). */
+  plates?: string;
   options: RedactOptions;
   /** Faces added by hand: tracks with negative ids, boxes in source pixels, interpolated between samples. */
   added: Track[];
@@ -220,7 +257,11 @@ export interface RedactPlan {
 export function newPlan(doc: VideoDoc, options: RedactOptions = REDACT_DEFAULTS): RedactPlan {
   const faces = doc.layers.faces;
   if (!faces) throw new Error('the doc has no faces layer');
-  return { schema: 'videodoc-redact/0', source: { name: doc.source.name, fingerprint: doc.source.fingerprint }, faces: faces.producer.configHash, options: { ...options, keep: [...options.keep] }, added: [] };
+  const plates = doc.layers.plates?.producer.configHash;
+  return {
+    schema: 'videodoc-redact/0', source: { name: doc.source.name, fingerprint: doc.source.fingerprint }, faces: faces.producer.configHash, ...(plates && { plates }),
+    options: { ...options, keep: [...options.keep], keepPlates: [...options.keepPlates], cover: [...options.cover] }, added: [],
+  };
 }
 
 /** Check a plan read from disk against `doc`. Keep ids from another faces layer no longer name
@@ -239,6 +280,11 @@ export function checkPlan(v: unknown, doc: VideoDoc): { plan: RedactPlan; warnin
     warnings.push(`faces were found again with other settings since the review, so its ${plan.options.keep.length} kept face(s) are blurred again; review them again`);
     plan.options.keep = [];
   }
+  if (p.plates !== plan.plates && plan.options.keepPlates.length) {
+    warnings.push(`plates were found again since the review, so its ${plan.options.keepPlates.length} kept plate(s) are blurred again; review them again`);
+    plan.options.keepPlates = [];
+  }
+  plan.options.cover = plan.options.cover.filter((k) => REDACT_KINDS.includes(k));
   return { plan, warnings };
 }
 

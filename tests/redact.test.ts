@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  checkPlan, formatLog, formatPlan, handTrack, newDoc, newPlan, parseKeep, parsePlan, RedactionCursor, redactionLog, REDACT_DEFAULTS, setBox, setEnd, trackBox, withLayers,
+  checkPlan, cursorFor, formatLog, formatPlan, handTrack, newDoc, newPlan, parseKeep, parsePlan, RedactionCursor, redactionLog, REDACT_DEFAULTS, setBox, setEnd, trackBox, withLayers,
   type Layer, type Track,
 } from '../src/doc/index.ts';
 
@@ -14,7 +14,7 @@ const tracks: Track[] = [
   { id: 3, f0: 40, f1: 44, samples: [[40, 300, 10, 20, 20], [44, 300, 10, 20, 20]] },
 ];
 const cursor = (o: Partial<ConstructorParameters<typeof RedactionCursor>[1]> = {}) =>
-  new RedactionCursor(tracks, { margin: 0, keep: [], holdFrames: 0, width: 310, height: 200, ...o });
+  new RedactionCursor(tracks, { margin: 0, holdFrames: 0, width: 310, height: 200, ...o });
 
 test('regions: margin, clamped to the frame', () => {
   const c = cursor({ margin: 0.25 });
@@ -41,18 +41,6 @@ test('regions: hold before and after a track, not across a cut, not over a live 
   assert.deepEqual(across.at(35).map((r) => r[0]), [300]);
 });
 
-test('regions: kept tracks stay visible; going back restarts the sweep', () => {
-  const c = cursor({ keep: [1] });
-  assert.equal(c.at(15).length, 0);
-  assert.equal(c.at(25).length, 1);
-  assert.deepEqual(c.regions(42), [{ id: 3, box: [300, 10, 10, 20], held: false }]);
-  assert.deepEqual(c.regions(24).map((r) => r.id), [2]);
-  assert.equal(c.at(15).length, 0);
-  assert.deepEqual(parseKeep('3, 7'), [3, 7]);
-  assert.deepEqual(parseKeep(undefined), []);
-  assert.throws(() => parseKeep('3,x'), /track ids/);
-});
-
 const layer = <T>(items: T[], extra = {}) => ({ producer: { module: 'm', version: '0', configHash: 'h', config: {}, ...extra }, items, coverage: [], createdAt: 'now', ms: 1, device: 'webgpu' }) as unknown as Layer<T>;
 const doc = withLayers(
   newDoc({ name: 'v.mp4', fingerprint: 'v0:1:x', size: 1, duration: 2.4, width: 310, height: 200, fps: 25, frames: 60, video: { codec: 'avc1' } }),
@@ -62,11 +50,51 @@ const doc = withLayers(
   },
 );
 
+test('regions: kept tracks stay visible; going back restarts the sweep', () => {
+  const c = cursorFor(doc, { ...REDACT_DEFAULTS, margin: 0, hold: 0, keep: [1] });
+  assert.equal(c.at(15).length, 0);
+  assert.equal(c.at(25).length, 1);
+  assert.deepEqual(c.regions(42), [{ id: 3, kind: 'faces', box: [300, 10, 10, 20], held: false }]);
+  assert.deepEqual(c.regions(24).map((r) => r.id), [2]);
+  assert.equal(c.at(15).length, 0);
+  assert.deepEqual(parseKeep('3, 7'), [3, 7]);
+  assert.deepEqual(parseKeep(undefined), []);
+  assert.throws(() => parseKeep('3,x'), /track ids/);
+});
+
+// Plate 1 at frames 12-16 (overlapping face track 1's place: kinds never merge), plate 2 at 50-51.
+const plates: Track[] = [
+  { id: 1, f0: 12, f1: 16, samples: [[12, 100, 100, 40, 12], [16, 100, 100, 40, 12]] },
+  { id: 2, f0: 50, f1: 51, samples: [[50, 200, 150, 30, 10], [51, 200, 150, 30, 10]] },
+];
+const withPlates = withLayers(doc, { plates: layer(plates, { model: 'yolo-plate', configHash: 'p' }) });
+
+test('plates: covered with faces, kept by their own ids, left out when not covered', () => {
+  const o = { ...REDACT_DEFAULTS, margin: 0, hold: 0 };
+  assert.deepEqual(cursorFor(withPlates, o).regions(14).map((r) => `${r.kind}/${r.id}`), ['faces/1', 'plates/1']);
+  // keepPlates: [1] leaves plate 1 visible, not face 1.
+  assert.deepEqual(cursorFor(withPlates, { ...o, keepPlates: [1] }).regions(14).map((r) => `${r.kind}/${r.id}`), ['faces/1']);
+  assert.deepEqual(cursorFor(withPlates, { ...o, cover: ['faces'] }).regions(50), []);
+  const log = redactionLog(withPlates, { ...o, keepPlates: [2] });
+  assert.deepEqual(log.totals, { tracks: 5, redacted: 4, kept: 1, added: 0, plates: 2, framesWithRegions: 25, regions: 30, maxPerFrame: 2 });
+  assert.deepEqual(log.tracks.at(-1), { id: 2, layer: 'plates', t0: 2, t1: 2.08, frames: 2, kept: true });
+  assert.deepEqual(Object.keys(log.detectors), ['faces', 'plates']);
+  assert.equal(log.detectors.plates?.model, 'yolo-plate');
+  // A doc without plates covers faces only.
+  assert.deepEqual(Object.keys(redactionLog(doc, o).detectors), ['faces']);
+  // Kept plates from another plates layer are dropped from a plan, like faces.
+  const plan = newPlan(withPlates, { ...o, keepPlates: [2] });
+  assert.equal(plan.plates, 'p');
+  const stale = checkPlan({ ...plan, plates: 'q' }, withPlates);
+  assert.deepEqual(stale.plan.options.keepPlates, []);
+  assert.match(stale.warnings[0], /plates were found again/);
+});
+
 test('log: totals from a sweep over every frame, one track per line, valid JSON', () => {
   const log = redactionLog(doc, { ...REDACT_DEFAULTS, hold: 0, keep: [3] }, { name: 'v.redacted.mp4', frames: 60, ms: 5 });
-  assert.deepEqual(log.totals, { tracks: 3, redacted: 2, kept: 1, added: 0, framesWithRegions: 20, regions: 20, maxPerFrame: 1 });
-  assert.deepEqual(log.tracks[2], { id: 3, t0: 1.6, t1: 1.8, frames: 5, kept: true });
-  assert.equal(log.detector.model, 'yunet');
+  assert.deepEqual(log.totals, { tracks: 3, redacted: 2, kept: 1, added: 0, plates: 0, framesWithRegions: 20, regions: 20, maxPerFrame: 1 });
+  assert.deepEqual(log.tracks[2], { id: 3, layer: 'faces', t0: 1.6, t1: 1.8, frames: 5, kept: true });
+  assert.equal(log.detectors.faces?.model, 'yunet');
   const text = formatLog(log);
   assert.deepEqual(JSON.parse(text), log);
   assert.equal(text.split('\n').filter((l) => l.startsWith('  {"id"')).length, 3);
@@ -96,7 +124,7 @@ test('plan: hand tracks are covered and logged; keep ids from other faces settin
   const back = parsePlan(formatPlan(plan), doc);
   assert.deepEqual(back, { plan, warnings: [] });
   const log = redactionLog(doc, plan.options, undefined, plan.added);
-  assert.deepEqual(log.tracks.at(-1), { id: -1, t0: 2, t1: 2.2, frames: 5, kept: false, added: true });
+  assert.deepEqual(log.tracks.at(-1), { id: -1, layer: 'faces', t0: 2, t1: 2.2, frames: 5, kept: false, added: true });
   assert.equal(log.totals.added, 1);
   assert.equal(log.totals.framesWithRegions, 10 + 5 + 5);
   const stale = checkPlan({ ...plan, faces: 'other' }, doc);

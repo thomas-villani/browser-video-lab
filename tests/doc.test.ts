@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  boxesAt, deriveLayers, fingerprint, fmtTime, formatDoc, linkTracks, maxFaces, newDoc, parseDoc, parseSettings, plan, PlanError, PRODUCERS, resolve,
+  boxesAt, DEFAULT_TRACKS, deriveLayers, fingerprint, fmtTime, formatDoc, linkTracks, maxFaces, newDoc, parseDoc, parseSettings, plan, PlanError, PRODUCERS, resolve,
   search, selectKeyframes, stableStringify, stem, terms, toMarkdown, withLayers,
   type Box, type KeyframeConfig, type Layer, type SceneItem, type SourceInfo, type SpeechItem,
 } from '../src/doc/index.ts';
@@ -80,6 +80,16 @@ test('tracks: linked across frames, split at cuts, compressed, reproduced by int
   // A turn mid-track needs a sample at the turn.
   const turn = linkTracks(Array.from({ length: 11 }, (_, f) => [[100 + 10 * Math.min(f, 5), 100 + 10 * Math.max(0, f - 5), 50, 50] as Box]));
   assert.deepEqual(turn[0].samples.map((s) => s[0]), [0, 5, 10]);
+
+  // A flickering detector: face A is missed at frames 3-4 and 12. Without maxGap: three tracks;
+  // with maxGap 2: one, the gaps interpolated; a gap longer than maxGap still splits.
+  const flicker = frames.map((b, f) => ([3, 4, 12].includes(f) ? b.slice(1) : b.slice(0, 1).concat(b.slice(1))));
+  const a = (o = {}) => linkTracks(flicker, [], { ...DEFAULT_TRACKS, ...o }).filter((t) => t.samples[0][1] < 800);
+  assert.equal(a().length, 3);
+  const bridged = a({ maxGap: 2 });
+  assert.deepEqual(bridged.map((t) => [t.f0, t.f1, t.samples.length]), [[0, 19, 2]]);
+  assert.deepEqual(boxesAt(bridged, 3)[0].box, frames[3][0]);
+  assert.equal(a({ maxGap: 1 }).length, 2);
 });
 
 test('doc: one item per line round-trips; bad docs say how to fix them', () => {
