@@ -31,7 +31,9 @@ Commands:
                          and folders, with times and the nearest keyframe (no browser; analyze first).
   redact <video>         Blur every face: writes <name>.redacted.mp4 (audio copied) and a redaction
                          log (<out>.redactions.json: every face track, which were kept visible).
-                         Analyzes faces first if needed. Review the output: detection misses some faces.
+                         Analyzes faces first if needed. Uses <video>.redact.json when there (a review
+                         made in the app: kept faces, faces added by hand). Watch the output before
+                         release: detection misses some faces.
   info <video|doc>       Summarize a saved doc (no browser).
   layers                 Layers, their dependencies and settings with defaults (JSON).
 
@@ -58,6 +60,8 @@ redact options:
   --margin <f>           Grow each face box by this fraction on every side (default ${REDACT_DEFAULTS.margin}).
   --hold <s>             Keep covering this long before and after each face track (default ${REDACT_DEFAULTS.hold}).
   --keep <ids>           Face track ids to leave visible, e.g. 3,7 (ids are in the log and the doc).
+                         Style, margin, hold and keep given here override the review's.
+  --no-plan              Ignore <video>.redact.json.
   --set, --force         As for analyze (face detection settings, e.g. --set faces.every=1).
 
 search options:
@@ -92,6 +96,7 @@ const { values: a, positionals } = parseArgs({
     keep: { type: 'string' },
     port: { type: 'string', default: '4317' },
     'no-open': { type: 'boolean', default: false },
+    'no-plan': { type: 'boolean', default: false },
     browser: { type: 'string', default: 'msedge' },
     headed: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
@@ -187,7 +192,7 @@ async function main() {
       if (!Number.isFinite(n)) throw new UsageError(`--${what} takes a number, got '${v}'`);
       return n;
     };
-    return out(await redact(ctx, rest[0], { set: a.set, force: a.force, dryRun: a['dry-run'], out: a.out, style: a.style, margin: num(a.margin, 'margin'), hold: num(a.hold, 'hold'), keep: a.keep }));
+    return out(await redact(ctx, rest[0], { set: a.set, force: a.force, dryRun: a['dry-run'], out: a.out, style: a.style, margin: num(a.margin, 'margin'), hold: num(a.hold, 'hold'), keep: a.keep, plan: !a['no-plan'] }));
   }
   const size = Number(a['image-size']);
   if (!Number.isFinite(size)) throw new UsageError(`--image-size takes a number of pixels, got '${a['image-size']}'`);

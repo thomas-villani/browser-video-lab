@@ -60,6 +60,9 @@ npm run videodoc -- layers                                 # layers, dependencie
   (audio copied), and writes `<out>.redactions.json`: settings, totals and every face track
   (id, times, kept or not). Regions are the face boxes grown by a margin, held 0.3 s past each
   track within its shot. Detection misses some faces: review the output before release.
+  A review made in the app (`<video>.redact.json`: faces left visible, faces added by hand,
+  style) is used when it sits next to the video; flags given on the command line override it,
+  `--no-plan` ignores it.
 - The doc's format is `src/doc/schema.ts`; one layer item per line. `src/doc` is dependency-free
   and runs in Node; `analyze()` in `src/analyze.ts` is the same pipeline as a browser API.
 
@@ -71,9 +74,13 @@ default browser (Chrome or Edge, for WebGPU). **Open folder** lists the videos i
 next to the videos, so the CLI, the MCP server and the app share one collection. **Add videos**
 or drag-and-drop works in any WebGPU browser (drop a `.videodoc.json` with its video to reuse
 it; docs then live in memory, with a download button). The reading view is the same Markdown
-agents get, beside a player: click a timestamp, keyframe or search hit to seek. **Blur faces…**
-saves a redacted copy (next to the video in a folder, else where you choose) with its log.
-Nothing is uploaded.
+agents get, beside a player: click a timestamp, keyframe or search hit to seek. **Review faces**
+draws what will be covered over the player, previewing the blur live, with a frame-accurate
+transport (Space, arrow keys, `[` `]` for shots) and a list of faces per shot with thumbnails:
+click a face to leave it visible, drag a box over a face the detector missed (draw it again
+further on and it follows). The review is saved next to the video as `<video>.redact.json`.
+**Blur faces…** saves a redacted copy as reviewed (next to the video in a folder, else where
+you choose) with its log. Nothing is uploaded.
 
 ### MCP server (for agents)
 
@@ -176,7 +183,7 @@ npm test   # tracker unit tests (node:test)
 
 ## Layout
 
-- `app.html` + `src/app/` — the app (`library.ts`: folders and files, docs and keyframes on disk; `render.ts`: Markdown to HTML; `main.ts`: UI)
+- `app.html` + `src/app/` — the app (`library.ts`: folders and files, docs, keyframes and reviews on disk; `render.ts`: Markdown to HTML; `review.ts`: face review over the player; `main.ts`: UI)
 - `cli/lib.ts` — the videodoc commands (shared); `cli/videodoc.ts` — CLI; `cli/mcp.ts` — MCP server (stdio, warm browser);
   `analyze.html` + `src/analyze-page.ts` — the compute page they drive
 - `src/doc/` — the VideoDoc: schema, planner (`PRODUCERS`), keyframe selection, Markdown view, transcript search (BM25), redaction regions and log, track linking/compression, hashing, load/save (pure TS)

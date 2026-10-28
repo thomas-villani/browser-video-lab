@@ -123,7 +123,7 @@ passes, and expected time from a per-device calibration (device class × measure
 |---|---|---|---|
 | **markdown** | transcript, scenes, keyframes, captions? | Markdown (+ keyframe JPEGs) | Works without captions or an LLM; captions enrich it. The agent-facing "read the video" view. |
 | **search** | embeddings (+ transcript text) | ranked hits with time ranges and refs | Hybrid: BM25 over transcript/captions + vector similarity. Query-time text encoding runs in the browser too. |
-| **redact** | faces (+ scenes; plates later) | encoded video + redaction log (JSON) | Built: mediabunny `Conversion` with a per-frame `process` hook, audio copied. Regions = track boxes grown by a margin, held 0.3 s within the shot; drawn per strength level (one downscaled copy of the frame per level, one clipped draw). |
+| **redact** | faces (+ scenes; plates later) | encoded video + redaction log (JSON) | Built: mediabunny `Conversion` with a per-frame `process` hook, audio copied. Regions = track boxes grown by a margin, held 0.3 s within the shot; drawn per strength level (one downscaled copy of the frame per level, one clipped draw). A review (`RedactPlan`, from the app) adds hand-drawn tracks and keep ids. |
 | **count** | objects / faces tracks | counts per label, per scene, over time | Mostly aggregation over tracks. |
 | **summarize** | markdown | text | The only LLM-dependent module; takes a pluggable `llm(prompt) => text` (WebLLM, a bring-your-own-key API, or the calling agent). |
 
@@ -230,10 +230,12 @@ loaded. Reading and searching work without WebGPU.
    search placeholder and suggested queries from the transcripts, a one-time seek tip.
 6. **Redact module**: ~~output encoding, redaction log~~ built 2026-10-27 (`src/doc/redact.ts`
    regions and log, `src/redact.ts` decode/cover/encode, `videodoc redact`, MCP `redact`, the
-   app's Blur faces). Next: a review UI (tracks drawn over the player, keep/unkeep a track, add
-   a missed face by hand), then plates, and audio redaction (bleep spoken names using word
-   timestamps). 8.1% of faces are still missed against human labels, so a person must check
-   the result.
+   app's Blur faces). ~~Review UI~~ built 2026-10-28 (`src/app/review.ts`: regions over the
+   player with a live preview of the cover, keep a face by clicking it, add a missed face by
+   dragging a box, faces listed per shot with thumbnails; saved as `<video>.redact.json`, a
+   `RedactPlan`, which `videodoc redact` and MCP `redact` also use). Next: plates, and audio
+   redaction (bleep spoken names using word timestamps). 8.1% of faces are still missed
+   against human labels, so a person must check the result.
 7. Captions with a small VLM, pulled in where they visibly improve search or the Markdown view.
 8. Worker-by-default runtime, single shared GPU device (detector + Whisper), packaging/publishing.
 

@@ -583,3 +583,31 @@ Findings:
 7. The app (download fallback, headless): Blur faces on pan1080 -> queued as a "Blurring faces"
    step, done in 25 s, MP4 + log downloaded, no page errors. The save dialog and folder writes
    need a manual check in Chrome/Edge.
+
+## videodoc step 6, part 2: the review UI (2026-10-28)
+
+The app's **Review faces**: regions drawn over the player from the doc (no decode), the cover
+previewed live with the output's drawing code, click to keep, drag to add a face by hand,
+faces listed per shot with thumbnails; the choices saved as `<video>.redact.json`. Iris Xe,
+Edge headless, AC + overlay:
+
+| Video | Faces (tracks) | Open review | Playback with preview (4 s) | Plan change (rebuild + list) |
+|---|---|---|---|---|
+| rickroll (3:33, 25 fps) | 369 | 0.5 s | 99 frames presented, 0 dropped | < 0.1 s |
+| walk (6:29, 30 fps, ~48 regions/frame) | 25,278 | 0.6 s | 119 presented, 0 dropped (same with preview off) | ~0.5 s |
+
+Findings:
+
+1. The first list rendered every face of a shot and hid the rest with CSS: 25k buttons on the
+   crowd, ~1 s per click. Now 24 per shot, then pages of 120 on request.
+2. Thumbnails cropped only as faces pass on screen left most of the list gray. A hidden second
+   `<video>` now seeks to each listed face in view (IntersectionObserver): ~10 thumbnails/s on
+   1080p, and the person's place in the main player is untouched. Thumbnails are not blurred:
+   the reviewer has to recognize who it is to decide.
+3. Hand boxes: a face drawn at one frame is held still for 2 s (cut at the shot end); drawing
+   it again further along moves the samples carried from before, so the box follows. Fixing an
+   earlier frame leaves later drawings alone.
+4. End to end: review in the app (keep #366, one hand face, download fallback) -> log with
+   `kept: 1, added: 1`; the same as a plan file next to the video -> `videodoc redact` used it
+   (pixelate, 81 fps); output frames checked with ffmpeg: hand box pixelated, kept face visible.
+5. Not covered headless: Open folder + review saved to disk, and the save dialog.

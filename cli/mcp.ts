@@ -108,7 +108,8 @@ const TOOLS = [
     description:
       'Write a copy of the video with every detected face blurred (or pixelated, or filled), audio copied, plus a redaction log (<out>.redactions.json) listing every face track and which were kept visible. ' +
       'Analyzes faces first if needed (slow: roughly 2-12x real time on an integrated GPU, crowds slowest). Detection misses some faces, so a person must review the output before release; ' +
-      'say so when reporting the result. Track ids for keep come from a previous log or the doc.',
+      'say so when reporting the result. Track ids for keep come from a previous log or the doc. ' +
+      'A review saved in the app (<video>.redact.json: kept faces, faces added by hand) is used when present; options given here override it.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -117,7 +118,8 @@ const TOOLS = [
         style: { type: 'string', enum: REDACT_STYLES, description: `How faces are covered (default ${REDACT_DEFAULTS.style}; fill leaves nothing to undo).` },
         margin: { type: 'number', minimum: 0, maximum: 2, description: `Grow each face box by this fraction on every side (default ${REDACT_DEFAULTS.margin}).` },
         hold: { type: 'number', minimum: 0, maximum: 10, description: `Seconds to keep covering before and after each face track, within its shot (default ${REDACT_DEFAULTS.hold}).` },
-        keep: { type: 'array', items: { type: 'integer', minimum: 1 }, description: 'Face track ids to leave visible.' },
+        keep: { type: 'array', items: { type: 'integer', minimum: 1 }, description: "Face track ids to leave visible (replaces the review's)." },
+        plan: { type: 'boolean', description: 'false: ignore <video>.redact.json (default true).' },
         set: SET,
         force: FORCE,
         dryRun: DRY_RUN,
@@ -243,6 +245,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra): Promise<Call
                   set: common.set, force: common.force, dryRun: common.dryRun,
                   out: args.out as string | undefined, style: args.style as string | undefined,
                   margin: args.margin as number | undefined, hold: args.hold as number | undefined, keep: args.keep as number[] | undefined,
+                  plan: args.plan as boolean | undefined,
                 }),
               ),
             },

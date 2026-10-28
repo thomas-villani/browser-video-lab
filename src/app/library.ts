@@ -2,8 +2,8 @@
 // files. A folder is the same collection the CLI uses: docs are read from and saved to
 // <video>.videodoc.json next to each video, keyframe JPEGs to <video>.keyframes/<frame>.jpg.
 // Dropped files keep their docs in memory (downloadable); a dropped .videodoc.json is matched
-// to its video by name.
-import { formatDoc, parseDoc, type KeyframeItem, type VideoDoc } from '../doc/index.ts';
+// to its video by name. A face review is <video>.redact.json, next to the video likewise.
+import { checkPlan, formatDoc, formatPlan, parseDoc, type KeyframeItem, type RedactPlan, type VideoDoc } from '../doc/index.ts';
 
 type DirHandle = FileSystemDirectoryHandle & { values(): AsyncIterable<FileSystemDirectoryHandle | FileSystemFileHandle> };
 
@@ -35,6 +35,12 @@ export interface Entry {
   duration?: number;
   /** Set when a redacted copy was asked for: it is made after the analysis in the queue. */
   redactTo?: RedactTarget;
+  /** The face review (kept faces, faces added by hand), once loaded or started. */
+  plan?: RedactPlan;
+  /** A dropped .redact.json, checked against the doc when the review opens. */
+  planFile?: File;
+  /** Open the review once the faces are found (Review faces on a video without them). */
+  reviewAfter?: boolean;
   /** Keyframe images by frame: object URLs. */
   images: Map<number, string>;
 }
@@ -77,6 +83,7 @@ export async function openFolder(): Promise<{ folder: string; entries: Entry[] }
 
 /** Entries for dropped or picked files; .videodoc.json files among them attach to their video. */
 export async function fromFiles(files: File[]): Promise<Entry[]> {
+  const plans = new Map(files.filter((f) => f.name.endsWith('.redact.json')).map((f) => [f.name.slice(0, -'.redact.json'.length), f]));
   const docs = new Map<string, VideoDoc>();
   for (const f of files.filter((f) => f.name.endsWith('.videodoc.json'))) {
     try {
@@ -89,7 +96,7 @@ export async function fromFiles(files: File[]): Promise<Entry[]> {
     .filter((f) => VIDEO_EXT.test(f.name))
     .map((f) => {
       const doc = docs.get(f.name);
-      return { id: nextId++, path: f.name, name: f.name, file: async () => f, doc, status: doc ? 'ready' : 'new', images: new Map() } as Entry;
+      return { id: nextId++, path: f.name, name: f.name, file: async () => f, doc, planFile: plans.get(f.name), status: doc ? 'ready' : 'new', images: new Map() } as Entry;
     });
 }
 
@@ -98,6 +105,37 @@ export async function saveDoc(e: Entry): Promise<boolean> {
   if (!e.dir || !e.doc) return false;
   const w = await (await e.dir.getFileHandle(`${e.name}.videodoc.json`, { create: true })).createWritable();
   await w.write(formatDoc(e.doc));
+  await w.close();
+  return true;
+}
+
+/** Load the saved face review into e.plan (from the folder, or a dropped file); returns warnings
+ *  to show. Leaves e.plan unset when there is none. */
+export async function loadPlan(e: Entry): Promise<string[]> {
+  if (e.plan || !e.doc?.layers.faces) return [];
+  let file = e.planFile;
+  if (!file && e.dir) {
+    try {
+      file = await (await e.dir.getFileHandle(`${e.name}.redact.json`)).getFile();
+    } catch {
+      return [];
+    }
+  }
+  if (!file) return [];
+  try {
+    const { plan, warnings } = checkPlan(JSON.parse(await file.text()), e.doc);
+    e.plan = plan;
+    return warnings;
+  } catch (err) {
+    return [`the saved review (${file.name}) was not used: ${(err as Error).message}`];
+  }
+}
+
+/** Save the face review next to the video (folder entries); false when there is nowhere to save. */
+export async function savePlan(e: Entry): Promise<boolean> {
+  if (!e.dir || !e.plan) return false;
+  const w = await (await e.dir.getFileHandle(`${e.name}.redact.json`, { create: true })).createWritable();
+  await w.write(formatPlan(e.plan));
   await w.close();
   return true;
 }

@@ -2,11 +2,13 @@
 // each frame (RedactionCursor, src/doc/redact.ts), encode H.264 into MP4. Audio is copied
 // as-is when MP4 can hold it. Frames without regions pass through untouched.
 import { BufferTarget, Conversion, Mp4OutputFormat, Output, Quality, QUALITY_HIGH, StreamTarget, type StreamTargetChunk, type VideoSample } from 'mediabunny';
-import { cursorFor, REDACT_DEFAULTS, type Box, type RedactOptions, type RedactStyle, type VideoDoc } from './doc/index.ts';
+import { cursorFor, REDACT_DEFAULTS, type Box, type RedactOptions, type RedactStyle, type Track, type VideoDoc } from './doc/index.ts';
 import { fingerprintOf, type Progress } from './analyze';
 import { openInput, type MediaInput } from './runtime/source';
 
 export interface RedactRun extends Partial<RedactOptions> {
+  /** Faces added by hand in a review (RedactPlan.added). */
+  added?: Track[];
   onProgress?: (p: Progress) => void;
   signal?: AbortSignal;
 }
@@ -24,10 +26,11 @@ export interface Redacted {
  * layer). Writes to `stream` (e.g. a FileSystemWritableFileStream) or returns the MP4 bytes.
  */
 export async function redact(input: MediaInput, doc: VideoDoc, stream?: WritableStream<StreamTargetChunk>, o: RedactRun = {}): Promise<Redacted> {
-  const opts: RedactOptions = { ...REDACT_DEFAULTS, ...Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) } as RedactOptions;
+  const { added, onProgress, signal, ...given } = o;
+  const opts: RedactOptions = { ...REDACT_DEFAULTS, ...Object.fromEntries(Object.entries(given).filter(([, v]) => v !== undefined)) } as RedactOptions;
   const id = await fingerprintOf(input);
   if (id.fingerprint !== doc.source.fingerprint) throw new Error(`the doc is for a different file (${doc.source.name}); analyze this video first`);
-  const cursor = cursorFor(doc, opts);
+  const cursor = cursorFor(doc, opts, added);
   const { width, height } = doc.source;
   const canvas = new OffscreenCanvas(width, height);
   const ctx = canvas.getContext('2d')!;
@@ -66,13 +69,13 @@ export async function redact(input: MediaInput, doc: VideoDoc, stream?: Writable
     const why = conversion.discardedTracks.map((d) => `${d.track.type}: ${d.reason}`).join('; ');
     throw new Error(`cannot write this video as MP4 here (${why})`);
   }
-  conversion.onProgress = () => o.onProgress?.({ pass: 'frames', stage: 'redacting', done: frame, total: Math.max(frame, doc.source.frames) });
+  conversion.onProgress = () => onProgress?.({ pass: 'frames', stage: 'redacting', done: frame, total: Math.max(frame, doc.source.frames) });
   const onAbort = () => void conversion.cancel();
-  o.signal?.addEventListener('abort', onAbort, { once: true });
+  signal?.addEventListener('abort', onAbort, { once: true });
   try {
     await conversion.execute();
   } finally {
-    o.signal?.removeEventListener('abort', onAbort);
+    signal?.removeEventListener('abort', onAbort);
   }
   return { frames: frame, ms: Math.round(performance.now() - t0), ...(target instanceof BufferTarget && { buffer: target.buffer! }) };
 }
@@ -81,7 +84,8 @@ export async function redact(input: MediaInput, doc: VideoDoc, stream?: Writable
 const MAX_LEVEL = 6;
 
 /**
- * Returns cover(regions), which draws over the regions on `canvas` (holding the frame). Regions
+ * Returns cover(regions), which draws over the regions on `canvas` (holding the frame; the
+ * review UI previews with the same drawing on a page canvas). Regions
  * are grouped by strength level (by size: blur radius about a fifth of the face, about 6 blocks
  * across it); each level costs one small copy of the frame and one clipped draw, however many
  * faces it covers (a crowd has hundreds per frame).
@@ -89,8 +93,8 @@ const MAX_LEVEL = 6;
  * The shape is a rounded rectangle whose corner radius (30% of the shorter side) stays inside a
  * margin of 10% or more, so the detector's box is always fully covered.
  */
-function coverer(canvas: OffscreenCanvas, style: RedactStyle) {
-  const ctx = canvas.getContext('2d')!;
+export function coverer(canvas: OffscreenCanvas | HTMLCanvasElement, style: RedactStyle) {
+  const ctx = canvas.getContext('2d') as OffscreenCanvasRenderingContext2D;
   const { width, height } = canvas;
   const small = Array.from({ length: MAX_LEVEL + 1 }, () => new OffscreenCanvas(1, 1));
   const shape = (boxes: Box[]) => {

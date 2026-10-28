@@ -10,8 +10,8 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { fileURLToPath } from 'node:url';
 import {
   deriveLayers, docPathFor, fingerprint, fmtTime, formatDoc, formatLog, LAYER_NAMES, newDoc, parseDoc, parseKeep, parseSettings, plan, PRODUCERS,
-  REDACT_DEFAULTS, REDACT_STYLES, redactionLog, search as searchDocs, summarize, toMarkdown, withLayers,
-  type KeyframeItem, type Layers, type Plan, type RedactOptions as RedactSettings, type RedactStyle, type VideoDoc,
+  parsePlan, planPathFor, REDACT_DEFAULTS, REDACT_STYLES, redactionLog, search as searchDocs, summarize, toMarkdown, withLayers,
+  type KeyframeItem, type Layers, type Plan, type RedactOptions as RedactSettings, type RedactStyle, type Track, type VideoDoc,
 } from '../src/doc/index.ts';
 
 export const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -456,13 +456,15 @@ export interface RedactOptions extends Omit<AnalyzeOptions, 'layers' | 'doc'> {
   style?: string;
   margin?: number;
   hold?: number;
-  /** Track ids to leave visible: "3,7" or [3, 7]. */
+  /** Track ids to leave visible: "3,7" or [3, 7]. Replaces the review plan's. */
   keep?: string | number[];
+  /** false: ignore <video>.redact.json (the app's review). */
+  plan?: boolean;
 }
 
-/** Check and complete redaction settings (defaults from REDACT_DEFAULTS). */
-export function redactSettings(o: RedactOptions): RedactSettings {
-  const style = (o.style ?? REDACT_DEFAULTS.style) as RedactStyle;
+/** Check and complete redaction settings (the unset ones from `base`: a review plan's, or the defaults). */
+export function redactSettings(o: RedactOptions, base: RedactSettings = REDACT_DEFAULTS): RedactSettings {
+  const style = (o.style ?? base.style) as RedactStyle;
   if (!REDACT_STYLES.includes(style)) throw new UsageError(`style takes ${REDACT_STYLES.join(', ')}, got '${o.style}'`);
   const num = (v: number | undefined, d: number, what: string, max: number) => {
     const n = v ?? d;
@@ -471,28 +473,46 @@ export function redactSettings(o: RedactOptions): RedactSettings {
   };
   let keep: number[];
   try {
-    keep = parseKeep(o.keep);
+    keep = o.keep === undefined ? base.keep : parseKeep(o.keep);
   } catch (e) {
     throw new UsageError((e as Error).message);
   }
-  return { style, margin: num(o.margin, REDACT_DEFAULTS.margin, 'margin', 2), hold: num(o.hold, REDACT_DEFAULTS.hold, 'hold', 10), keep };
+  return { style, margin: num(o.margin, base.margin, 'margin', 2), hold: num(o.hold, base.hold, 'hold', 10), keep };
 }
 
 /**
  * Blur (or pixelate, or fill) every face: analyzes faces first if needed, writes the redacted
  * MP4 (audio copied) and a redaction log, <out>.redactions.json, listing every face track and
- * which were kept visible.
+ * which were kept visible. A review saved by the app (<video>.redact.json: kept faces, faces
+ * added by hand, options) is used when present; options given here override it.
  */
 export async function redact(ctx: Context, videoArg: string, o: RedactOptions = {}) {
   const video = videoPath(ctx, videoArg);
-  const settings = redactSettings(o);
+  let settings = redactSettings(o);
   const out = o.out ? userPath(ctx, o.out) : join(dirname(video), `${basename(video).replace(/\.[^.]+$/, '')}.redacted.mp4`);
   if (resolve(out) === resolve(video)) throw new UsageError('the output would overwrite the video; pass another --out');
   if (!/\.mp4$/i.test(out)) throw new UsageError(`the output is MP4; name it .mp4, got ${out}`);
   const r = await ensure(ctx, video, docPathFor(video), ['faces'], o);
   if ('dryRun' in r) return r.dryRun;
-  const t = redactionLog(r.doc, settings).totals;
-  ctx.report.log(`redacting ${t.redacted} face tracks${t.kept ? ` (keeping ${t.kept} visible)` : ''} on ${t.framesWithRegions} of ${r.doc.source.frames} frames (${settings.style})`);
+  const planPath = planPathFor(video);
+  let added: Track[] = [];
+  const warnings: string[] = [];
+  const usePlan = o.plan !== false && existsSync(planPath);
+  if (usePlan) {
+    let p: ReturnType<typeof parsePlan>;
+    try {
+      p = parsePlan(readFileSync(planPath, 'utf8'), r.doc);
+    } catch (e) {
+      throw new UsageError(`${planPath}: ${(e as Error).message} (delete it, or pass --no-plan)`);
+    }
+    settings = redactSettings(o, p.plan.options);
+    added = p.plan.added;
+    warnings.push(...p.warnings);
+    ctx.report.log(`review: ${planPath}`);
+    for (const w of p.warnings) ctx.report.log(`  warning: ${w}`);
+  }
+  const t = redactionLog(r.doc, settings, undefined, added).totals;
+  ctx.report.log(`redacting ${t.redacted} face tracks${t.added ? ` (${t.added} added by hand)` : ''}${t.kept ? `, keeping ${t.kept} visible,` : ''} on ${t.framesWithRegions} of ${r.doc.source.frames} frames (${settings.style})`);
   const part = `${out}.part`;
   writeFileSync(part, '');
   let result: { frames: number; ms: number };
@@ -503,8 +523,8 @@ export async function redact(ctx: Context, videoArg: string, o: RedactOptions = 
       { video, out: part },
       (page, base) =>
         page.evaluate(
-          ([url, outUrl, d, s]: [string, string, VideoDoc, RedactSettings]) => window.videodoc.redact(url, outUrl, d, s),
-          [`${base}@file/video`, `${base}@file/out`, doc, settings],
+          ([url, outUrl, d, s]: [string, string, VideoDoc, RedactSettings & { added: Track[] }]) => window.videodoc.redact(url, outUrl, d, s),
+          [`${base}@file/video`, `${base}@file/out`, doc, { ...settings, added }],
         ),
       ctx.report.progress,
       ctx.signal,
@@ -518,13 +538,16 @@ export async function redact(ctx: Context, videoArg: string, o: RedactOptions = 
     throw new Error(`decoded ${result.frames} frames but the faces layer has ${r.doc.source.frames}; the regions would not line up (re-analyze with --force)`);
   }
   renameSync(part, out);
-  const log = redactionLog(r.doc, settings, { name: basename(out), frames: result.frames, ms: result.ms });
+  const log = redactionLog(r.doc, settings, { name: basename(out), frames: result.frames, ms: result.ms }, added);
   const logPath = `${out}.redactions.json`;
   writeFileSync(logPath, formatLog(log));
   ctx.report.log(`  ${result.frames} frames in ${(result.ms / 1000).toFixed(1)} s (${((result.frames * 1000) / result.ms).toFixed(0)} fps)`);
   ctx.report.log(`  -> ${out}\n  -> ${logPath}`);
   ctx.report.log(`  note: ${log.caveat}`);
-  return { out, log: logPath, doc: r.docPath, settings, totals: log.totals, frames: result.frames, ms: result.ms, wallMs: r.wallMs + result.ms, caveat: log.caveat };
+  return {
+    out, log: logPath, doc: r.docPath, ...(usePlan && { review: planPath, warnings }), settings, totals: log.totals,
+    frames: result.frames, ms: result.ms, wallMs: r.wallMs + result.ms, caveat: log.caveat,
+  };
 }
 
 export interface SearchOptions {

@@ -53,7 +53,11 @@
         <ul id="results" class="results" hidden></ul>
         <section id="viewer" class="viewer" hidden>
           <div class="player">
-            <video id="player" controls preload="metadata"></video>
+            <div class="stage">
+              <video id="player" controls preload="metadata"></video>
+              <canvas id="overlay" hidden></canvas>
+            </div>
+            <div id="review-bar" class="review-bar" hidden></div>
             <div class="doc-bar"><span id="read-status" class="muted"></span><span id="doc-actions"></span></div>
           </div>
           <div class="read-col">
@@ -62,6 +66,7 @@
               highlighted. <button id="tip-ok">Got it</button>
             </p>
             <article id="read" class="read"></article>
+            <section id="review" class="review" hidden></section>
           </div>
         </section>
       </main>

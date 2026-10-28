@@ -27,7 +27,7 @@ difference, denser visual analysis where nobody speaks.
   (`computeLayers`, browser `analyze()`, `frameImages`), `cli/lib.ts` (the commands),
   `cli/videodoc.ts` (CLI: `check`, `analyze`, `markdown`, `info`, `layers`), `cli/mcp.ts` (MCP
   server, same commands), `analyze.html` + `src/analyze-page.ts` (the compute page they drive).
-  48 tests pass (4 of them drive the MCP server over stdio); `tsc --noEmit` clean. The app:
+  50 tests pass (4 of them drive the MCP server over stdio); `tsc --noEmit` clean. The app:
   `app.html` + `src/app/`, served by `videodoc ui`. Redaction: `src/doc/redact.ts`,
   `src/redact.ts`, `videodoc redact`.
 - Layers today: `speech` (Silero VAD), `transcript` (Whisper base via transformers.js; needs
@@ -103,17 +103,29 @@ difference, denser visual analysis where nobody speaks.
 - `videodoc redact` (`--style --margin --hold --keep --out`), MCP `redact`, app **Blur faces…**
   (folder: saved next to the video; files: save dialog, or download). The page writes the
   output to Node with `PUT /@file/out?pos=` (harness), so large files stream.
-- Not yet: the review UI (next), plates, audio redaction.
+- Not yet: plates, audio redaction.
 
-## Next: redaction review UI (step 6 part 2)
+## Done: roadmap step 6 part 2, the review UI (2026-10-28)
 
-In the app: draw the face tracks over the player (from the doc, no decode), click one to keep
-it visible (track ids go to `keep`), list tracks per shot with a thumbnail, step through frames
-with regions, and add a missed face by hand (a manual track). Then Blur faces uses those
-choices. Lead application (decided 2026-10-27) stays search and read. Smaller follow-ups for the app: hosted
-build with a model registry, analysis in a worker, persistence for dropped files. Ideas noted
-in DESIGN.md (not scheduled): audio-only files (lectures, podcasts) and transcript-driven
-editing (filler words, cuts).
+- `src/doc/redact.ts`: `RedactPlan` (`videodoc-redact/0`, saved as `<video>.redact.json`:
+  options, keep ids, `added` hand tracks with negative ids), `checkPlan` (keep ids dropped with
+  a warning when the faces layer's configHash changed), `handTrack` / `setBox` / `setEnd`
+  (drawing a box again further along moves the carried samples, so the box follows the face).
+  `RedactionCursor.regions(frame)` returns track ids; going back restarts the sweep.
+- `src/app/review.ts`: canvas over the `<video>` (letterbox-aware), redrawn per presented
+  frame (`requestVideoFrameCallback`), preview drawn with the same `coverer` as the output;
+  own transport bar (native controls off while reviewing); click = keep/unkeep, drag = add or
+  move a hand box; faces per shot, longest first, 24 then pages of 120; thumbnails cropped
+  from the player as faces pass and from a hidden second `<video>` for list items in view.
+- `videodoc redact` / MCP `redact` use the plan when present (`--no-plan` / `plan: false`).
+
+## Next
+
+Plates (a detector for license plates, as a second region source), then audio redaction
+(bleep spoken names using word timestamps). Lead application (decided 2026-10-27) stays search
+and read. Smaller follow-ups for the app: hosted build with a model registry, analysis in a
+worker, persistence for dropped files. Ideas noted in DESIGN.md (not scheduled): audio-only
+files (lectures, podcasts) and transcript-driven editing (filler words, cuts).
 
 ## Later: captions
 

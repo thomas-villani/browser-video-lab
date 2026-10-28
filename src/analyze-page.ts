@@ -1,7 +1,7 @@
 // The compute page the CLI drives (analyze.html). It exposes window.videodoc and does nothing
 // on its own; the driver calls compute()/check() with page.evaluate and receives progress
 // through window.__videodocProgress (if the driver exposed it).
-import type { PlannedLayer, Layers, RedactOptions, VideoDoc } from './doc/index.ts';
+import type { PlannedLayer, Layers, RedactOptions, Track, VideoDoc } from './doc/index.ts';
 import { computeLayers, frameImages, type Progress } from './analyze';
 import { redact } from './redact';
 
@@ -49,7 +49,7 @@ const api = {
   },
 
   /** Redact the video at `url` with the faces in `doc`, writing the MP4 to `outUrl` (PUT, by byte offset). */
-  async redact(url: string, outUrl: string, doc: VideoDoc, opts: Partial<RedactOptions>) {
+  async redact(url: string, outUrl: string, doc: VideoDoc, opts: Partial<RedactOptions> & { added?: Track[] }) {
     const sink = new WritableStream<{ type: 'write'; data: Uint8Array<ArrayBuffer>; position: number }>({
       async write(chunk) {
         const r = await fetch(`${outUrl}?pos=${chunk.position}`, { method: 'PUT', body: chunk.data });
