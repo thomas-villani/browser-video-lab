@@ -44,6 +44,8 @@ npm run videodoc -- markdown talk.mp4 --images --out talk.md   # + keyframe JPEG
 npm run videodoc -- markdown talk.mp4 --from 12:30 --to 15:00  # just that stretch
 npm run videodoc -- analyze videos/                        # every video in a folder (recursive)
 npm run videodoc -- search "budget cuts" videos/ --top 5    # where is it said? (transcripts, no browser)
+npm run videodoc -- redact bodycam.mp4                     # every face blurred -> bodycam.redacted.mp4 + redaction log
+npm run videodoc -- redact bodycam.mp4 --style fill --keep 3,7   # solid boxes; leave face tracks 3 and 7 visible
 npm run videodoc -- info talk.mp4                          # summarize a saved doc (no browser)
 npm run videodoc -- layers                                 # layers, dependencies, settings + defaults (JSON)
 ```
@@ -54,6 +56,10 @@ npm run videodoc -- layers                                 # layers, dependencie
   reused, and with nothing left to compute no browser starts. `--dry-run` prints the plan.
 - stdout: one JSON object per command (agents); stderr: progress and a summary (people).
   Exit codes: 0 ok, 1 failure, 2 usage error.
+- `redact` finds faces first if the doc has none, re-encodes H.264 at about the source bitrate
+  (audio copied), and writes `<out>.redactions.json`: settings, totals and every face track
+  (id, times, kept or not). Regions are the face boxes grown by a margin, held 0.3 s past each
+  track within its shot. Detection misses some faces: review the output before release.
 - The doc's format is `src/doc/schema.ts`; one layer item per line. `src/doc` is dependency-free
   and runs in Node; `analyze()` in `src/analyze.ts` is the same pipeline as a browser API.
 
@@ -65,13 +71,14 @@ default browser (Chrome or Edge, for WebGPU). **Open folder** lists the videos i
 next to the videos, so the CLI, the MCP server and the app share one collection. **Add videos**
 or drag-and-drop works in any WebGPU browser (drop a `.videodoc.json` with its video to reuse
 it; docs then live in memory, with a download button). The reading view is the same Markdown
-agents get, beside a player: click a timestamp, keyframe or search hit to seek. Nothing is
-uploaded.
+agents get, beside a player: click a timestamp, keyframe or search hit to seek. **Blur faces…**
+saves a redacted copy (next to the video in a folder, else where you choose) with its log.
+Nothing is uploaded.
 
 ### MCP server (for agents)
 
 `npm run mcp` (or `node cli/mcp.ts [--browser chrome] [--headed]`) serves the same commands over
-MCP stdio: `markdown`, `search`, `analyze`, `info`, `layers`, `check`. The browser stays warm between
+MCP stdio: `markdown`, `search`, `analyze`, `redact`, `info`, `layers`, `check`. The browser stays warm between
 calls (closed after `VIDEODOC_IDLE_MS` idle, default 10 min), calls run one at a time, long runs
 send progress notifications, and cancelling a call stops its work. `markdown` can also return
 keyframes as image content (`embedImages: n`). To add it to Claude Code:
@@ -172,7 +179,8 @@ npm test   # tracker unit tests (node:test)
 - `app.html` + `src/app/` — the app (`library.ts`: folders and files, docs and keyframes on disk; `render.ts`: Markdown to HTML; `main.ts`: UI)
 - `cli/lib.ts` — the videodoc commands (shared); `cli/videodoc.ts` — CLI; `cli/mcp.ts` — MCP server (stdio, warm browser);
   `analyze.html` + `src/analyze-page.ts` — the compute page they drive
-- `src/doc/` — the VideoDoc: schema, planner (`PRODUCERS`), keyframe selection, Markdown view, transcript search (BM25), track linking/compression, hashing, load/save (pure TS)
+- `src/doc/` — the VideoDoc: schema, planner (`PRODUCERS`), keyframe selection, Markdown view, transcript search (BM25), redaction regions and log, track linking/compression, hashing, load/save (pure TS)
+- `src/redact.ts` — `redact()`: decode, cover regions (blur, pixelate, fill), encode MP4 with mediabunny `Conversion` (audio copied)
 - `src/analyze.ts` — `computeLayers` (one audio pass, one shared video decode), the browser `analyze()`, `frameImages` (seek-based keyframe JPEGs)
 - `src/main.ts` — benchmark loop (decode → preprocess → infer → readback → decode outputs), in-flight ring
 - `src/pipeline.ts` + `scripts/pipeline.mjs` — single-pass adaptive pipeline page and its headless runner

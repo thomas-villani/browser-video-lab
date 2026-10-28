@@ -27,8 +27,9 @@ difference, denser visual analysis where nobody speaks.
   (`computeLayers`, browser `analyze()`, `frameImages`), `cli/lib.ts` (the commands),
   `cli/videodoc.ts` (CLI: `check`, `analyze`, `markdown`, `info`, `layers`), `cli/mcp.ts` (MCP
   server, same commands), `analyze.html` + `src/analyze-page.ts` (the compute page they drive).
-  43 tests pass (4 of them drive the MCP server over stdio); `tsc --noEmit` clean. The app:
-  `app.html` + `src/app/`, served by `videodoc ui`.
+  48 tests pass (4 of them drive the MCP server over stdio); `tsc --noEmit` clean. The app:
+  `app.html` + `src/app/`, served by `videodoc ui`. Redaction: `src/doc/redact.ts`,
+  `src/redact.ts`, `videodoc redact`.
 - Layers today: `speech` (Silero VAD), `transcript` (Whisper base via transformers.js; needs
   speech), `scenes` (GPU thumbnail scene score), `faces` (YuNet 640 + adaptive bisection +
   native-resolution tile refinement; needs scenes). Defaults live in `PRODUCERS`
@@ -91,10 +92,25 @@ difference, denser visual analysis where nobody speaks.
   queries (`suggestions`: names said mid-sentence), one-time seek tip, plain names in the
   "What to analyze" menu. 44 tests pass.
 
-## Next: redaction (step 6)
+## Done: roadmap step 6 part 1, redaction (2026-10-27)
 
-Lead application decided 2026-10-27: search and read your videos privately; redaction follows
-(output encoding, redaction log, plates, review UI). Smaller follow-ups for the app: hosted
+- `src/doc/redact.ts` (pure): `RedactionCursor` (regions per frame, swept in decode order;
+  margin; hold within the shot; held boxes over a live face dropped; `keep` ids),
+  `redactionLog` / `formatLog` (`videodoc-redactions/0`: settings, totals, every track).
+- `src/redact.ts` (browser): `redact(input, doc, stream?)` via mediabunny `Conversion`
+  (`process` hook, H.264 at 1.25x the source bitrate, audio copied). Styles blur / pixelate /
+  fill, drawn per strength level, not per face (crowd: 3 -> 29 fps).
+- `videodoc redact` (`--style --margin --hold --keep --out`), MCP `redact`, app **Blur faces…**
+  (folder: saved next to the video; files: save dialog, or download). The page writes the
+  output to Node with `PUT /@file/out?pos=` (harness), so large files stream.
+- Not yet: the review UI (next), plates, audio redaction.
+
+## Next: redaction review UI (step 6 part 2)
+
+In the app: draw the face tracks over the player (from the doc, no decode), click one to keep
+it visible (track ids go to `keep`), list tracks per shot with a thumbnail, step through frames
+with regions, and add a missed face by hand (a manual track). Then Blur faces uses those
+choices. Lead application (decided 2026-10-27) stays search and read. Smaller follow-ups for the app: hosted
 build with a model registry, analysis in a worker, persistence for dropped files. Ideas noted
 in DESIGN.md (not scheduled): audio-only files (lectures, podcasts) and transcript-driven
 editing (filler words, cuts).
@@ -149,3 +165,9 @@ Open issues found in step 1 (also in DESIGN.md open questions / NOTES.md):
   backslash escapes with the Write tool.
 - Python on Windows writes cp1252 and CRLF by default: in edit scripts use
   `read_text(encoding='utf-8')` and `write_bytes(s.encode('utf-8'))`.
+- Node's type stripping rejects constructor parameter properties (`constructor(private o: X)`):
+  declare the field and assign it.
+- mediabunny `new Quality(n)` with a bare number is not a bitrate (the encoder failed with
+  "Encoding error"); use `new Quality({ bitrate })`.
+- `pan1080.mp4` is a pan over a face-detection demo image: every face has boxes and landmark
+  dots painted on, so YuNet misses many. Do not judge detection or redaction quality on it.

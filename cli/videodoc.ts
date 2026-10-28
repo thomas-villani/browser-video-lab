@@ -6,9 +6,9 @@
 // stdout: JSON results (one object per command; `markdown` without --out prints Markdown).
 // stderr: progress and human summaries. Exit codes: 0 ok, 1 failure, 2 usage error.
 import { parseArgs } from 'node:util';
-import { DocError, LAYER_NAMES, PlanError } from '../src/doc/index.ts';
+import { DocError, LAYER_NAMES, PlanError, REDACT_DEFAULTS, REDACT_STYLES } from '../src/doc/index.ts';
 import {
-  analyze, check, DEFAULT_IMAGE_SIZE, DEFAULT_LAYERS, info, layers, MARKDOWN_LAYERS, markdown, oneShotBrowser, openUrl, search, serveApp, UsageError,
+  analyze, check, DEFAULT_IMAGE_SIZE, DEFAULT_LAYERS, info, layers, MARKDOWN_LAYERS, markdown, oneShotBrowser, openUrl, redact, search, serveApp, UsageError,
   type Context, type Progress,
 } from './lib.ts';
 
@@ -29,6 +29,9 @@ Commands:
   search <query> <paths...>
                          Find where something is said: ranked transcript passages across videos
                          and folders, with times and the nearest keyframe (no browser; analyze first).
+  redact <video>         Blur every face: writes <name>.redacted.mp4 (audio copied) and a redaction
+                         log (<out>.redactions.json: every face track, which were kept visible).
+                         Analyzes faces first if needed. Review the output: detection misses some faces.
   info <video|doc>       Summarize a saved doc (no browser).
   layers                 Layers, their dependencies and settings with defaults (JSON).
 
@@ -48,6 +51,14 @@ markdown options:
   --image-size <px>      Long side of extracted keyframes (default ${DEFAULT_IMAGE_SIZE}).
   --from, --to <time>    Only this stretch (seconds, mm:ss or h:mm:ss), e.g. around a search hit.
   --layers, --set, --force   As for analyze (e.g. --layers faces adds faces per shot).
+
+redact options:
+  --out <path>           Output MP4 (default: <name>.redacted.mp4 next to the video).
+  --style <s>            ${REDACT_STYLES.join(' | ')} (default ${REDACT_DEFAULTS.style}; fill leaves nothing to undo).
+  --margin <f>           Grow each face box by this fraction on every side (default ${REDACT_DEFAULTS.margin}).
+  --hold <s>             Keep covering this long before and after each face track (default ${REDACT_DEFAULTS.hold}).
+  --keep <ids>           Face track ids to leave visible, e.g. 3,7 (ids are in the log and the doc).
+  --set, --force         As for analyze (face detection settings, e.g. --set faces.every=1).
 
 search options:
   --top <n>              Hits to return (default 10).
@@ -75,6 +86,10 @@ const { values: a, positionals } = parseArgs({
     from: { type: 'string' },
     to: { type: 'string' },
     top: { type: 'string', default: '10' },
+    style: { type: 'string' },
+    margin: { type: 'string' },
+    hold: { type: 'string' },
+    keep: { type: 'string' },
     port: { type: 'string', default: '4317' },
     'no-open': { type: 'boolean', default: false },
     browser: { type: 'string', default: 'msedge' },
@@ -160,11 +175,20 @@ async function main() {
     if (!(top >= 1)) throw new UsageError(`--top takes a positive number, got '${a.top}'`);
     return out(search(ctx, rest[0], rest.slice(1), { top }));
   }
-  if (!['analyze', 'markdown', 'info'].includes(cmd)) throw new UsageError(`unknown command '${cmd}' (have: ui, check, analyze, markdown, search, info, layers; see --help)`);
+  if (!['analyze', 'markdown', 'redact', 'info'].includes(cmd)) throw new UsageError(`unknown command '${cmd}' (have: ui, check, analyze, markdown, search, redact, info, layers; see --help)`);
   if (rest.length !== 1) throw new UsageError(`usage: videodoc ${cmd} <video>`);
   const common = { layers: list(a.layers), set: a.set, force: a.force, dryRun: a['dry-run'] };
   if (cmd === 'info') return out(info(ctx, rest[0]));
   if (cmd === 'analyze') return out(await analyze(ctx, rest[0], { ...common, doc: a.out }));
+  if (cmd === 'redact') {
+    const num = (v: string | undefined, what: string) => {
+      if (v === undefined) return undefined;
+      const n = Number(v);
+      if (!Number.isFinite(n)) throw new UsageError(`--${what} takes a number, got '${v}'`);
+      return n;
+    };
+    return out(await redact(ctx, rest[0], { set: a.set, force: a.force, dryRun: a['dry-run'], out: a.out, style: a.style, margin: num(a.margin, 'margin'), hold: num(a.hold, 'hold'), keep: a.keep }));
+  }
   const size = Number(a['image-size']);
   if (!Number.isFinite(size)) throw new UsageError(`--image-size takes a number of pixels, got '${a['image-size']}'`);
   const r = await markdown(ctx, rest[0], { ...common, out: a.out, images: a.images, imageSize: size, from: a.from, to: a.to });

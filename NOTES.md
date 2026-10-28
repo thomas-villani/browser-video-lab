@@ -544,3 +544,42 @@ minute), pan1080 after. Estimates use 0.22x the duration for the transcript plus
 shots (0.2x with faces), from the step-4 table; they are for an integrated GPU.
 Found while testing: `[hidden]` lost to `display: grid` (the empty player showed under the
 welcome screen), and the previous video's "extracting keyframes…" status carried over.
+
+## videodoc step 6, part 1: redaction (2026-10-27)
+
+`videodoc redact` = faces layer (computed if missing) -> regions per frame (`RedactionCursor`:
+box + 15% margin, held 0.3 s within the shot) -> mediabunny `Conversion` with a `process` hook
+(H.264 at 1.25x the source bitrate, audio copied). Iris Xe, Edge headless, AC + overlay:
+
+| Video | Frames | Face tracks | Frames with regions | Redaction | Output vs source |
+|---|---|---|---|---|---|
+| pan1080 (0:20, painted-on demo boxes, 250+ faces/frame) | 600 | 13,225 | 600 (max 626 regions) | 20.9 s, **29 fps** (first version: 3 fps) | — |
+| rickroll (3:33, 25 fps, close-ups, cuts) | 5,326 | 369 | 5,022 | 68 s, **78 fps** | 72 vs 84 MB, AAC copied |
+| walk (6:29, 30 fps, crowded street) | 11,684 | 25,278 | 11,613 | 281 s, **42 fps** | 285 vs 225 MB, AAC copied |
+| bodycam (17:35, 30 fps, night, from scratch) | 31,661 | 1,238 | 20,500 | faces ~330 s + redaction 414 s (**77 fps**); **752 s wall, 1.4x real time** | 462 vs 376 MB |
+
+Findings:
+
+1. **Draw per strength level, not per face.** One blur filter per face made a crowd frame cost
+   hundreds of filtered draws (3 fps). Now regions are grouped into levels by size (blur
+   radius ~ a fifth of the face: 6 * 2^k px, done as a 6 px blur on a 2^k-downscaled copy;
+   pixelate: 4 * 2^k px blocks) and each level is one small copy plus one clipped draw of a
+   path holding all its rounded rectangles: 10x faster on the crowd; ordinary videos run at
+   70-80 fps, about the decode + encode cost.
+2. **Holds must stop at cuts.** Holding a close-up's box 0.3 s past a cut left a large blob in
+   the next shot (music video). Holds now stay within the track's shot (scenes layer).
+3. **Fragmented tracks multiply held boxes.** IoU-linked tracks break under motion, and holding
+   every fragment covered faces twice (crowd: 383k regions for 151k face-frames). A held box
+   that overlaps a live track's box by > 30% (of the smaller box) is dropped: 279k regions.
+4. Bitrate: `QUALITY_HIGH` gave 5 Mb/s on a 3.2 Mb/s source (1.7x the size); 1.25x the source
+   bitrate keeps files near the original size (walk and bodycam are larger: their sources are
+   below what the encoder settles at for 1080p30 noise and motion).
+5. The region shape is a rounded rectangle (corner radius 30% of the shorter side), which
+   covers the detector box whenever the margin is 10% or more.
+6. Visual checks (frames extracted with ffmpeg, which the product does not use): faces covered
+   in close-ups, a nighttime car interior and an arrest, a crowded street (small background
+   faces too); over-blur where the detector fires on hands. pan1080 is not a fair test: its
+   faces carry painted boxes and landmark dots, and YuNet misses many of them.
+7. The app (download fallback, headless): Blur faces on pan1080 -> queued as a "Blurring faces"
+   step, done in 25 s, MP4 + log downloaded, no page errors. The save dialog and folder writes
+   need a manual check in Chrome/Edge.

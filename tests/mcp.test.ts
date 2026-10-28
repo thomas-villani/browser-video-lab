@@ -18,7 +18,7 @@ after(() => client.close());
 
 test('mcp: tools are listed with schemas generated from the layer registry', async () => {
   const { tools } = await client.listTools();
-  assert.deepEqual(tools.map((t) => t.name), ['markdown', 'search', 'analyze', 'info', 'layers', 'check']);
+  assert.deepEqual(tools.map((t) => t.name), ['markdown', 'search', 'analyze', 'redact', 'info', 'layers', 'check']);
   const analyze = tools.find((t) => t.name === 'analyze')!;
   assert.deepEqual((analyze.inputSchema.properties!.layers as { items: { enum: string[] } }).items.enum, LAYER_NAMES);
   assert.match((analyze.inputSchema.properties!.set as { description: string }).description, /faces\.every=2/);
@@ -46,6 +46,11 @@ test('mcp: mistakes come back as tool errors that say how to fix them', async ()
   const setting = await client.callTool({ name: 'analyze', arguments: { video: 'package.json', set: ['faces.evry=4'], dryRun: true } });
   assert.equal(setting.isError, true);
   assert.match(text(setting), /faces\.every/);
+  const style = await client.callTool({ name: 'redact', arguments: { video: 'package.json', style: 'smudge' } });
+  assert.equal(style.isError, true);
+  assert.match(text(style), /style takes blur, pixelate, fill/);
+  const over = await client.callTool({ name: 'redact', arguments: { video: 'package.json', out: 'package.json' } });
+  assert.match(text(over), /overwrite the video/);
 });
 
 test('mcp: search finds passages across a folder and lists videos not analyzed yet', async () => {

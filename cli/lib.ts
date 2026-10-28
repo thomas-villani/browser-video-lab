@@ -5,13 +5,13 @@
 // Compute runs in a headless Edge/Chrome (WebGPU) driving analyze.html; planning, caching and
 // reading docs run in Node, so commands with nothing to compute never touch a browser.
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, closeSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, closeSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  deriveLayers, docPathFor, fingerprint, fmtTime, formatDoc, LAYER_NAMES, newDoc, parseDoc, parseSettings, plan, PRODUCERS, search as searchDocs,
-  summarize, toMarkdown, withLayers,
-  type KeyframeItem, type Layers, type Plan, type VideoDoc,
+  deriveLayers, docPathFor, fingerprint, fmtTime, formatDoc, formatLog, LAYER_NAMES, newDoc, parseDoc, parseKeep, parseSettings, plan, PRODUCERS,
+  REDACT_DEFAULTS, REDACT_STYLES, redactionLog, search as searchDocs, summarize, toMarkdown, withLayers,
+  type KeyframeItem, type Layers, type Plan, type RedactOptions as RedactSettings, type RedactStyle, type VideoDoc,
 } from '../src/doc/index.ts';
 
 export const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -35,9 +35,10 @@ type Page = any;
 
 /** Where compute runs: a fresh browser per command (CLI) or one kept warm (MCP). */
 export interface Browser {
-  /** Run `fn` on the compute page with `video` served at `${base}@file/video`. Progress from
-   *  the page goes to `onProgress`; aborting `signal` stops the run (the page is discarded). */
-  run<T>(video: string | undefined, fn: (page: Page, base: string) => Promise<T>, onProgress?: (p: Progress) => void, signal?: AbortSignal): Promise<T>;
+  /** Run `fn` on the compute page with `files` (key -> path) served at `${base}@file/<key>`
+   *  (keys starting with `out` are writable, see the harness). Progress from the page goes to
+   *  `onProgress`; aborting `signal` stops the run (the page is discarded). */
+  run<T>(files: Record<string, string>, fn: (page: Page, base: string) => Promise<T>, onProgress?: (p: Progress) => void, signal?: AbortSignal): Promise<T>;
   close(): Promise<void>;
 }
 
@@ -92,9 +93,9 @@ async function runOn<T>(page: Page, fn: () => Promise<T>, signal?: AbortSignal):
 /** A new browser for every run, closed afterwards (the CLI: one command per process). */
 export function oneShotBrowser(o: BrowserOptions): Browser {
   return {
-    async run(video, fn, onProgress, signal) {
+    async run(files, fn, onProgress, signal) {
       const { openBrowser } = await harness();
-      const b = await openBrowser({ build: 'auto', browser: o.browser, headed: o.headed, files: video ? { video } : {} });
+      const b = await openBrowser({ build: 'auto', browser: o.browser, headed: o.headed, files: { ...files } });
       try {
         const { page, state } = await computePage(b.browser, b.base);
         state.onProgress = onProgress;
@@ -122,7 +123,7 @@ export function warmBrowser(o: BrowserOptions, idleMs = 10 * 60_000): Browser {
     warm = undefined;
     if (w) await (await w.catch(() => undefined))?.b.close().catch(() => {});
   };
-  const run = async <T>(video: string | undefined, fn: (page: Page, base: string) => Promise<T>, onProgress?: (p: Progress) => void, signal?: AbortSignal) => {
+  const run = async <T>(files: Record<string, string>, fn: (page: Page, base: string) => Promise<T>, onProgress?: (p: Progress) => void, signal?: AbortSignal) => {
     clearTimeout(idle);
     warm ??= harness().then(async ({ openBrowser }) => ({ b: await openBrowser({ build: 'auto', browser: o.browser, headed: o.headed, files: {} }) }));
     let w: Warm;
@@ -134,8 +135,8 @@ export function warmBrowser(o: BrowserOptions, idleMs = 10 * 60_000): Browser {
     }
     if (!w.page || w.page.page.isClosed()) w.page = await computePage(w.b.browser, w.b.base);
     const { page, state } = w.page;
-    if (video) w.b.files.video = video;
-    else delete w.b.files.video;
+    for (const k of Object.keys(w.b.files)) delete w.b.files[k];
+    Object.assign(w.b.files, files);
     state.onProgress = onProgress;
     try {
       return await runOn(page, () => fn(page, w.b.base), signal);
@@ -146,8 +147,8 @@ export function warmBrowser(o: BrowserOptions, idleMs = 10 * 60_000): Browser {
     }
   };
   return {
-    run(video, fn, onProgress, signal) {
-      const next = queue.then(() => run(video, fn, onProgress, signal));
+    run(files, fn, onProgress, signal) {
+      const next = queue.then(() => run(files, fn, onProgress, signal));
       queue = next.catch(() => {});
       return next;
     },
@@ -308,7 +309,7 @@ async function ensure(ctx: Context, video: string, docPath: string, requested: s
       }
     }
     const result: Awaited<ReturnType<Window['videodoc']['compute']>> = await ctx.browser.run(
-      video,
+      { video },
       (page, base) =>
         page.evaluate(
           ([url, layers, inp]: [string, typeof p.layers, Partial<Layers>]) => window.videodoc.compute(url, layers, inp),
@@ -396,7 +397,7 @@ async function extractImages(ctx: Context, video: string, keyframes: KeyframeIte
   ctx.report.log(`keyframe images: extracting ${todo.length} of ${keyframes.length}`);
   let ms = 0;
   const jpegs: string[] = await ctx.browser.run(
-    video,
+    { video },
     async (page, base) => {
       const t0 = Date.now();
       const r = await page.evaluate(
@@ -447,6 +448,83 @@ export async function markdown(ctx: Context, videoArg: string, o: MarkdownOption
     /** Keyframe image files in Markdown order (with images). */
     imageFiles: o.images ? keyframes.map((k) => imagePath(video, k)) : [],
   };
+}
+
+export interface RedactOptions extends Omit<AnalyzeOptions, 'layers' | 'doc'> {
+  /** Output MP4 (default: <video name>.redacted.mp4 next to the video). */
+  out?: string;
+  style?: string;
+  margin?: number;
+  hold?: number;
+  /** Track ids to leave visible: "3,7" or [3, 7]. */
+  keep?: string | number[];
+}
+
+/** Check and complete redaction settings (defaults from REDACT_DEFAULTS). */
+export function redactSettings(o: RedactOptions): RedactSettings {
+  const style = (o.style ?? REDACT_DEFAULTS.style) as RedactStyle;
+  if (!REDACT_STYLES.includes(style)) throw new UsageError(`style takes ${REDACT_STYLES.join(', ')}, got '${o.style}'`);
+  const num = (v: number | undefined, d: number, what: string, max: number) => {
+    const n = v ?? d;
+    if (!(Number.isFinite(n) && n >= 0 && n <= max)) throw new UsageError(`${what} takes a number from 0 to ${max}, got '${v}'`);
+    return n;
+  };
+  let keep: number[];
+  try {
+    keep = parseKeep(o.keep);
+  } catch (e) {
+    throw new UsageError((e as Error).message);
+  }
+  return { style, margin: num(o.margin, REDACT_DEFAULTS.margin, 'margin', 2), hold: num(o.hold, REDACT_DEFAULTS.hold, 'hold', 10), keep };
+}
+
+/**
+ * Blur (or pixelate, or fill) every face: analyzes faces first if needed, writes the redacted
+ * MP4 (audio copied) and a redaction log, <out>.redactions.json, listing every face track and
+ * which were kept visible.
+ */
+export async function redact(ctx: Context, videoArg: string, o: RedactOptions = {}) {
+  const video = videoPath(ctx, videoArg);
+  const settings = redactSettings(o);
+  const out = o.out ? userPath(ctx, o.out) : join(dirname(video), `${basename(video).replace(/\.[^.]+$/, '')}.redacted.mp4`);
+  if (resolve(out) === resolve(video)) throw new UsageError('the output would overwrite the video; pass another --out');
+  if (!/\.mp4$/i.test(out)) throw new UsageError(`the output is MP4; name it .mp4, got ${out}`);
+  const r = await ensure(ctx, video, docPathFor(video), ['faces'], o);
+  if ('dryRun' in r) return r.dryRun;
+  const t = redactionLog(r.doc, settings).totals;
+  ctx.report.log(`redacting ${t.redacted} face tracks${t.kept ? ` (keeping ${t.kept} visible)` : ''} on ${t.framesWithRegions} of ${r.doc.source.frames} frames (${settings.style})`);
+  const part = `${out}.part`;
+  writeFileSync(part, '');
+  let result: { frames: number; ms: number };
+  try {
+    // The page gets the doc without the layers it does not need (a transcript can be large).
+    const doc = { ...r.doc, layers: { faces: r.doc.layers.faces, scenes: r.doc.layers.scenes } };
+    result = await ctx.browser.run(
+      { video, out: part },
+      (page, base) =>
+        page.evaluate(
+          ([url, outUrl, d, s]: [string, string, VideoDoc, RedactSettings]) => window.videodoc.redact(url, outUrl, d, s),
+          [`${base}@file/video`, `${base}@file/out`, doc, settings],
+        ),
+      ctx.report.progress,
+      ctx.signal,
+    );
+  } catch (e) {
+    rmSync(part, { force: true });
+    throw e;
+  }
+  if (result.frames !== r.doc.source.frames) {
+    rmSync(part, { force: true });
+    throw new Error(`decoded ${result.frames} frames but the faces layer has ${r.doc.source.frames}; the regions would not line up (re-analyze with --force)`);
+  }
+  renameSync(part, out);
+  const log = redactionLog(r.doc, settings, { name: basename(out), frames: result.frames, ms: result.ms });
+  const logPath = `${out}.redactions.json`;
+  writeFileSync(logPath, formatLog(log));
+  ctx.report.log(`  ${result.frames} frames in ${(result.ms / 1000).toFixed(1)} s (${((result.frames * 1000) / result.ms).toFixed(0)} fps)`);
+  ctx.report.log(`  -> ${out}\n  -> ${logPath}`);
+  ctx.report.log(`  note: ${log.caveat}`);
+  return { out, log: logPath, doc: r.docPath, settings, totals: log.totals, frames: result.frames, ms: result.ms, wallMs: r.wallMs + result.ms, caveat: log.caveat };
 }
 
 export interface SearchOptions {
@@ -533,7 +611,7 @@ export async function check(ctx: Context, browserName: string) {
   const models = Object.fromEntries(
     ['yunet_face_dyn.onnx', 'silero_vad.onnx', ...['whisper-base', 'whisper-small'].map((m) => `onnx-community/${m}`)].map((m) => [m, existsSync(join(ROOT, 'public/models', m))]),
   );
-  const env: Awaited<ReturnType<Window['videodoc']['check']>> = await ctx.browser.run(undefined, (page) => page.evaluate(() => window.videodoc.check()), undefined, ctx.signal);
+  const env: Awaited<ReturnType<Window['videodoc']['check']>> = await ctx.browser.run({}, (page) => page.evaluate(() => window.videodoc.check()), undefined, ctx.signal);
   if (!env.webgpu) problems.push('no WebGPU adapter: faces and scenes need it (try --browser chrome, or update GPU drivers)');
   if (!env.crossOriginIsolated) problems.push('page is not cross-origin isolated: wasm runs single-threaded');
   if (!env.decode.h264) problems.push('no H.264 decoder in this browser');

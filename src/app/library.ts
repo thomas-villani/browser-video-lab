@@ -10,6 +10,7 @@ type DirHandle = FileSystemDirectoryHandle & { values(): AsyncIterable<FileSyste
 declare global {
   interface Window {
     showDirectoryPicker?: (o?: { mode?: 'read' | 'readwrite'; id?: string }) => Promise<FileSystemDirectoryHandle>;
+    showSaveFilePicker?: (o?: { suggestedName?: string; id?: string; types?: { description: string; accept: Record<string, string[]> }[] }) => Promise<FileSystemFileHandle>;
   }
 }
 
@@ -32,6 +33,8 @@ export interface Entry {
   step?: number;
   /** Video length in seconds before there is a doc (probeDuration), for time estimates. */
   duration?: number;
+  /** Set when a redacted copy was asked for: it is made after the analysis in the queue. */
+  redactTo?: RedactTarget;
   /** Keyframe images by frame: object URLs. */
   images: Map<number, string>;
 }
@@ -156,4 +159,43 @@ export function probeDuration(file: File): Promise<number | undefined> {
     v.onerror = () => done(undefined);
     v.src = url;
   });
+}
+
+/** Where a redacted copy goes: a file (next to the video for folder entries, else one the
+ *  person picks) or, without the File System Access API, a download of the whole MP4. */
+export interface RedactTarget {
+  name: string;
+  file?: FileSystemFileHandle;
+  /** The redaction log's file (folder entries); otherwise it is downloaded. */
+  log?: FileSystemFileHandle;
+}
+
+/** Ask where to save the redacted copy. Call from a click (the save dialog needs one);
+ *  undefined when the person cancels. */
+export async function redactTarget(e: Entry): Promise<RedactTarget | undefined> {
+  const name = `${e.name.replace(/\.[^.]+$/, '')}.redacted.mp4`;
+  if (e.dir) {
+    return {
+      name,
+      file: await e.dir.getFileHandle(name, { create: true }),
+      log: await e.dir.getFileHandle(`${name}.redactions.json`, { create: true }),
+    };
+  }
+  if (!window.showSaveFilePicker) return { name };
+  try {
+    const file = await window.showSaveFilePicker({ suggestedName: name, id: 'videodoc-redacted', types: [{ description: 'MP4 video', accept: { 'video/mp4': ['.mp4'] } }] });
+    return { name: file.name, file };
+  } catch (err) {
+    if ((err as DOMException).name === 'AbortError') return undefined;
+    throw err;
+  }
+}
+
+/** Save a file the browser way: a download. */
+export function download(name: string, data: BlobPart, type: string) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([data], { type }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
 }

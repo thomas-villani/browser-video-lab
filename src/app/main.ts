@@ -1,9 +1,12 @@
 // videodoc app (app.html): open a folder or drop videos, analyze them in this browser, read them
 // (the same Markdown view agents get, with a player beside it) and search across them. Nothing
 // is uploaded: analysis runs here on WebGPU, docs are saved next to the videos or kept in memory.
-import { highlight, search, toMarkdown, type LayerName } from '../doc/index.ts';
+import { formatLog, highlight, REDACT_DEFAULTS, redactionLog, search, toMarkdown, type LayerName } from '../doc/index.ts';
 import { analyze, frameImages } from '../analyze';
-import { canOpenFolders, downloadDoc, fromFiles, loadSavedImages, openFolder, probeDuration, saveDoc, storeImages, type Entry } from './library';
+import { redact } from '../redact';
+import {
+  canOpenFolders, download, downloadDoc, fromFiles, loadSavedImages, openFolder, probeDuration, redactTarget, saveDoc, storeImages, type Entry,
+} from './library';
 import { analysisSteps, esc, estimate, markdownToHtml, marks, stepOf, suggestions } from './render';
 import './style.css';
 
@@ -51,10 +54,11 @@ let closeTodo: (() => void) | undefined;
 const queue: Entry[] = [];
 let running = false;
 
-function layersWanted(): LayerName[] {
+function layersWanted(e?: Entry): LayerName[] {
   const layers: LayerName[] = ['speech', 'scenes', 'keyframes'];
   if ($<HTMLInputElement>('#opt-transcript').checked) layers.push('transcript');
-  if ($<HTMLInputElement>('#opt-faces').checked) layers.push('faces');
+  // Redaction needs faces; a video analyzed before keeps the layers it has.
+  if ($<HTMLInputElement>('#opt-faces').checked || e?.redactTo || e?.doc?.layers.faces) layers.push('faces');
   return layers;
 }
 
@@ -86,39 +90,85 @@ async function runQueue() {
     const e = queue.shift()!;
     e.status = 'analyzing';
     e.progress = '';
-    e.steps = analysisSteps(layersWanted(), new Set(Object.keys(e.doc?.layers ?? {})));
+    e.steps = [...analysisSteps(layersWanted(e), new Set(Object.keys(e.doc?.layers ?? {}))), ...(e.redactTo ? ['Blurring faces'] : [])];
     e.step = -1;
     renderList();
     if (state.selected === e && !e.doc) renderPending(e);
     try {
       const t0 = performance.now();
-      e.doc = await analyze(await e.file(), layersWanted(), {
-        doc: e.doc,
-        onProgress: (p) => {
-          e.step = stepOf(p, e.steps!);
-          e.progress = p.total > 1 ? `${Math.floor((100 * p.done) / p.total)}%` : '';
-          renderEntry(e);
-          if (state.selected === e && !e.doc) renderPending(e);
-        },
-      });
-      e.status = 'ready';
-      e.progress = `done in ${((performance.now() - t0) / 1000).toFixed(0)} s`;
+      const onProgress = (p: { pass: string; stage: string; done: number; total: number }) => {
+        e.step = p.stage === 'redacting' ? e.steps!.length - 1 : stepOf(p, e.steps!);
+        e.progress = p.total > 1 ? `${Math.floor((100 * p.done) / p.total)}%` : '';
+        renderEntry(e);
+        if (state.selected === e && !e.doc) renderPending(e);
+      };
+      e.doc = await analyze(await e.file(), layersWanted(e), { doc: e.doc, onProgress });
       const saved = await saveDoc(e);
-      if (!saved) e.progress += ' (not saved: download the doc to keep it)';
-      const more = queue.length ? ` ${queue.length} more to go.` : '';
-      const said = e.doc.layers.transcript?.items.length;
-      toast(`<b>${esc(e.name)}</b> is ready to read${said ? ' and search' : said === 0 ? ' (no speech found, so nothing to search)' : ''}.${more}`, state.selected === e ? {} : { action: 'Open', onAction: () => void showEntry(e) });
+      if (e.redactTo) {
+        await redactEntry(e, onProgress);
+        e.status = 'ready';
+        e.progress = `redacted in ${((performance.now() - t0) / 1000).toFixed(0)} s`;
+      } else {
+        e.status = 'ready';
+        e.progress = `done in ${((performance.now() - t0) / 1000).toFixed(0)} s`;
+        if (!saved) e.progress += ' (not saved: download the doc to keep it)';
+        const more = queue.length ? ` ${queue.length} more to go.` : '';
+        const said = e.doc.layers.transcript?.items.length;
+        toast(`<b>${esc(e.name)}</b> is ready to read${said ? ' and search' : said === 0 ? ' (no speech found, so nothing to search)' : ''}.${more}`, state.selected === e ? {} : { action: 'Open', onAction: () => void showEntry(e) });
+      }
     } catch (err) {
       console.error(err);
-      e.status = 'error';
+      e.status = e.doc ? 'ready' : 'error';
       e.error = (err as Error).message;
-      toast(`Could not analyze <b>${esc(e.name)}</b>: ${esc(e.error)}`, { ms: 0 });
+      e.progress = e.doc ? `failed: ${e.error}` : undefined;
+      toast(`Could not ${e.redactTo ? 'redact' : 'analyze'} <b>${esc(e.name)}</b>: ${esc(e.error)}`, { ms: 0 });
     }
+    e.redactTo = undefined;
     renderList();
     if (state.selected === e) await showEntry(e);
     if (state.query) renderResults();
   }
   running = false;
+}
+
+// ---- redaction ----
+
+/** Ask where to save a redacted copy of e (from the click), then queue it: faces first if needed. */
+async function startRedact(e: Entry) {
+  const to = await redactTarget(e);
+  if (!to) return;
+  e.redactTo = to;
+  if (e.status === 'ready') e.status = 'new';
+  enqueue(e);
+  const faces = e.doc?.layers.faces ? '' : ' Faces are found first, which takes a while.';
+  toast(`Making <b>${esc(to.name)}</b>: every face blurred, sound kept.${faces} Progress shows in the list.`);
+}
+
+async function redactEntry(e: Entry, onProgress: (p: { pass: string; stage: string; done: number; total: number }) => void) {
+  const to = e.redactTo!;
+  const doc = e.doc!;
+  const writable = to.file ? ((await to.file.createWritable()) as unknown as WritableStream) : undefined;
+  const r = await redact(await e.file(), doc, writable, { ...REDACT_DEFAULTS, onProgress });
+  if (r.buffer) download(to.name, r.buffer, 'video/mp4');
+  const log = formatLog(redactionLog(doc, REDACT_DEFAULTS, { name: to.name, frames: r.frames, ms: r.ms }));
+  if (to.log) {
+    const w = await to.log.createWritable();
+    await w.write(log);
+    await w.close();
+  } else download(`${to.name}.redactions.json`, log, 'application/json');
+  const where = e.dir ? ' next to the video' : '';
+  const watch = to.file ? { action: 'Watch it', onAction: async () => playFile(await to.file!.getFile()) } : {};
+  toast(`Saved <b>${esc(to.name)}</b>${where}, with its redaction log. Detection misses some faces: watch it before you share it.`, { ms: 0, ...watch });
+}
+
+/** Play a file (e.g. a redacted copy) in the player; selecting a video goes back to it. */
+function playFile(f: File) {
+  if (state.videoUrl) URL.revokeObjectURL(state.videoUrl);
+  state.videoUrl = URL.createObjectURL(f);
+  video().src = state.videoUrl;
+  video().dataset.id = 'file';
+  $('#read-status').textContent = `playing ${f.name}`;
+  void video().play().catch(() => {});
 }
 
 // ---- video list ----
@@ -202,7 +252,7 @@ async function showEntry(e: Entry, at?: number, marked: string[] = []) {
     video().dataset.id = String(e.id);
   }
   $('#doc-actions').innerHTML = e.doc
-    ? `<button id="copy-md">Copy Markdown</button><button id="dl-doc">Download doc</button>${e.status === 'ready' ? '<button id="reanalyze" title="Compute the layers ticked above that are missing">Add layers</button>' : ''}`
+    ? `<button id="copy-md">Copy Markdown</button><button id="dl-doc">Download doc</button>${e.status === 'ready' ? `<button id="reanalyze" title="Compute the layers ticked above that are missing">Add layers</button>${state.gpu === false ? '' : '<button id="redact" title="Save a copy with every face blurred (sound kept) and a redaction log">Blur faces…</button>'}` : ''}`
     : '';
   $('#tip').hidden = !e.doc || tipSeen();
   $('#read-status').textContent = '';
@@ -459,6 +509,7 @@ function wire() {
       (ev.target as HTMLElement).textContent = 'Copied';
       setTimeout(() => ((ev.target as HTMLElement).textContent = 'Copy Markdown'), 1500);
     } else if (id === 'dl-doc') downloadDoc(e);
+    else if (id === 'redact') void startRedact(e);
     else if (id === 'reanalyze') {
       e.status = 'new';
       enqueue(e);

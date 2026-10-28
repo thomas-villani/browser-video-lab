@@ -123,7 +123,7 @@ passes, and expected time from a per-device calibration (device class × measure
 |---|---|---|---|
 | **markdown** | transcript, scenes, keyframes, captions? | Markdown (+ keyframe JPEGs) | Works without captions or an LLM; captions enrich it. The agent-facing "read the video" view. |
 | **search** | embeddings (+ transcript text) | ranked hits with time ranges and refs | Hybrid: BM25 over transcript/captions + vector similarity. Query-time text encoding runs in the browser too. |
-| **redact** | faces (+ plates) | encoded video + redaction log (JSON) | Needs output encoding (WebCodecs `VideoEncoder` + mediabunny output), audio passthrough. |
+| **redact** | faces (+ scenes; plates later) | encoded video + redaction log (JSON) | Built: mediabunny `Conversion` with a per-frame `process` hook, audio copied. Regions = track boxes grown by a margin, held 0.3 s within the shot; drawn per strength level (one downscaled copy of the frame per level, one clipped draw). |
 | **count** | objects / faces tracks | counts per label, per scene, over time | Mostly aggregation over tracks. |
 | **summarize** | markdown | text | The only LLM-dependent module; takes a pluggable `llm(prompt) => text` (WebLLM, a bring-your-own-key API, or the calling agent). |
 
@@ -178,7 +178,7 @@ Commands that only read a doc (`markdown` from complete layers, `search` over ca
 embeddings except the query vector) never need the GPU and return instantly.
 
 **MCP server.** stdio, same implementation as the CLI (`cli/lib.ts`), one tool per command
-(built: `markdown`, `search`, `analyze`, `info`, `layers`, `check`; later `redact`, `estimate`).
+(built: `markdown`, `search`, `analyze`, `redact`, `info`, `layers`, `check`; later `estimate`).
 Tool schemas are generated from `PRODUCERS`, like the CLI help. Long runs report MCP progress
 notifications; cancellation closes the compute page, which stops the work. The browser and
 compute page stay warm between calls, so an agent's second query skips browser start and page
@@ -228,8 +228,12 @@ loaded. Reading and searching work without WebGPU.
    First-run guidance added the same day: welcome screen with the two ways in, toasts that say
    what is ready and what to analyze (with a time estimate), step-by-step analysis progress,
    search placeholder and suggested queries from the transcripts, a one-time seek tip.
-6. **Redact module**: output encoding, redaction log, plates, and a review UI (8.1% of faces
-   are still missed against human labels, so a person must check the result).
+6. **Redact module**: ~~output encoding, redaction log~~ built 2026-10-27 (`src/doc/redact.ts`
+   regions and log, `src/redact.ts` decode/cover/encode, `videodoc redact`, MCP `redact`, the
+   app's Blur faces). Next: a review UI (tracks drawn over the player, keep/unkeep a track, add
+   a missed face by hand), then plates, and audio redaction (bleep spoken names using word
+   timestamps). 8.1% of faces are still missed against human labels, so a person must check
+   the result.
 7. Captions with a small VLM, pulled in where they visibly improve search or the Markdown view.
 8. Worker-by-default runtime, single shared GPU device (detector + Whisper), packaging/publishing.
 

@@ -2,6 +2,7 @@
 // Edge/Chrome via playwright-core. A page signals completion by setting window.__BENCH_RESULT__.
 import { execSync } from 'node:child_process';
 import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs';
+import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 import { chromium } from 'playwright-core';
 import { preview } from 'vite';
@@ -23,7 +24,8 @@ export function buildIsStale() {
 
 /**
  * Serve local files to the page at `/@file/<key>`, with range requests (mediabunny reads
- * videos in ranges, so large files are never loaded whole).
+ * videos in ranges, so large files are never loaded whole). Keys starting with `out` are
+ * outputs: the page writes them with `PUT /@file/<key>?pos=<byte offset>` (the file must exist).
  */
 function serveFiles(files) {
   return {
@@ -36,6 +38,7 @@ function serveFiles(files) {
           res.statusCode = 404;
           return res.end();
         }
+        if (req.method === 'PUT') return writeAt(key, path, req, res);
         const size = statSync(path).size;
         res.setHeader('Accept-Ranges', 'bytes');
         res.setHeader('Content-Type', 'application/octet-stream');
@@ -58,6 +61,25 @@ function serveFiles(files) {
       });
     },
   };
+}
+
+async function writeAt(key, path, req, res) {
+  const pos = Number(new URLSearchParams((req.url ?? '').split('?')[1] ?? '').get('pos'));
+  if (!key.startsWith('out') || !Number.isSafeInteger(pos) || pos < 0) {
+    res.statusCode = key.startsWith('out') ? 400 : 403;
+    return res.end();
+  }
+  const parts = [];
+  for await (const c of req) parts.push(c);
+  const data = Buffer.concat(parts);
+  const fh = await open(path, 'r+');
+  try {
+    await fh.write(data, 0, data.length, pos);
+  } finally {
+    await fh.close();
+  }
+  res.statusCode = 204;
+  res.end();
 }
 
 /** A page whose first few browser errors (first line each) are relayed to stderr. */

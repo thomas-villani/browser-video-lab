@@ -11,9 +11,9 @@ import { parseArgs } from 'node:util';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { LAYER_NAMES, PlanError, PRODUCERS, VERSION } from '../src/doc/index.ts';
+import { LAYER_NAMES, PlanError, PRODUCERS, REDACT_DEFAULTS, REDACT_STYLES, VERSION } from '../src/doc/index.ts';
 import {
-  analyze, check, DEFAULT_IMAGE_SIZE, DEFAULT_LAYERS, info, layers, MARKDOWN_LAYERS, markdown, search, UsageError, warmBrowser,
+  analyze, check, DEFAULT_IMAGE_SIZE, DEFAULT_LAYERS, info, layers, MARKDOWN_LAYERS, markdown, redact, search, UsageError, warmBrowser,
   type Context, type Progress,
 } from './lib.ts';
 
@@ -103,6 +103,29 @@ const TOOLS = [
     },
   },
   {
+    name: 'redact',
+    title: 'Blur faces in a video',
+    description:
+      'Write a copy of the video with every detected face blurred (or pixelated, or filled), audio copied, plus a redaction log (<out>.redactions.json) listing every face track and which were kept visible. ' +
+      'Analyzes faces first if needed (slow: roughly 2-12x real time on an integrated GPU, crowds slowest). Detection misses some faces, so a person must review the output before release; ' +
+      'say so when reporting the result. Track ids for keep come from a previous log or the doc.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        video: VIDEO,
+        out: { type: 'string', description: 'Output MP4 path (default: <name>.redacted.mp4 next to the video).' },
+        style: { type: 'string', enum: REDACT_STYLES, description: `How faces are covered (default ${REDACT_DEFAULTS.style}; fill leaves nothing to undo).` },
+        margin: { type: 'number', minimum: 0, maximum: 2, description: `Grow each face box by this fraction on every side (default ${REDACT_DEFAULTS.margin}).` },
+        hold: { type: 'number', minimum: 0, maximum: 10, description: `Seconds to keep covering before and after each face track, within its shot (default ${REDACT_DEFAULTS.hold}).` },
+        keep: { type: 'array', items: { type: 'integer', minimum: 1 }, description: 'Face track ids to leave visible.' },
+        set: SET,
+        force: FORCE,
+        dryRun: DRY_RUN,
+      },
+      required: ['video'],
+    },
+  },
+  {
     name: 'info',
     title: 'Summarize a saved doc',
     description: 'Summarize the saved videodoc of a video (or a .videodoc.json path): source facts, layers present and missing. No compute.',
@@ -129,7 +152,8 @@ const server = new Server(
     instructions:
       'videodoc analyzes local video files on this machine (in a headless browser with WebGPU) into a saved document of time-indexed layers, then answers from it. ' +
       'To understand a video, call markdown (add images: true or embedImages to see keyframes). To find where something is said across videos, ' +
-      'call search over files or folders, then markdown with from/to around a hit. Analysis is cached per video and settings; analyze takes a folder.',
+      'call search over files or folders, then markdown with from/to around a hit. To blur faces before sharing a video, call redact. ' +
+      'Analysis is cached per video and settings; analyze takes a folder.',
   },
 );
 
@@ -209,6 +233,21 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra): Promise<Call
       }
       case 'analyze':
         return { content: [{ type: 'text', text: json(await analyze(ctx, video(), common)) }] };
+      case 'redact':
+        return {
+          content: [
+            {
+              type: 'text',
+              text: json(
+                await redact(ctx, video(), {
+                  set: common.set, force: common.force, dryRun: common.dryRun,
+                  out: args.out as string | undefined, style: args.style as string | undefined,
+                  margin: args.margin as number | undefined, hold: args.hold as number | undefined, keep: args.keep as number[] | undefined,
+                }),
+              ),
+            },
+          ],
+        };
       case 'info':
         return { content: [{ type: 'text', text: json(info(ctx, video())) }] };
       case 'layers':

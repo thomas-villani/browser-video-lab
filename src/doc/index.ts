@@ -8,3 +8,4 @@ export * from './keyframes.ts';
 export * from './markdown.ts';
 export * from './search.ts';
 export * from './doc.ts';
+export * from './redact.ts';
