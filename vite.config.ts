@@ -41,8 +41,27 @@ function labelStore(): Plugin {
   };
 }
 
+// ONNX Runtime loads its wasm glue with a dynamic import() of public/ort*/…mjs. The dev server
+// rewrites that import to add ?import and then refuses it for public files ("should not be
+// imported from source code"), so serve those files as-is before its transform middleware.
+// The build and `vite preview` (videodoc ui, the CLI) are unaffected.
+function ortRuntime(): Plugin {
+  return {
+    name: 'ort-runtime',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const path = req.url?.split('?')[0] ?? '';
+        if (!/^\/ort(-hf)?\/[\w.-]+\.mjs$/.test(path) || !existsSync(`public${path}`)) return next();
+        res.setHeader('Content-Type', 'text/javascript');
+        for (const [k, v] of Object.entries(isolation)) res.setHeader(k, v);
+        res.end(readFileSync(`public${path}`));
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [labelStore()],
+  plugins: [ortRuntime(), labelStore()],
   server: { headers: isolation },
   preview: { headers: isolation },
   optimizeDeps: { exclude: ['onnxruntime-web'] },

@@ -111,7 +111,7 @@ export async function serve({ build = true, files = {}, port = 4317 } = {}) {
  * Build if needed, serve the pages and launch a browser; resolves with { browser, base, files,
  * close }. See serve() for `build` and `files`.
  */
-export async function openBrowser({ build = true, browser = 'msedge', headed = false, files = {} }) {
+export async function openBrowser({ build = true, browser = 'msedge', headed = false, files = {}, handleSIGINT = true }) {
   const { server, base } = await serve({ build, files });
   let b;
   try {
@@ -119,6 +119,8 @@ export async function openBrowser({ build = true, browser = 'msedge', headed = f
       channel: browser,
       headless: !headed,
       args: ['--enable-unsafe-webgpu', '--ignore-gpu-blocklist'],
+      // false: the caller handles Ctrl+C (the videodoc CLI cancels, cleans up, then closes).
+      handleSIGINT,
     });
   } catch (e) {
     await server.close();

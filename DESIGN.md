@@ -234,8 +234,19 @@ loaded. Reading and searching work without WebGPU.
    player with a live preview of the cover, keep a face by clicking it, add a missed face by
    dragging a box, faces listed per shot with thumbnails; saved as `<video>.redact.json`, a
    `RedactPlan`, which `videodoc redact` and MCP `redact` also use). Next: plates, and audio
-   redaction (bleep spoken names using word timestamps). 8.1% of faces are still missed
-   against human labels, so a person must check the result.
+   redaction. 8.1% of faces are still missed against human labels, so a person must check
+   the result.
+
+   Audio redaction (sketch, 2026-10-28): bleep or mute words using word-level timestamps, from
+   lists the user configures: names (suggested from the transcript's recurring proper nouns),
+   an opt-in profanity list for platforms like YouTube, and their own words and phrases
+   (stem-aware, with wildcards). Settings live in the same review plan (`<video>.redact.json`:
+   `audio: { lists, words, mode: bleep | mute, pad }`, plus spans added or removed by hand);
+   the app highlights matches in the reading view, where a click toggles one. The log lists
+   every covered span with its word. Audio-only redaction re-encodes the audio and copies the
+   video. To verify first: word timestamps from transformers.js Whisper (cross-attention
+   alignment), and whether Whisper writes profanity faithfully or softens it (it already drops
+   most "um"s); ASR misses mean a person still listens before release.
 7. Captions with a small VLM, pulled in where they visibly improve search or the Markdown view.
 8. Worker-by-default runtime, single shared GPU device (detector + Whisper), packaging/publishing.
 

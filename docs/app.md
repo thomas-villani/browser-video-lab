@@ -20,7 +20,9 @@ Everything runs in the page; nothing is uploaded.
 
 Videos without a doc show how long analysis will take; **Analyze** (one video) or **Analyze all**
 queues them. They are analyzed one at a time, with each step shown as it runs (Listening →
-Transcribing → Finding shots). You can read and search the others meanwhile.
+Transcribing → Finding shots). You can read and search the others meanwhile. **Cancel** takes a
+queued video off the queue, or stops the running job within a few seconds; nothing half-done is
+kept (a cancelled blurred copy is not saved, and a file created for it is removed).
 
 **What to analyze** (top right) chooses the layers for new analyses: speech, shots and keyframes
 always; the transcript (on by default; needed for search); faces (off by default; about doubles

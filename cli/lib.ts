@@ -95,7 +95,7 @@ export function oneShotBrowser(o: BrowserOptions): Browser {
   return {
     async run(files, fn, onProgress, signal) {
       const { openBrowser } = await harness();
-      const b = await openBrowser({ build: 'auto', browser: o.browser, headed: o.headed, files: { ...files } });
+      const b = await openBrowser({ build: 'auto', browser: o.browser, headed: o.headed, files: { ...files }, handleSIGINT: false });
       try {
         const { page, state } = await computePage(b.browser, b.base);
         state.onProgress = onProgress;

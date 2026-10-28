@@ -140,12 +140,16 @@ export async function computeLayers(input: MediaInput, planned: PlannedLayer[], 
       if (!gpu) throw new Error('WebGPU unavailable in this browser; use Chrome or Edge 113+');
       const device = await gpu.requestDevice();
       adapter = { vendor: gpu.info.vendor, architecture: gpu.info.architecture, description: gpu.info.description };
-      for await (const r of sceneStream(source, device)) {
-        times.push(r.t);
-        scores.push(r.score);
-        tick(r.frame);
+      try {
+        for await (const r of sceneStream(source, device)) {
+          times.push(r.t);
+          scores.push(r.score);
+          tick(r.frame);
+        }
+      } finally {
+        // Also when cancelled: an app that cancels and starts again must not pile up devices.
+        device.destroy();
       }
-      device.destroy();
     }
     const ms = performance.now() - t0;
     const n = times.length;

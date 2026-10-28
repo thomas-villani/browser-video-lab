@@ -17,3 +17,5 @@ public/label/*
 !results/labels/*.jsonl
 *.videodoc.json
 *.keyframes/
+*.redact.json
+*.redactions.json

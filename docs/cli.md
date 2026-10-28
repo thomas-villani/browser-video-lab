@@ -7,7 +7,10 @@ npm run videodoc -- <command> [options]     # from anywhere: node /path/to/brows
 Every command prints **one JSON object on stdout** (except `markdown` without `--out`, which
 prints Markdown) and writes progress and a human summary to **stderr**, so it pipes into `jq`
 or an agent as easily as it reads in a terminal. Exit codes: `0` ok, `1` failure (the message
-says how to fix it), `2` usage error.
+says how to fix it), `2` usage error, `130` cancelled.
+
+**Ctrl+C cancels** within a few seconds: the compute page is discarded, nothing half-done is
+saved to the doc, and a partly written redaction is deleted. A second Ctrl+C quits at once.
 
 Commands that compute (`analyze`, `markdown` with missing layers, `redact`, `check`) start a
 headless Edge (or `--browser chrome`; `--headed` to watch it). Commands that only read docs

@@ -55,6 +55,8 @@ let closeTodo: (() => void) | undefined;
 
 const queue: Entry[] = [];
 let running = false;
+/** The job running now, to cancel it. */
+let current: { e: Entry; ctl: AbortController } | undefined;
 
 function layersWanted(e?: Entry): LayerName[] {
   const layers: LayerName[] = ['speech', 'scenes', 'keyframes'];
@@ -96,6 +98,8 @@ async function runQueue() {
     e.step = -1;
     renderList();
     if (state.selected === e && !e.doc) renderPending(e);
+    const ctl = new AbortController();
+    current = { e, ctl };
     try {
       const t0 = performance.now();
       const onProgress = (p: { pass: string; stage: string; done: number; total: number }) => {
@@ -104,10 +108,10 @@ async function runQueue() {
         renderEntry(e);
         if (state.selected === e && !e.doc) renderPending(e);
       };
-      e.doc = await analyze(await e.file(), layersWanted(e), { doc: e.doc, onProgress });
+      e.doc = await analyze(await e.file(), layersWanted(e), { doc: e.doc, onProgress, signal: ctl.signal });
       const saved = await saveDoc(e);
       if (e.redactTo) {
-        await redactEntry(e, onProgress);
+        await redactEntry(e, onProgress, ctl.signal);
         e.status = 'ready';
         e.progress = `redacted in ${((performance.now() - t0) / 1000).toFixed(0)} s`;
       } else {
@@ -121,12 +125,21 @@ async function runQueue() {
         } else toast(`<b>${esc(e.name)}</b> is ready to read${said ? ' and search' : said === 0 ? ' (no speech found, so nothing to search)' : ''}.${more}`, state.selected === e ? {} : { action: 'Open', onAction: () => void showEntry(e) });
       }
     } catch (err) {
-      console.error(err);
-      e.status = e.doc ? 'ready' : 'error';
-      e.error = (err as Error).message;
-      e.progress = e.doc ? `failed: ${e.error}` : undefined;
-      toast(`Could not ${e.redactTo ? 'redact' : 'analyze'} <b>${esc(e.name)}</b>: ${esc(e.error)}`, { ms: 0 });
+      if (ctl.signal.aborted) {
+        // Back to how it was: nothing half-done is kept.
+        e.status = e.doc ? 'ready' : 'new';
+        e.progress = undefined;
+        e.reviewAfter = undefined;
+        toast(`Cancelled ${e.redactTo ? 'the blurred copy of' : 'analyzing'} <b>${esc(e.name)}</b>${e.redactTo ? '; nothing was saved' : ''}.`);
+      } else {
+        console.error(err);
+        e.status = e.doc ? 'ready' : 'error';
+        e.error = (err as Error).message;
+        e.progress = e.doc ? `failed: ${e.error}` : undefined;
+        toast(`Could not ${e.redactTo ? 'redact' : 'analyze'} <b>${esc(e.name)}</b>: ${esc(e.error)}`, { ms: 0 });
+      }
     }
+    current = undefined;
     e.redactTo = undefined;
     renderList();
     if (state.selected === e && review.entry !== e) {
@@ -137,6 +150,18 @@ async function runQueue() {
     if (state.query) renderResults();
   }
   running = false;
+}
+
+/** Cancel e's job: drop it from the queue, or stop it if it is running (within seconds). */
+function cancelJob(e: Entry) {
+  if (current?.e === e) return current.ctl.abort();
+  const i = queue.indexOf(e);
+  if (i < 0) return;
+  queue.splice(i, 1);
+  e.status = e.doc ? 'ready' : 'new';
+  e.redactTo = e.reviewAfter = undefined;
+  renderList();
+  if (state.selected === e && !e.doc) renderPending(e);
 }
 
 // ---- redaction ----
@@ -154,14 +179,22 @@ async function startRedact(e: Entry) {
   toast(`Making <b>${esc(to.name)}</b>: ${what}, sound kept.${faces} Progress shows in the list.`);
 }
 
-async function redactEntry(e: Entry, onProgress: (p: { pass: string; stage: string; done: number; total: number }) => void) {
+async function redactEntry(e: Entry, onProgress: (p: { pass: string; stage: string; done: number; total: number }) => void, signal: AbortSignal) {
   const to = e.redactTo!;
   const doc = e.doc!;
   await loadPlan(e);
   const opts = e.plan?.options ?? REDACT_DEFAULTS;
   const added = e.plan?.added ?? [];
   const writable = to.file ? ((await to.file.createWritable()) as unknown as WritableStream) : undefined;
-  const r = await redact(await e.file(), doc, writable, { ...opts, added, onProgress });
+  let r: Awaited<ReturnType<typeof redact>>;
+  try {
+    r = await redact(await e.file(), doc, writable, { ...opts, added, onProgress, signal });
+  } catch (err) {
+    // A file stream only replaces the file when closed: aborting it keeps whatever was there.
+    await writable?.abort().catch(() => {});
+    if (to.created) for (const n of [to.name, `${to.name}.redactions.json`]) await to.created.removeEntry(n).catch(() => {});
+    throw err;
+  }
   if (r.buffer) download(to.name, r.buffer, 'video/mp4');
   const log = formatLog(redactionLog(doc, opts, { name: to.name, frames: r.frames, ms: r.ms }, added));
   if (to.log) {
@@ -258,15 +291,27 @@ function entryHtml(e: Entry): string {
     : e.status === 'error' ? `<span class="err" title="${esc(e.error ?? '')}">failed: ${esc(e.error ?? '')}</span>`
     : e.status === 'new' ? `<span class="muted">not analyzed yet${e.duration ? ` · takes ${timeFor(e.duration)}` : ''}</span>`
     : e.progress ? `<span class="muted">${esc(e.progress)}</span>` : '';
-  const action = e.status === 'new' || e.status === 'error' ? `<button class="analyze primary">${e.status === 'error' ? 'Retry' : 'Analyze'}</button>` : '';
+  const action =
+    e.status === 'new' || e.status === 'error' ? `<button class="analyze primary">${e.status === 'error' ? 'Retry' : 'Analyze'}</button>`
+    : e.status === 'queued' || e.status === 'analyzing' ? `<button class="cancel" title="${e.status === 'queued' ? 'Take it off the queue' : 'Stop now; nothing half-done is kept'}">Cancel</button>`
+    : '';
   return `<li data-id="${e.id}" class="${state.selected === e ? 'sel' : ''} ${e.status}">
     <div class="row"><span class="name" title="${esc(e.path)}">${esc(e.path)}</span>${action}</div>
     <div class="meta">${meta} ${chips}</div>${status ? `<div class="status">${status}</div>` : ''}</li>`;
 }
 
+/** Update e's row in place, replacing only the parts that changed: progress ticks many times a
+ *  second, and a button rebuilt between mousedown and mouseup never gets the click (Cancel). */
 function renderEntry(e: Entry) {
   const li = document.querySelector(`#list li[data-id="${e.id}"]`);
-  if (li) li.outerHTML = entryHtml(e);
+  if (!li) return;
+  const tpl = document.createElement('template');
+  tpl.innerHTML = entryHtml(e).trim();
+  const next = tpl.content.firstElementChild!;
+  if (li.className !== next.className || li.children.length !== next.children.length) return li.replaceWith(next);
+  [...next.children].forEach((c, i) => {
+    if (li.children[i].outerHTML !== c.outerHTML) li.children[i].replaceWith(c);
+  });
 }
 
 function renderList() {
@@ -351,8 +396,8 @@ async function showEntry(e: Entry, at?: number, marked: string[] = []) {
 function renderPending(e: Entry) {
   const time = e.duration ? ` It takes ${timeFor(e.duration)} here.` : '';
   const body =
-    e.status === 'analyzing' ? `<p>Analyzing in this browser:</p><p class="big-steps">${stepsHtml(e)}</p><p class="muted">You can read and search other videos meanwhile.</p>`
-    : e.status === 'queued' ? `<p>Queued: ${plural(ahead(e), 'video')} ahead of it. Videos are analyzed one at a time.</p>`
+    e.status === 'analyzing' ? `<p>Analyzing in this browser:</p><p class="big-steps">${stepsHtml(e)}</p><p class="muted">You can read and search other videos meanwhile.</p><p><button class="cancel-this">Cancel</button></p>`
+    : e.status === 'queued' ? `<p>Queued: ${plural(ahead(e), 'video')} ahead of it. Videos are analyzed one at a time.</p><p><button class="cancel-this">Cancel</button></p>`
     : state.gpu === false ? '<p>Not analyzed yet, and this browser has no WebGPU to analyze it. Use Chrome or Edge, or the <code>videodoc</code> CLI.</p>'
     : `${e.status === 'error' ? `<p class="err">Analysis failed: ${esc(e.error ?? '')}</p>` : ''}
        <p>Not analyzed yet. Analysis transcribes what's said, finds the shots and picks a picture for each, in this browser.${time}</p>
@@ -550,6 +595,7 @@ function wire() {
     const e = li && state.entries.find((x) => x.id === Number(li.dataset.id));
     if (!e) return;
     if ((ev.target as HTMLElement).classList.contains('analyze')) enqueue(e);
+    else if ((ev.target as HTMLElement).classList.contains('cancel')) cancelJob(e);
     else void showEntry(e);
   });
   $('#results').addEventListener('click', (ev) => {
@@ -565,6 +611,7 @@ function wire() {
   $('#read').addEventListener('click', (ev) => {
     const el = (ev.target as HTMLElement).closest<HTMLElement>('[data-t]');
     if ((ev.target as HTMLElement).classList.contains('analyze-this') && state.selected) return enqueue(state.selected);
+    if ((ev.target as HTMLElement).classList.contains('cancel-this') && state.selected) return cancelJob(state.selected);
     if (el) seek(Number(el.dataset.t));
   });
   $('#doc-actions').addEventListener('click', async (ev) => {

@@ -4,7 +4,7 @@
 // arguments and prints.
 //
 // stdout: JSON results (one object per command; `markdown` without --out prints Markdown).
-// stderr: progress and human summaries. Exit codes: 0 ok, 1 failure, 2 usage error.
+// stderr: progress and human summaries. Exit codes: 0 ok, 1 failure, 2 usage error, 130 cancelled.
 import { parseArgs } from 'node:util';
 import { DocError, LAYER_NAMES, PlanError, REDACT_DEFAULTS, REDACT_STYLES } from '../src/doc/index.ts';
 import {
@@ -136,7 +136,17 @@ function progressPrinter() {
 }
 
 const progress = progressPrinter();
+// Ctrl+C cancels: the compute page is discarded, a partly written output is deleted, nothing
+// half-done is saved. A second Ctrl+C exits at once.
+const cancel = new AbortController();
+process.on('SIGINT', () => {
+  if (cancel.signal.aborted) process.exit(130);
+  progress.end();
+  log('cancelling… (Ctrl+C again to quit at once)');
+  cancel.abort();
+});
 const ctx: Context = {
+  signal: cancel.signal,
   browser: oneShotBrowser({ browser: a.browser!, headed: a.headed! }),
   report: {
     log: (s) => {
@@ -202,6 +212,12 @@ async function main() {
 }
 
 main().catch((e: unknown) => {
+  if (cancel.signal.aborted) {
+    log('cancelled');
+    out({ error: 'cancelled', kind: 'cancelled' });
+    process.exitCode = 130;
+    return;
+  }
   const err = e as Error;
   const usage = e instanceof UsageError || e instanceof PlanError;
   log(`error: ${err.message}`);

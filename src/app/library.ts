@@ -204,6 +204,8 @@ export function probeDuration(file: File): Promise<number | undefined> {
 export interface RedactTarget {
   name: string;
   file?: FileSystemFileHandle;
+  /** The folder the files were created in, when they did not exist before (removed on cancel). */
+  created?: FileSystemDirectoryHandle;
   /** The redaction log's file (folder entries); otherwise it is downloaded. */
   log?: FileSystemFileHandle;
 }
@@ -213,10 +215,12 @@ export interface RedactTarget {
 export async function redactTarget(e: Entry): Promise<RedactTarget | undefined> {
   const name = `${e.name.replace(/\.[^.]+$/, '')}.redacted.mp4`;
   if (e.dir) {
+    const existed = await e.dir.getFileHandle(name).then(() => true, () => false);
     return {
       name,
       file: await e.dir.getFileHandle(name, { create: true }),
       log: await e.dir.getFileHandle(`${name}.redactions.json`, { create: true }),
+      ...(!existed && { created: e.dir }),
     };
   }
   if (!window.showSaveFilePicker) return { name };
