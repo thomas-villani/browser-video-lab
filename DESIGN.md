@@ -248,6 +248,9 @@ loaded. Reading and searching work without WebGPU.
    alignment), and whether Whisper writes profanity faithfully or softens it (it already drops
    most "um"s); ASR misses mean a person still listens before release.
 7. Captions with a small VLM, pulled in where they visibly improve search or the Markdown view.
+   Together with **on-screen text (OCR)**: slides, screen recordings, whiteboards, documents
+   held up to a camera. Plan in NOTES.md ("On-screen text: plan", 2026-10-28): a text detector
+   on every keyframe screens, recognition runs only where it found text.
 8. Worker-by-default runtime, single shared GPU device (detector + Whisper), packaging/publishing.
 
 Ideas for later applications (2026-10-27, not scheduled):

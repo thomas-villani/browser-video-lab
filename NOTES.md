@@ -611,3 +611,43 @@ Findings:
    `kept: 1, added: 1`; the same as a plan file next to the video -> `videodoc redact` used it
    (pixelate, 81 fps); output frames checked with ffmpeg: hand box pixelated, kept face visible.
 5. Not covered headless: Open folder + review saved to disk, and the save dialog.
+
+## On-screen text (OCR): plan (2026-10-28, not built, nothing measured yet)
+
+Goal: the text on screen in slide decks, lectures, screen recordings, whiteboards, documents
+held up to a bodycam, burned-in captions; under each shot in the Markdown view and in search
+(lecture slides often use words the speaker never says verbatim).
+
+**Deciding where to read: let the text detector do it, not a slide classifier.** OCR is two
+stages: detection (where is text; PaddleOCR's DB detector is a few MB, milliseconds per image)
+and recognition (what does it say; heavier). Running detection on every keyframe costs almost
+nothing (50–200 per video) and answers "is there text here" per shot for every genre, so no
+presentation heuristic gates it. Recognition runs only on keyframes (and boxes) with text:
+cheap screening, expensive confirmation, as in the bodycam work.
+
+**What the existing layers still contribute** (inferred, not classified):
+- *Static shots* (scene score near zero within the shot, long shots, hard cuts between them)
+  are slides or a fixed camera. Within a static text shot, a small localized change marks a
+  build (a bullet appearing): add a keyframe there, so each build is read once. Needs a
+  per-shot motion figure from the frames pass (the scene scores are computed already, not
+  kept).
+- *Speech* near-continuous (> 90%) plus *faces* absent or one small track fixed in a corner
+  (picture-in-picture presenter) plus static text shots: label the video a presentation in the
+  Markdown header. A label for readers; it does not gate OCR.
+- Dedupe: consecutive shots with the same text (a slide revisited) are read once and refer back.
+
+**Recognition model, to measure on the Iris Xe before choosing:**
+- PaddleOCR PP-OCR recognizer (ONNX, ~10 MB, ORT Web): small and fast, good on clean
+  printed text; line by line from the detector's boxes.
+- Florence-2 (base, ~230M params; transformers.js, WebGPU): `<OCR>` / `<OCR_WITH_REGION>` and
+  captions from one model, so it would also deliver roadmap item 7. Heavier per image; fine if it
+  runs at about a second per keyframe. Leaning this way if the speed holds.
+
+**Shape:** a `text` layer, `{ keyframe, lines: { text, box, score }[] }` per keyframe with text,
+from a seek pass over selected frames (like keyframe images: extract and read in one pass).
+Markdown: the lines under the shot's image, as a quote block. Search: index the text with the
+transcript, hits marked as on-screen text.
+
+To check first: detector recall on small text at 768 px keyframes (may need the full-resolution
+frame, which the seek pass can provide); recognition on stylized slide fonts; Florence-2 speed
+and memory alongside Whisper in one page.
