@@ -774,3 +774,28 @@ Iris Xe, Edge headless, AC, "Best performance" overlay. `npm run test:browser`: 
 - **The suite found a bug on its first run:** a search hit's `at` was its transcript segment's
   start (0.25 s for "Daniel Reyes", said at 4.48 s), though the docs said "where the first matched
   word is said". With word times it is now half a second before the word (4.08 s).
+
+## videodoc step 9, part 1: models as data, pipeline presets, track layers (2026-10-28)
+
+- **Refactor check.** The browser suite before and after: every pinned figure and every layer
+  hash (faces, plates, scenes, keyframes, transcript) is unchanged, so the data-driven decoders
+  (`src/doc/models.ts`) reproduce the hand-written YuNet and plate decoders exactly. Saved docs
+  still recompute faces and plates once: their config hash now includes the model's
+  description and file fingerprint.
+- **A custom track layer** (`heads`: a copy of YuNet beside the preset, named by a relative
+  path, served to the page by the CLI) on rickroll-cuts: 10 tracks, test 3.1 s; re-run cached.
+- **RF-DETR nano as a `vehicles` layer** (`examples/pipelines/dashcam.json`, labels
+  car,truck,bus,motorcycle, minScore 0.5) with plates on dashcam-plates (10 s, 1080p30, AC,
+  Best performance): frame pass 102 s (plates 41 tracks, unchanged; vehicles 59 tracks, 1250
+  samples). The same clip with faces and plates takes ~22 s for the whole test, so RF-DETR
+  (~3 fps, 108 MB) costs about 8x real time on its own: fine as a demo of the plumbing, too
+  slow as the default object detector. A small YOLO (the `yolo` decoder) is the next thing to
+  try; Ultralytics models are AGPL, so a permissive one (YOLOX, D-FINE, RT-DETRv2-S) is preferable.
+- **sirv (vite preview) and `Range: bytes=0-0`:** answered with the whole file (an end of 0 is
+  read as "to the end"), so a size probe started a 108 MB download. Probes now ask for
+  `bytes=0-1`.
+- **Range reads poisoned ORT's model fetch in the app.** Fingerprinting `/models/yunet_face_dyn.onnx`
+  with range requests just before ORT fetched it whole made session creation fail ("protobuf
+  parsing failed"): the browser reused the cached partial response. Found by the app review
+  test (the CLI fingerprints in Node, so its tests passed). Range reads now use
+  `cache: 'no-store'`.

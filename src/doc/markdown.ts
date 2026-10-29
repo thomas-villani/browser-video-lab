@@ -81,7 +81,7 @@ export function toMarkdown(doc: VideoDoc, opts: MarkdownOptions = {}): string {
     !!words && `${words.toLocaleString('en-US')} words`,
     faces && `${faces.items.length} face tracks`,
   ].filter(Boolean);
-  const made = Object.entries(layers).map(([n, l]) => `${n}${l.producer.model ? ` (${l.producer.model})` : ''}`);
+  const made = Object.entries(layers).flatMap(([n, l]) => (l ? [`${n}${l.producer.model ? ` (${l.producer.model})` : ''}`] : []));
   const out = [`# ${source.name}`, '', facts.join(' · '), `<!-- ${doc.schema} · ${made.join(' · ')} -->`];
   if (excerpt) out.push('', `*Excerpt ${ts(from)}–${ts(opts.to ?? source.duration)} of the video.*`);
 

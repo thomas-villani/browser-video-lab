@@ -94,12 +94,26 @@ import { plan, parseSettings, resolve, PRODUCERS } from './src/doc/index.ts';
 
 resolve(['keyframes']);   // ['speech', 'scenes', 'keyframes']: dependencies, in order
 const p = await plan(doc, ['transcript', 'faces'], parseSettings(['faces.every=4']));
-p.layers;   // [{ name, status: 'cached' | 'compute', config, configHash }]
+p.layers;   // [{ name, status: 'cached' | 'compute', config, configHash, kind?, model? }]
 p.passes;   // { audio: ['transcript'], frames: ['faces'] }: what has to be decoded
 ```
 
 `PRODUCERS` holds each layer's dependencies, pass, description, defaults and help text (the CLI
-help and MCP schemas are generated from it). `deriveLayers(doc, plannedLayers)` computes the
+help and MCP schemas are generated from it). `plan`'s fifth argument adds a pipeline's track
+layers and models and a model-file fingerprint function:
+
+```ts
+import { checkPipeline, pipelineContext } from './src/doc/index.ts';
+
+const pipeline = checkPipeline(JSON.parse(text));        // PlanError with the fix when it is wrong
+const pc = pipelineContext(pipeline);                    // { producers, models, settings }
+const p = await plan(doc, pipeline.layers, pc.settings, false, { ...pc, fingerprint: async (url) => undefined });
+```
+
+Model descriptions (`ModelConfig`, `MODELS`, `resolveModel`) and the decoders (`decode`: `yolo`,
+`yolo-end2end`, `detr`, `yunet`) are pure (`src/doc/models.ts`), so they run and test in Node.
+`trackLayers(doc)` and `tracksOf(doc, name)` read every track layer, built-in or not. See
+[pipelines](pipelines.md). `deriveLayers(doc, plannedLayers)` computes the
 pure layers (keyframes) from layers already in the doc. Errors are `PlanError`s that list the
 valid names.
 
@@ -121,6 +135,13 @@ const doc = await analyze(file, ['transcript', 'scenes', 'keyframes'], {
   audio decoded once and video decoded once for every frame layer. Pure layers are derived last.
 - Progress reports `pass` (`probe`, `audio`, `frames`), a human `stage` and `done`/`total`.
 - `force: true` recomputes the requested layers.
+- `pipeline`: a checked [pipeline preset](pipelines.md) (`checkPipeline`): its track layers,
+  models and settings (`settings` wins). Model files are fingerprinted with range requests.
+
+`registerModel(name, model)` (`src/models.ts`) makes a model available by name to layers in this
+page: a description (`{ url, decoder, labels }`) or a spec with its own `decode(outputs, geo,
+minScore, dims)` for outputs no decoder preset reads. Name it in a track layer (`tracks: { logos:
+{ model: 'mine' } }`, with `models: { mine: { url } }` so the planner knows the file).
 
 `frameImages(input, times, { maxSide = 768, quality = 0.85 })` returns JPEG blobs of the frames
 at the given times, seeking to each (no full decode): how the keyframe images are made.
@@ -140,7 +161,8 @@ The compute code loads models and runtimes by URL from the page's origin:
 
 Serve the page **cross-origin isolated** (`Cross-Origin-Opener-Policy: same-origin`,
 `Cross-Origin-Embedder-Policy: require-corp`) so wasm runs multithreaded; `vite.config.ts` and
-the CLI's harness do this. A configurable model registry is on the roadmap.
+the CLI's harness do this. Models elsewhere (another origin, a CDN) are named by URL in a
+[pipeline](pipelines.md).
 
 ## Redacting (browser)
 

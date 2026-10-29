@@ -3,15 +3,17 @@
 // person saves (<video>.redact.json) and the redaction log written next to the output. The
 // browser half (src/redact.ts) decodes, draws over these regions, rewrites the audio and
 // encodes. Node computes the log without decoding anything.
-import type { Box, Track, VideoDoc } from './schema.ts';
+import { tracksOf } from './doc.ts';
+import { TRACK_LAYERS, type Box, type Track, type VideoDoc } from './schema.ts';
 import { trackBox } from './tracks.ts';
 import { findWords, mergeTimes, PROFANITY, type WordMatch } from './words.ts';
 
 export type RedactStyle = 'blur' | 'pixelate' | 'fill';
 export const REDACT_STYLES: RedactStyle[] = ['blur', 'pixelate', 'fill'];
-/** Layers of tracks that redaction covers. */
-export type RedactKind = 'faces' | 'plates';
-export const REDACT_KINDS: RedactKind[] = ['faces', 'plates'];
+/** A track layer that redaction covers: faces, plates, or one a pipeline defines. */
+export type RedactKind = string;
+/** The built-in ones. */
+export const REDACT_KINDS: RedactKind[] = TRACK_LAYERS;
 /** bleep: a 1 kHz tone over the word; mute: silence. */
 export type RedactSound = 'bleep' | 'mute';
 export const REDACT_SOUNDS: RedactSound[] = ['bleep', 'mute'];
@@ -28,7 +30,9 @@ export interface RedactOptions {
   keep: number[];
   /** Plate track ids to leave visible (a sign the detector took for a plate, a plate meant to be seen). */
   keepPlates: number[];
-  /** Which layers to cover, each when the doc has it (faces is required when listed). None:
+  /** Track ids to leave visible in a pipeline's track layers, by layer. */
+  keepTracks: Record<string, number[]>;
+  /** Which track layers to cover, each when the doc has it (faces is required when listed). None:
    *  the video is copied as it is (audio redaction only). */
   cover: RedactKind[];
   /** Words and phrases to bleep wherever they are spoken (names, places, numbers): see
@@ -46,7 +50,7 @@ export interface RedactOptions {
 }
 
 export const REDACT_DEFAULTS: RedactOptions = {
-  style: 'blur', margin: 0.15, hold: 0.3, keep: [], keepPlates: [], cover: ['faces', 'plates'],
+  style: 'blur', margin: 0.15, hold: 0.3, keep: [], keepPlates: [], keepTracks: {}, cover: ['faces', 'plates'],
   words: [], profanity: false, sound: 'bleep', lead: 0.4, tail: 0.2, keepWords: [],
 };
 
@@ -148,11 +152,15 @@ function overlap(a: Box, b: Box): number {
   return w > 0 && h > 0 ? (w * h) / Math.min(a[2] * a[3], b[2] * b[3]) : 0;
 }
 
-/** The layers `o` covers that `doc` has (faces is required when covered). */
+/** The track layers `o` covers that `doc` has, in doc order (faces is required when covered). */
 export function covered(doc: VideoDoc, o: Pick<RedactOptions, 'cover'>): RedactKind[] {
   if (o.cover.includes('faces') && !doc.layers.faces) throw new Error('the doc has no faces layer');
-  return REDACT_KINDS.filter((k) => o.cover.includes(k) && doc.layers[k]);
+  return Object.keys(doc.layers).filter((k) => o.cover.includes(k) && tracksOf(doc, k));
 }
+
+/** The track ids of layer `kind` that `o` leaves visible. */
+export const keptIds = (o: Pick<RedactOptions, 'keep' | 'keepPlates' | 'keepTracks'>, kind: RedactKind): number[] =>
+  kind === 'faces' ? o.keep : kind === 'plates' ? o.keepPlates : (o.keepTracks?.[kind] ?? []);
 
 /** Whether `o` (and spans `added` by hand) redact any audio. */
 export const coversAudio = (o: Pick<RedactOptions, 'words' | 'profanity'>, added: [number, number][] = []) =>
@@ -200,8 +208,8 @@ export const audioCover = (spans: AudioSpan[]): [number, number][] => mergeTimes
 export function coverTracks(doc: VideoDoc, o: RedactOptions, added: Track[] = []): CoverTrack[] {
   const out: CoverTrack[] = [];
   for (const kind of covered(doc, o)) {
-    const keep = new Set(kind === 'faces' ? o.keep : o.keepPlates);
-    for (const track of doc.layers[kind]!.items) if (!keep.has(track.id)) out.push({ track, kind });
+    const keep = new Set(keptIds(o, kind));
+    for (const track of tracksOf(doc, kind)!.items) if (!keep.has(track.id)) out.push({ track, kind });
   }
   for (const track of added) out.push({ track, kind: 'faces' });
   return out;
@@ -223,7 +231,7 @@ export interface RedactionLog {
   source: { name: string; fingerprint: string; frames: number; fps: number; width: number; height: number };
   output?: { name: string; frames: number; ms: number };
   /** Where the regions came from: each covered layer's producer (and the transcript's, for audio). */
-  detectors: Partial<Record<RedactKind | 'transcript', { model?: string; configHash: string; device: string; createdAt: string }>>;
+  detectors: Record<string, { model?: string; configHash: string; device: string; createdAt: string }>;
   options: RedactOptions;
   /** `plates`: how many of `tracks` are plate tracks. */
   totals: { tracks: number; redacted: number; kept: number; added: number; plates: number; framesWithRegions: number; regions: number; maxPerFrame: number };
@@ -267,8 +275,8 @@ export function redactionLog(doc: VideoDoc, o: RedactOptions, output?: Redaction
   const tracks: RedactionLog['tracks'] = [];
   const detectors: RedactionLog['detectors'] = {};
   for (const kind of kinds) {
-    const l = doc.layers[kind]!;
-    const keep = new Set(kind === 'faces' ? o.keep : o.keepPlates);
+    const l = tracksOf(doc, kind)!;
+    const keep = new Set(keptIds(o, kind));
     for (const t of l.items) tracks.push(entry(t, kind, keep.has(t.id)));
     detectors[kind] = { model: l.producer.model, configHash: l.producer.configHash, device: l.device, createdAt: l.createdAt };
   }
@@ -335,6 +343,8 @@ export interface RedactPlan {
   plates?: string;
   /** The transcript's configHash, when the doc had one (keepWords name its words). */
   transcript?: string;
+  /** Pipeline track layers' configHashes, by layer (for keepTracks). */
+  tracks?: Record<string, string>;
   options: RedactOptions;
   /** Faces added by hand: tracks with negative ids, boxes in source pixels, interpolated between samples. */
   added: Track[];
@@ -343,11 +353,16 @@ export interface RedactPlan {
 }
 
 export function newPlan(doc: VideoDoc, options: RedactOptions = REDACT_DEFAULTS): RedactPlan {
-  const hash = (k: 'faces' | 'plates' | 'transcript') => doc.layers[k]?.producer.configHash;
+  const hash = (k: string) => doc.layers[k]?.producer.configHash;
   const [faces, plates, transcript] = [hash('faces'), hash('plates'), hash('transcript')];
+  const custom = Object.keys(doc.layers).filter((k) => !(TRACK_LAYERS as string[]).includes(k) && tracksOf(doc, k));
+  const tracks = Object.fromEntries(custom.map((k) => [k, hash(k)!]));
+  const keepTracks = Object.fromEntries(Object.entries(options.keepTracks ?? {}).map(([k, ids]) => [k, [...ids]]));
   return {
     schema: 'videodoc-redact/0', source: { name: doc.source.name, fingerprint: doc.source.fingerprint }, ...(faces && { faces }), ...(plates && { plates }), ...(transcript && { transcript }),
-    options: { ...options, keep: [...options.keep], keepPlates: [...options.keepPlates], cover: [...options.cover], words: [...options.words], keepWords: [...options.keepWords] }, added: [], addedAudio: [],
+    ...(custom.length && { tracks }),
+    options: { ...options, keep: [...options.keep], keepPlates: [...options.keepPlates], keepTracks, cover: [...options.cover], words: [...options.words], keepWords: [...options.keepWords] },
+    added: [], addedAudio: [],
   };
 }
 
@@ -375,6 +390,14 @@ export function checkPlan(v: unknown, doc: VideoDoc): { plan: RedactPlan; warnin
     warnings.push(`plates were found again since the review, so its ${plan.options.keepPlates.length} kept plate(s) are blurred again; review them again`);
     plan.options.keepPlates = [];
   }
+  for (const [k, ids] of Object.entries(plan.options.keepTracks)) {
+    if (!Array.isArray(ids) || !ids.every((x) => Number.isInteger(x))) {
+      delete plan.options.keepTracks[k];
+    } else if (ids.length && p.tracks?.[k] !== plan.tracks?.[k]) {
+      warnings.push(`${k} were found again since the review, so its ${ids.length} kept track(s) are covered again; review them again`);
+      delete plan.options.keepTracks[k];
+    }
+  }
   if (p.transcript !== plan.transcript && plan.options.keepWords.length) {
     warnings.push(`the transcript was made again since the review, so its ${plan.options.keepWords.length} word(s) left audible are bleeped again; review them again`);
     plan.options.keepWords = [];
@@ -383,7 +406,7 @@ export function checkPlan(v: unknown, doc: VideoDoc): { plan: RedactPlan; warnin
     warnings.push(`unknown sound '${plan.options.sound}', using ${REDACT_DEFAULTS.sound}`);
     plan.options.sound = REDACT_DEFAULTS.sound;
   }
-  plan.options.cover = plan.options.cover.filter((k) => REDACT_KINDS.includes(k));
+  plan.options.cover = plan.options.cover.filter((k) => typeof k === 'string');
   plan.options.words = plan.options.words.filter((w) => typeof w === 'string' && w.trim());
   return { plan, warnings };
 }

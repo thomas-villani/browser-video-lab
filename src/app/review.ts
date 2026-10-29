@@ -1,13 +1,13 @@
 // Face and plate review: the regions drawn over the player frame by frame, with the cover previewed
 // live (the same drawing the redacted copy gets). Click a face or plate to leave it visible, drag
-// to cover one the detector missed. Tracks are named by key, `f:<id>` (faces, and hand tracks with
-// negative ids) or `p:<id>` (plates): ids are per layer. The choices are the entry's RedactPlan (saved as <video>.redact.json
+// to cover one the detector missed. Tracks are named by key, `<layer>:<id>` (`faces:3`, hand
+// tracks are faces with negative ids, `plates:7`, a pipeline's `vehicles:2`): ids are per layer. The choices are the entry's RedactPlan (saved as <video>.redact.json
 // for folder entries), which Blur faces and `videodoc redact` use. Nothing is decoded here: the
 // boxes come from the doc, the picture from the <video> element. Spoken words to bleep are
 // listed above the shots; while the preview plays, the player is muted over them and the tone
 // plays instead.
 import {
-  audioCover, audioSpans, cursorFor, handTrack, newPlan, REDACT_SOUNDS, REDACT_STYLES, setBox, setEnd, suggestNames, trackBox,
+  audioCover, audioSpans, covered, cursorFor, handTrack, keptIds, newPlan, REDACT_SOUNDS, REDACT_STYLES, setBox, setEnd, suggestNames, trackBox, tracksOf,
   type AudioSpan, type Box, type RedactionCursor, type RedactKind, type RedactPlan, type RedactSound, type RedactStyle, type Region, type SceneItem, type Track, type VideoDoc,
 } from '../doc/index.ts';
 import { coverer } from '../redact';
@@ -43,9 +43,16 @@ const MORE = 120;
 const HAND_SECONDS = 2;
 
 /** A track's key in the review: layer and id. */
-const keyOf = (kind: RedactKind, id: number) => `${kind === 'plates' ? 'p' : 'f'}:${id}`;
-const parseKey = (k: string) => ({ kind: (k[0] === 'p' ? 'plates' : 'faces') as RedactKind, id: Number(k.slice(2)) });
-const isHand = (k: string) => k.startsWith('f:-');
+const keyOf = (kind: RedactKind, id: number) => `${kind}:${id}`;
+const parseKey = (k: string) => ({ kind: k.slice(0, k.lastIndexOf(':')) as RedactKind, id: Number(k.slice(k.lastIndexOf(':') + 1)) });
+const isHand = (k: string) => k.startsWith('faces:-');
+/** "face", "plate", or a pipeline layer's name made singular ("vehicles" -> "vehicle"). */
+const noun = (kind: RedactKind, n = 1) => {
+  const one = kind === 'faces' ? 'face' : kind === 'plates' ? 'plate' : kind.replace(/s$/, '');
+  return n === 1 ? one : `${one}s`;
+};
+/** Box colors by layer: faces white, plates cyan, a pipeline's layers after them (hand boxes are amber). */
+const KIND_COLORS: [string, string][] = [['#ffffff', 'white'], ['#67e8f9', 'cyan'], ['#c084fc', 'violet'], ['#a3e635', 'lime'], ['#f472b6', 'pink'], ['#fb923c', 'orange']];
 
 const fmtT = (s: number, frac = false) => {
   const m = Math.floor(s / 60);
@@ -62,7 +69,7 @@ export class Review {
   private cover!: ReturnType<typeof coverer>;
   private byId = new Map<string, Track>();
   private shots: SceneItem[] = [];
-  /** Track keys by shot: hand tracks first, then faces, then plates, longest first. */
+  /** Track keys by shot: hand tracks first, then faces, plates and other layers, longest first. */
   private shotTracks: string[][] = [];
   private fps = 25;
   /** Presentation time of frame 0 (first keyframe's t minus its frame time). */
@@ -72,7 +79,7 @@ export class Review {
   private regions: Region[] = [];
   private preview = true;
   private selected?: string;
-  /** Tracks listed per shot and group ("3:f" faces and hand boxes, "3:p" plates), when more
+  /** Tracks listed per shot and layer ("3:faces" faces and hand boxes, "3:plates"), when more
    *  than PER_SHOT were asked for. */
   private listed = new Map<string, number>();
   private hover?: string;
@@ -345,7 +352,7 @@ export class Review {
     const out: Region[] = [];
     const o = this.plan.options;
     for (const kind of this.kinds()) {
-      for (const id of kind === 'faces' ? o.keep : o.keepPlates) {
+      for (const id of keptIds(o, kind)) {
         const t = this.byId.get(keyOf(kind, id));
         const b = t && trackBox(t, this.frame);
         const g = b && this.cursor.grow(b);
@@ -355,13 +362,21 @@ export class Review {
     return out;
   }
 
-  /** The layers this review covers: faces, and plates when the doc has them. */
+  /** The layers this review covers: faces, and the covered track layers the doc has. */
   private kinds(): RedactKind[] {
-    return this.doc.layers.plates && this.plan.options.cover.includes('plates') ? ['faces', 'plates'] : ['faces'];
+    return ['faces', ...covered(this.doc, this.plan.options).filter((k) => k !== 'faces')];
   }
 
   private keep(kind: RedactKind) {
-    return kind === 'faces' ? this.plan.options.keep : this.plan.options.keepPlates;
+    const o = this.plan.options;
+    if (kind === 'faces') return o.keep;
+    if (kind === 'plates') return o.keepPlates;
+    return (o.keepTracks[kind] ??= []);
+  }
+
+  /** [hex, name] of the layer's box color. */
+  private color(kind: RedactKind) {
+    return KIND_COLORS[Math.max(0, this.kinds().indexOf(kind)) % KIND_COLORS.length];
   }
 
   private isKept(k: string) {
@@ -402,11 +417,11 @@ export class Review {
       ctx.fillStyle = '#fff';
       ctx.fillText(text, b[0] + 4 * px, y + 12 * px);
     };
-    const name = (r: Region) => `${r.kind === 'plates' ? 'plate ' : ''}#${r.id}`;
+    const name = (r: Region) => `${r.kind === 'faces' ? '' : `${noun(r.kind)} `}#${r.id}`;
     for (const r of this.regions) {
       const k = keyOf(r.kind, r.id);
       const on = k === this.selected || k === this.hover;
-      const color = r.id < 0 ? '#f59e0b' : r.kind === 'plates' ? '#67e8f9' : '#ffffff';
+      const color = r.id < 0 ? '#f59e0b' : this.color(r.kind)[0];
       stroke(r.box, on ? '#7ea2ff' : color, on ? 3 : 1.5, r.held ? [4, 3] : []);
       if (on) label(r.box, r.id < 0 ? 'added by hand' : `${name(r)} blurred · click: leave visible`, '#2b5fd9');
     }
@@ -480,10 +495,11 @@ export class Review {
 
   private rebuild() {
     const all: [string, Track][] = this.plan.added.map((t) => [keyOf('faces', t.id), t]);
-    for (const kind of this.kinds()) for (const t of this.doc.layers[kind]!.items) all.push([keyOf(kind, t.id), t]);
+    for (const kind of this.kinds()) for (const t of tracksOf(this.doc, kind)!.items) all.push([keyOf(kind, t.id), t]);
     this.byId = new Map(all);
     this.cursor = cursorFor(this.doc, this.plan.options, this.plan.added);
-    const rank = (k: string) => (isHand(k) ? 0 : k[0] === 'f' ? 1 : 2);
+    const kinds = this.kinds();
+    const rank = (k: string) => (isHand(k) ? 0 : 1 + kinds.indexOf(parseKey(k).kind));
     const len = (k: string) => this.byId.get(k)!.f1 - this.byId.get(k)!.f0;
     this.shotTracks = this.shots.map(() => []);
     for (const [k, t] of all) this.shotTracks[this.shotOf(t.f0)].push(k);
@@ -778,9 +794,9 @@ export class Review {
   }
 
   private what(words = true) {
-    const vis = this.kinds().includes('plates') ? 'faces and plates' : 'faces';
-    if (!words || !this.bleeps.length) return vis;
-    return vis === 'faces' ? 'faces and spoken words' : 'faces, plates and spoken words';
+    const names = this.kinds().map((k) => noun(k, 2));
+    if (words && this.bleeps.length) names.push('spoken words');
+    return names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
   }
 
   // ---- the face list ----
@@ -789,9 +805,8 @@ export class Review {
     const e = this.e!;
     const p = this.plan;
     const kinds = this.kinds();
-    const faces = this.doc.layers.faces!.items.length;
-    const plates = kinds.includes('plates') ? this.doc.layers.plates!.items.length : undefined;
-    const kept = p.options.keep.length + (plates === undefined ? 0 : p.options.keepPlates.length);
+    const found = kinds.map((k) => ({ k, n: tracksOf(this.doc, k)!.items.length }));
+    const kept = kinds.reduce((n, k) => n + keptIds(p.options, k).length, 0);
     const what = this.what(false);
     const thumbs = this.thumbs.get(e)!;
     const span = (t: Track) => `${fmtT(t.f0 / this.fps)}–${fmtT((t.f1 + 1) / this.fps)}`;
@@ -802,26 +817,28 @@ export class Review {
     };
     const title = (key: string) => {
       const { kind, id } = parseKey(key);
-      return isHand(key) ? 'Added by hand' : `${kind === 'plates' ? 'Plate' : 'Face'} #${id}`;
+      const n = noun(kind);
+      return isHand(key) ? 'Added by hand' : `${n[0].toUpperCase()}${n.slice(1)} #${id}`;
     };
     const chip = (key: string) => {
       const t = this.byId.get(key)!;
       const k = this.isKept(key);
       const img = thumbs.get(key);
-      const cls = `face${k ? ' kept' : ''}${isHand(key) ? ' hand' : ''}${key[0] === 'p' ? ' plate' : ''}${key === this.selected ? ' sel' : ''}`;
+      const cls = `face${k ? ' kept' : ''}${isHand(key) ? ' hand' : ''}${parseKey(key).kind !== 'faces' ? ' plate' : ''}${key === this.selected ? ' sel' : ''}`;
       return `<button class="${cls}" data-track="${key}" title="${title(key)}, ${span(t)}">${img ? `<img src="${img}" alt="">` : '<span class="ph"></span>'}<span class="lab">${fmtT(t.f0 / this.fps)} · ${secs(t)}</span><span class="state">${isHand(key) ? 'added' : k ? 'visible' : 'blurred'}</span></button>`;
     };
-    const count = (ids: string[]) => {
-      const nf = ids.filter((k) => k[0] === 'f').length;
-      const np = ids.length - nf;
-      return [nf && `${nf} face${nf === 1 ? '' : 's'}`, np && `${np} plate${np === 1 ? '' : 's'}`].filter(Boolean).join(', ');
-    };
+    const count = (ids: string[]) =>
+      kinds
+        .map((g) => [g, ids.filter((k) => parseKey(k).kind === g).length] as const)
+        .filter(([, n]) => n)
+        .map(([g, n]) => `${n} ${noun(g, n)}`)
+        .join(', ');
     const withFaces = this.shots.map((s, i) => ({ s, i, ids: this.shotTracks[i] })).filter((x) => x.ids.length);
     const shots = withFaces
       .map(({ s, i, ids }) => {
-        // Faces (and hand boxes) and plates page separately, so a crowd does not bury the plates.
-        const group = (g: 'f' | 'p') => {
-          const list = ids.filter((k) => k[0] === g);
+        // Each layer pages separately (faces with hand boxes), so a crowd does not bury the plates.
+        const group = (g: RedactKind) => {
+          const list = ids.filter((k) => parseKey(k).kind === g);
           if (!list.length) return '';
           const n = this.listed.get(`${i}:${g}`) ?? PER_SHOT;
           const more = list.length - n;
@@ -829,7 +846,7 @@ export class Review {
         };
         return `<li class="rv-shot${i === this.shot ? ' cur' : ''}" data-shot="${i}">
           <div class="shot-head" data-shot="${i}">Shot ${i + 1} · ${fmtT(s.t0)}–${fmtT(s.t1)} · ${count(ids)}</div>
-          ${group('f')}${group('p')}</li>`;
+          ${kinds.map(group).join('')}</li>`;
       })
       .join('');
     const key = this.selected;
@@ -841,9 +858,9 @@ export class Review {
     const shotsWithout = this.shots.length - withFaces.length;
     this.h.panel.innerHTML = `<div class="rv-head">
         <h1>Review ${this.what()}</h1>
-        <p>Boxes on the video are what the copy covers${plates === undefined ? '' : ' (plates in cyan)'}. <b>Click a box</b> to leave it visible (click it again to cover it), e.g. a sign taken for a plate. <b>Drag a box</b> over anything the detector missed. Dashed boxes are held a moment before and after something is seen, for faces turning away.</p>
+        <p>Boxes on the video are what the copy covers${kinds.length > 1 ? ` (${kinds.slice(1).map((k) => `${noun(k, 2)} in ${this.color(k)[1]}`).join(', ')})` : ''}. <b>Click a box</b> to leave it visible (click it again to cover it), e.g. a sign taken for a plate. <b>Drag a box</b> over anything the detector missed. Dashed boxes are held a moment before and after something is seen, for faces turning away.</p>
         <p class="muted keys">Space plays · ← → step a frame (Shift: 10) · [ ] previous / next shot · Esc deselects · Delete removes a box added by hand</p>
-        <p class="muted">${faces} face${faces === 1 ? '' : 's'}${plates === undefined ? '' : ` and ${plates} plate${plates === 1 ? '' : 's'}`} found · ${kept} left visible · ${p.added.length} added by hand · ${esc(this.h.keptWhere(e))}</p>
+        <p class="muted">${found.map(({ k, n }) => `${n} ${noun(k, n)}`).join(' and ')} found · ${kept} left visible · ${p.added.length} added by hand · ${esc(this.h.keptWhere(e))}</p>
       </div>
       <div class="rv-sticky">
         <div class="rv-actions"><label>Cover with <select id="rv-style">${REDACT_STYLES.map((s) => `<option value="${s}"${s === p.options.style ? ' selected' : ''}>${STYLE_NAMES[s]}</option>`).join('')}</select></label>

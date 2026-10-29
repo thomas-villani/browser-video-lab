@@ -1,0 +1,10 @@
+{
+  "schema": "videodoc-pipeline/0",
+  "name": "dashcam",
+  "description": "Dashcam and bodycam footage: transcript with word times, faces, plates and vehicles (RF-DETR nano, COCO), ready for redaction.",
+  "layers": ["transcript", "keyframes", "faces", "plates", "vehicles"],
+  "settings": { "transcript.words": true },
+  "tracks": {
+    "vehicles": { "model": "rfdetr", "labels": "car,truck,bus,motorcycle", "description": "Vehicles (RF-DETR nano, COCO classes car, truck, bus, motorcycle)", "minScore": 0.5 }
+  }
+}

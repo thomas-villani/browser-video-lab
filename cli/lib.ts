@@ -9,9 +9,10 @@ import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, c
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  deriveLayers, docPathFor, fingerprint, fmtTime, formatDoc, formatLog, LAYER_NAMES, newDoc, parseDoc, parseKeep, parseSettings, plan, PRODUCERS,
-  parsePlan, planPathFor, REDACT_DEFAULTS, REDACT_KINDS, REDACT_SOUNDS, REDACT_STYLES, coversAudio, redactionLog, search as searchDocs, summarize, toMarkdown, withLayers,
-  type KeyframeItem, type Layers, type Plan, type RedactKind, type RedactOptions as RedactSettings, type RedactSound, type RedactStyle, type Track, type VideoDoc,
+  deriveLayers, docPathFor, fingerprint, fmtTime, formatDoc, formatLog, isTrackLayer, LAYER_NAME_RE, LAYER_NAMES, mergeOverrides, newDoc, parseDoc, parseKeep, parsePipeline, parseSettings,
+  pipelineContext, plan, parsePlan, planPathFor, REDACT_DEFAULTS, REDACT_KINDS, REDACT_SOUNDS, REDACT_STYLES, coversAudio, redactionLog, search as searchDocs, summarize,
+  toMarkdown, withLayers,
+  type DocLayers, type KeyframeItem, type Pipeline, type Plan, type RedactKind, type RedactOptions as RedactSettings, type RedactSound, type RedactStyle, type Track, type VideoDoc,
 } from '../src/doc/index.ts';
 
 export const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -176,6 +177,9 @@ export interface AnalyzeOptions {
   dryRun?: boolean;
   /** Doc path (default: <video>.videodoc.json). */
   doc?: string;
+  /** A pipeline preset (JSON, videodoc-pipeline/0): its layers (when `layers` is unset), settings
+   *  (`set` wins), models and track layers. */
+  pipeline?: string;
 }
 
 export interface MarkdownOptions extends Omit<AnalyzeOptions, 'doc'> {
@@ -227,14 +231,64 @@ function videoPath(ctx: Context, arg: string) {
 
 const PLATE_MODEL_URL = 'https://github.com/ankandrew/open-image-models/releases/download/assets/yolo-v9-t-640-license-plates-end2end.onnx';
 
+const MODEL_FIX: Record<string, string> = {
+  yunet: 'see README (YuNet, dynamic shape)',
+  'yolo-plate': `curl -L -o public/models/yolo_plate_t640.onnx ${PLATE_MODEL_URL}`,
+  rfdetr: 'the fp32 ONNX from huggingface.co/onnx-community/rfdetr_nano-ONNX, saved as public/models/rfdetr_nano.onnx',
+};
+
+const isRemote = (url: string) => /^https?:\/\//i.test(url);
+
+/** A model URL's file on this machine: `/models/...` is under public/; anything else that is
+ *  not http(s) is a path (a pipeline's are made absolute when it is loaded). */
+function modelFile(url: string): string | undefined {
+  if (isRemote(url)) return undefined;
+  return url.startsWith('/models/') ? join(ROOT, 'public', url) : url;
+}
+
+/** A model file's identity for the planner (local files, and servers with range requests). */
+async function modelFingerprint(url: string): Promise<string | undefined> {
+  const file = modelFile(url);
+  if (file) return existsSync(file) ? (await fingerprintFile(file)).fingerprint : undefined;
+  try {
+    const read = async (a: number, b: number) => {
+      const r = await fetch(url, { headers: { Range: `bytes=${a}-${b - 1}` } });
+      if (r.status !== 206) throw new Error('no range requests');
+      return new Uint8Array(await r.arrayBuffer());
+    };
+    const head = await fetch(url, { headers: { Range: 'bytes=0-1' } });
+    const size = Number(head.headers.get('Content-Range')?.split('/')[1]);
+    await head.body?.cancel();
+    return Number.isFinite(size) ? await fingerprint(size, read) : undefined;
+  } catch {
+    // Unreachable or no range requests: the URL stands in for the file.
+    return undefined;
+  }
+}
+
+/** Read a pipeline preset; its models' relative paths resolve against the preset's folder. */
+export function loadPipeline(ctx: Context, arg: string): Pipeline {
+  const path = userPath(ctx, arg);
+  if (!existsSync(path)) throw new UsageError(`no pipeline at ${path}`);
+  let p: Pipeline;
+  try {
+    p = parsePipeline(readFileSync(path, 'utf8'), path);
+  } catch (e) {
+    throw new UsageError((e as Error).message);
+  }
+  const local = (url: string) => !isRemote(url) && !url.startsWith('/models/');
+  const models = Object.fromEntries(Object.entries(p.models ?? {}).map(([k, m]) => [k, local(m.url) ? { ...m, url: resolve(dirname(path), m.url) } : m]));
+  return { ...p, models };
+}
+
 /** Model files each layer needs (dev layout: public/models), with how to get them. */
 function missingModels(p: Plan): string[] {
   const need: [string, string][] = [];
   for (const l of p.layers) {
     if (l.status !== 'compute') continue;
     if (l.name === 'speech') need.push(['public/models/silero_vad.onnx', 'see README (Silero VAD v5)']);
-    if (l.name === 'faces') need.push([`public/models/yunet_face_dyn.onnx`, 'see README (YuNet, dynamic shape)']);
-    if (l.name === 'plates') need.push(['public/models/yolo_plate_t640.onnx', `curl -L -o public/models/yolo_plate_t640.onnx ${PLATE_MODEL_URL}`]);
+    const file = l.model && modelFile(l.model.url);
+    if (file) need.push([file, MODEL_FIX[l.model!.id] ?? `${l.name}.model is '${l.model!.id}'; check its url`]);
     if (l.name === 'transcript') {
       const { model, encoder, decoder } = l.config as Record<string, string>;
       const suffix = (d: string) => (d === 'fp32' ? '' : d === 'q8' ? '_quantized' : `_${d}`);
@@ -242,7 +296,7 @@ function missingModels(p: Plan): string[] {
       for (const f of files) need.push([`public/models/${model}/onnx/${f}.onnx`, `node scripts/fetch-model.mjs ${model} ${files.join(' ')}`]);
     }
   }
-  return need.filter(([f]) => !existsSync(join(ROOT, f))).map(([f, fix]) => `missing ${f} (fix: ${fix})`);
+  return need.filter(([f]) => !existsSync(isAbsolute(f) ? f : join(ROOT, f))).map(([f, fix]) => `missing ${f} (fix: ${fix})`);
 }
 
 async function fingerprintFile(path: string) {
@@ -282,7 +336,8 @@ interface Ensured {
 /** Bring the doc at `docPath` up to date with the `requested` layers: plan in Node, run decode
  *  passes in the browser (only if any), derive pure layers, save. */
 async function ensure(ctx: Context, video: string, docPath: string, requested: string[], o: AnalyzeOptions): Promise<Ensured | { dryRun: object }> {
-  const settings = parseSettings(o.set ?? []);
+  const pc = pipelineContext(o.pipeline ? loadPipeline(ctx, o.pipeline) : undefined);
+  const settings = mergeOverrides(pc.settings, parseSettings(o.set ?? [], pc.producers));
   const id = await fingerprintFile(video);
   let existing = loadDoc(docPath);
   let replaced: string | undefined;
@@ -291,7 +346,11 @@ async function ensure(ctx: Context, video: string, docPath: string, requested: s
     ctx.report.log(`note: ${replaced}`);
     existing = undefined;
   }
-  const p = await plan(existing, requested, settings, o.force);
+  // A pipeline's track layer already in the doc is used as saved when its pipeline is not given
+  // (redact --cover vehicles after analyzing with the preset).
+  const asSaved = requested.filter((n) => !(n in pc.producers) && existing && isTrackLayer(existing, n));
+  if (asSaved.length) ctx.report.log(`note: ${asSaved.join(', ')} used as saved in the doc (pass its --pipeline to recompute)`);
+  const p = await plan(existing, requested.filter((n) => !asSaved.includes(n)), settings, o.force, { ...pc, fingerprint: modelFingerprint });
   ctx.report.log(`plan: ${p.layers.map((l) => `${l.name} (${l.status})`).join(', ')}`);
   const missing = missingModels(p);
   if (o.dryRun) return { dryRun: { doc: docPath, plan: p.layers.map((l) => ({ name: l.name, status: l.status })), passes: p.passes, missing } };
@@ -302,22 +361,34 @@ async function ensure(ctx: Context, video: string, docPath: string, requested: s
   const wall0 = Date.now();
   if (p.passes.audio || p.passes.frames) {
     // Cached layers that browser-computed ones depend on (e.g. speech for the transcript).
-    const inputs: Partial<Layers> = {};
+    const inputs: DocLayers = {};
     for (const l of p.layers) {
-      if (l.status !== 'compute' || PRODUCERS[l.name].pass === 'pure') continue;
-      for (const dep of PRODUCERS[l.name].needs) {
+      if (l.status !== 'compute' || pc.producers[l.name].pass === 'pure') continue;
+      for (const dep of pc.producers[l.name].needs) {
         if (existing?.layers[dep] && p.layers.find((x) => x.name === dep)?.status === 'cached') {
           (inputs as Record<string, unknown>)[dep] = existing.layers[dep];
         }
       }
     }
+    // Model files outside public/ are served to the page like the video.
+    const files: Record<string, string> = { video };
+    const served = new Map<string, string>();
+    for (const l of p.layers) {
+      const file = l.model && modelFile(l.model.url);
+      if (!file || l.model!.url.startsWith('/models/') || served.has(l.model!.url)) continue;
+      const key = `model-${served.size}`;
+      served.set(l.model!.url, key);
+      files[key] = file;
+    }
     const result: Awaited<ReturnType<Window['videodoc']['compute']>> = await ctx.browser.run(
-      { video },
-      (page, base) =>
-        page.evaluate(
-          ([url, layers, inp]: [string, typeof p.layers, Partial<Layers>]) => window.videodoc.compute(url, layers, inp),
-          [`${base}@file/video`, p.layers, inputs],
-        ),
+      files,
+      (page, base) => {
+        const layers = p.layers.map((l) => (l.model && served.has(l.model.url) ? { ...l, model: { ...l.model, url: `${base}@file/${served.get(l.model.url)}` } } : l));
+        return page.evaluate(
+          ([url, layers, inp]: [string, typeof p.layers, DocLayers]) => window.videodoc.compute(url, layers, inp),
+          [`${base}@file/video`, layers, inputs],
+        );
+      },
       ctx.report.progress,
       ctx.signal,
     );
@@ -374,7 +445,8 @@ export async function analyze(ctx: Context, videoArg: string, o: AnalyzeOptions 
 async function analyzeOne(ctx: Context, videoArg: string, o: AnalyzeOptions) {
   const video = videoPath(ctx, videoArg);
   const docPath = o.doc ? userPath(ctx, o.doc) : docPathFor(video);
-  const r = await ensure(ctx, video, docPath, o.layers?.length ? o.layers : DEFAULT_LAYERS, o);
+  const requested = o.layers?.length ? o.layers : o.pipeline ? loadPipeline(ctx, o.pipeline).layers : DEFAULT_LAYERS;
+  const r = await ensure(ctx, video, docPath, requested, o);
   if ('dryRun' in r) return r.dryRun;
   const summary = logLayers(ctx, r.doc, r.plan);
   ctx.report.log(`  -> ${docPath}`);
@@ -463,6 +535,9 @@ export interface RedactOptions extends Omit<AnalyzeOptions, 'layers' | 'doc'> {
   keep?: string | number[];
   /** Plate track ids to leave visible, likewise. */
   keepPlates?: string | number[];
+  /** A pipeline's track layers: ids to leave visible, by layer ({ vehicles: [3] }, or
+   *  "vehicles=3,7" strings). Replaces the review plan's for the layers given. */
+  keepTracks?: Record<string, string | number[]> | string[];
   /** Layers to cover: "faces,plates" (default), "faces", or "none" (audio only). */
   cover?: string | string[];
   /** Words and phrases to bleep: "Okafor,Daniel Reyes" or a list. Replaces the review plan's. */
@@ -493,16 +568,25 @@ export function redactSettings(o: RedactOptions, base: RedactSettings = REDACT_D
   };
   let keep: number[];
   let keepPlates: number[];
+  const keepTracks = { ...base.keepTracks };
   try {
     keep = o.keep === undefined ? base.keep : parseKeep(o.keep);
     keepPlates = o.keepPlates === undefined ? base.keepPlates : parseKeep(o.keepPlates);
+    const pairs = Array.isArray(o.keepTracks)
+      ? o.keepTracks.map((x) => {
+          const m = /^(\w+)=(.*)$/.exec(x);
+          if (!m) throw new Error(`keep-tracks takes layer=ids, e.g. vehicles=3,7, got '${x}'`);
+          return [m[1], m[2]] as const;
+        })
+      : Object.entries(o.keepTracks ?? {});
+    for (const [k, ids] of pairs) keepTracks[k] = parseKeep(ids);
   } catch (e) {
     throw new UsageError((e as Error).message);
   }
   let cover = list(o.cover) ?? base.cover;
   if (cover.length === 1 && cover[0] === 'none') cover = [];
-  const bad = cover.find((k) => !REDACT_KINDS.includes(k as RedactKind));
-  if (bad !== undefined) throw new UsageError(`cover takes faces, plates (comma-separated) or none, got '${cover.join(',')}'`);
+  const bad = cover.find((k) => !LAYER_NAME_RE.test(k) || ((LAYER_NAMES as string[]).includes(k) && !REDACT_KINDS.includes(k)));
+  if (bad !== undefined) throw new UsageError(`cover takes track layers (faces, plates or a pipeline's), comma-separated, or none, got '${cover.join(',')}'`);
   const sound = (o.sound ?? base.sound) as RedactSound;
   if (!REDACT_SOUNDS.includes(sound)) throw new UsageError(`sound takes ${REDACT_SOUNDS.join(', ')}, got '${o.sound}'`);
   let words = list(o.words) ?? base.words;
@@ -515,7 +599,7 @@ export function redactSettings(o: RedactOptions, base: RedactSettings = REDACT_D
   const badKey = keepWords.find((k) => !/^\d+\.\d+$/.test(k));
   if (badKey !== undefined) throw new UsageError(`keepWords takes word keys like 12.3 (from the redaction log), got '${badKey}'`);
   return {
-    style, margin: num(o.margin, base.margin, 'margin', 2), hold: num(o.hold, base.hold, 'hold', 10), keep, keepPlates, cover: cover as RedactKind[],
+    style, margin: num(o.margin, base.margin, 'margin', 2), hold: num(o.hold, base.hold, 'hold', 10), keep, keepPlates, keepTracks, cover: cover as RedactKind[],
     words, profanity: o.profanity ?? base.profanity, sound, lead: num(o.lead, base.lead, 'lead', 5), tail: num(o.tail, base.tail, 'tail', 5), keepWords,
   };
 }
@@ -542,7 +626,7 @@ export async function redact(ctx: Context, videoArg: string, o: RedactOptions = 
   if (usePlan) {
     try {
       const p = JSON.parse(readFileSync(planPath, 'utf8')) as { options?: Partial<RedactSettings>; addedAudio?: [number, number][] };
-      need = redactSettings(o, { ...REDACT_DEFAULTS, ...p.options, cover: (p.options?.cover ?? REDACT_DEFAULTS.cover).filter((k) => REDACT_KINDS.includes(k)) });
+      need = redactSettings(o, { ...REDACT_DEFAULTS, ...p.options, cover: (p.options?.cover ?? REDACT_DEFAULTS.cover).filter((k) => LAYER_NAME_RE.test(k)) });
       addedAudio = Array.isArray(p.addedAudio) ? p.addedAudio : [];
     } catch {
       // parsePlan below reports it.
@@ -578,7 +662,8 @@ export async function redact(ctx: Context, videoArg: string, o: RedactOptions = 
   const n = (k: RedactKind) => pre.tracks.filter((x) => x.layer === k && !x.kept).length;
   const coversVideo = settings.cover.length > 0 || added.length > 0;
   if (coversVideo) {
-    const what = `${n('faces')} face${pre.detectors.plates ? ` and ${n('plates')} plate` : ''} tracks`;
+    const kinds = [...new Set(pre.tracks.map((x) => x.layer))];
+    const what = `${(kinds.length ? kinds : ['faces']).map((k) => `${n(k)} ${k === 'faces' ? 'face' : k === 'plates' ? 'plate' : k}`).join(' and ')} tracks`;
     ctx.report.log(`redacting ${what}${t.added ? ` (${t.added} added by hand)` : ''}${t.kept ? `, keeping ${t.kept} visible,` : ''} on ${t.framesWithRegions} of ${r.doc.source.frames} frames (${settings.style})`);
   }
   if (pre.audio) {
@@ -693,11 +778,13 @@ export function info(ctx: Context, arg: string) {
   return { doc: path, schema: doc.schema, source: doc.source, layers: summary, missing };
 }
 
-/** Layers, their dependencies and settings with defaults (generated from PRODUCERS). */
-export function layers() {
+/** Layers, their dependencies and settings with defaults (generated from PRODUCERS; with a
+ *  pipeline, its track layers too). */
+export function layers(ctx?: Context, pipeline?: string) {
+  const { producers } = pipelineContext(ctx && pipeline ? loadPipeline(ctx, pipeline) : undefined);
   return Object.fromEntries(
-    LAYER_NAMES.map((n) => {
-      const p = PRODUCERS[n];
+    Object.keys(producers).map((n) => {
+      const p = producers[n];
       const settings = Object.fromEntries(Object.entries(p.defaults).map(([k, v]) => [k, { default: v, help: p.help[k] }]));
       return [n, { description: p.description, needs: p.needs, pass: p.pass, default: DEFAULT_LAYERS.includes(n), settings }];
     }),

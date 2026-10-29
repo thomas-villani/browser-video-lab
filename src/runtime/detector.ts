@@ -7,7 +7,7 @@
 // a time; two sessions running at once on the WebGPU device hang), while readback and decoding of
 // up to `depth` calls per detector proceed concurrently.
 import * as ort from 'onnxruntime-web/webgpu';
-import { geometryFor, MODELS, type Detection, type GeometryOptions, type ModelSpec } from '../models';
+import { geometryFor, modelSpec, type Detection, type GeometryOptions, type ModelSpec } from '../models';
 import { GpuPreprocessor, type FrameSource } from '../preprocess';
 import { BatchedReadback } from '../readback';
 
@@ -23,6 +23,8 @@ export interface DetectorOptions {
   depth?: number;
   /** Override the model's score threshold. */
   score?: number;
+  /** Keep only detections with these labels (a COCO model used for people or vehicles). */
+  labels?: string[];
 }
 
 /** Cumulative cost counters, so callers can report what a strategy spent. */
@@ -47,13 +49,13 @@ export class Detector {
     private pre: GpuPreprocessor,
     private readers: BatchedReadback[],
     private score?: number,
+    private labels?: Set<string>,
   ) {
     this.busy = readers.map(() => Promise.resolve());
   }
 
   static async create(opts: DetectorOptions): Promise<Detector> {
-    const spec = typeof opts.model === 'string' ? MODELS[opts.model] : opts.model;
-    if (!spec) throw new Error(`unknown model '${opts.model}' (have: ${Object.keys(MODELS).join(', ')})`);
+    const spec = typeof opts.model === 'string' ? modelSpec(opts.model) : opts.model;
     const session = await ort.InferenceSession.create(spec.url, {
       executionProviders: ['webgpu'],
       graphOptimizationLevel: 'all',
@@ -62,7 +64,7 @@ export class Detector {
     const device = await ort.env.webgpu.device;
     const depth = Math.max(1, opts.depth ?? 2);
     const readers = Array.from({ length: depth }, () => new BatchedReadback(device));
-    return new Detector(spec, device, session, new GpuPreprocessor(device, spec), readers, opts.score);
+    return new Detector(spec, device, session, new GpuPreprocessor(device, spec), readers, opts.score, opts.labels?.length ? new Set(opts.labels) : undefined);
   }
 
   /**
@@ -99,7 +101,9 @@ export class Detector {
     const result = (async () => {
       try {
         const arrays = await this.readers[slot].read(outputs);
-        return this.spec.decode(arrays, geo, this.score);
+        const dims = Object.fromEntries(Object.entries(outputs).map(([k, v]) => [k, v.dims]));
+        const dets = this.spec.decode(arrays, geo, this.score, dims);
+        return this.labels ? dets.filter((d) => this.labels!.has(d.label)) : dets;
       } finally {
         // GPU-resident outputs are fresh buffers each run; release them.
         for (const v of Object.values(outputs)) v.dispose();

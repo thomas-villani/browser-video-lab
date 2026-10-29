@@ -21,34 +21,54 @@ difference, denser visual analysis where nobody speaks.
 
 ## State (2026-10-28)
 
-- Branch `main`, everything committed and pushed (last: `e61e8ac`, browser test suite). Commit
-  and push only when the user asks.
+- Branch `main`. Commit and push only when the user asks.
 - Built: roadmap steps 1-6 (doc + planner, keyframes + markdown, MCP server, search, the app,
-  redaction of faces, plates and spoken words with the review UI) and the browser test suite
-  (step 8's first part). Captions (step 7) not started.
+  redaction of faces, plates and spoken words with the review UI), the browser test suite
+  (step 8's first part) and step 9's library half (models as data, pipeline presets, track
+  layers on any detector). Captions (step 7) not started.
 - Layers: `speech` (Silero VAD), `transcript` (whisper-base_timestamped, word times),
   `scenes`, `keyframes` (pure), `faces` (YuNet + adaptive sampling + tile refinement), `plates`
-  (YOLOv9-t, same decode as faces). Defaults in `PRODUCERS` (`src/doc/plan.ts`).
-- Tests: `npm test` 59 pure-TS tests (seconds); `npm run test:browser` 9 tests in headless Edge
-  (~4 min; `npm run fixtures` first; docs/lab.md "Tests"). Run both before and after step 9.
+  (YOLOv9-t, same decode as faces), and any track layer a pipeline defines (`vehicles`).
+  Defaults in `PRODUCERS` (`src/doc/plan.ts`); a pipeline's in `pipelineContext`.
+- Tests: `npm test` 66 pure-TS tests (seconds); `npm run test:browser` 10 tests in headless Edge
+  (~4 min; `npm run fixtures` first; docs/lab.md "Tests").
 - Audience (user, 2026-10-28): creators (bodycam/dashcam channels, podcasts, tutorials), not
   institutions; DESIGN.md "Audience" and roadmap steps 10-16.
 - Power overlay still "Best performance" (restore: `powercfg /overlaysetactive
   00000000-0000-0000-0000-000000000000` when the user says).
 
-## Step 9 starting points (pluggable models and a pipeline builder)
+## Done: step 9, library half (2026-10-28)
 
-- Detector models: `ModelSpec` (`src/models.ts`: url, input geometry, normalization, `decode` to
-  boxes), the `MODELS` table (`yunetFace`, `yoloPlate`, ...), looked up by name in
-  `src/runtime/detector.ts`. Several heads share one decode via `multiStream`
-  (`src/runtime/stream.ts`), used by `computeLayers` in `src/analyze.ts`.
-- Layers: `PRODUCERS` (`src/doc/plan.ts`: defaults, help, `pass`, `needs`); `plan()` resolves
-  dependencies and passes and hashes configs (the hash includes the model name, not the file).
-- Transcript model: `transcript.model` (any `_timestamped` Whisper repo under `public/models`).
-- Redaction covers `REDACT_KINDS` (faces, plates) in `src/doc/redact.ts`; custom track layers
-  should join that.
-- DESIGN.md step 9 has the design sketch (registry, decoder presets, custom track layers,
-  presets as `--pipeline preset.json`, app builder on the planner, not a graph editor).
+- Models are data: `ModelConfig` (`src/doc/models.ts`: url, decoder preset `yolo`,
+  `yolo-end2end`, `detr`, `yunet`, labels, input settings) and pure decoders (unit-tested in
+  tests/pipeline.test.ts). `src/models.ts` builds runnable specs (`specFor`), `registerModel`
+  takes a description or a spec with its own `decode`. `Detector` filters by `labels` and passes
+  output shapes to the decoder.
+- Pipelines (`src/doc/pipeline.ts`, `videodoc-pipeline/0`): layers, settings, models, track
+  layers; `checkPipeline` / `pipelineContext` give the planner its producers and models.
+  CLI `--pipeline` (analyze, markdown, redact, layers), MCP `pipeline`, library
+  `analyze(..., { pipeline })`. Local model paths resolve against the preset and are served to
+  the page as `/@file/model-N`. Example: `examples/pipelines/dashcam.json`. Docs: docs/pipelines.md.
+- Track layers: any lowercase name, `producer.kind: 'track'`, planned after the built-in
+  layers, extra heads in `multiStream`, linked like plates. `trackLayers` / `tracksOf` read
+  them. Redaction: `cover` lists any track layer, `keepTracks` (CLI `--keep-tracks l=ids`),
+  the review plan stores their hashes in `tracks`; the review shows every covered layer in its
+  own color (keys are now `<layer>:<id>`). A track layer already in the doc is used as saved
+  when its pipeline is not passed.
+- The config hash of a track layer includes its model description and file fingerprint (size +
+  first/last MiB; range requests in the browser), so saved docs recompute faces and plates once.
+
+## Next: step 9, the app's pipeline builder
+
+- On `plan()`: choose layers and models (built-in and a pipeline's), see the order and shared
+  decode passes, an estimate, save and load presets (`videodoc-pipeline/0`, same files as the
+  CLI), run on a folder. The app's analysis is `analyze()` in `src/app/main.ts`
+  (`layersWanted`); the review's covered layers come from `plan.options.cover`, so the builder
+  must also let a person cover a pipeline's layers.
+- Model licenses (user, 2026-10-29): users pick their own models (any license, e.g. Ultralytics
+  AGPL); videodoc bundles none and only its defaults must be permissive.
+- Open: a fast, permissively licensed COCO detector as a default for `vehicles`/`people` (RF-DETR nano is ~3
+  fps, NOTES.md); labels per track; one session shared by two layers on the same model.
 
 ## Key numbers (details in NOTES.md)
 
@@ -193,8 +213,7 @@ benchmarks and evaluation tools that used to fill the README). Keep it current w
 
 ## Next
 
-Pluggable models and a pipeline builder in the app (DESIGN.md step 9, user direction
-2026-10-28); run `npm run test:browser` before and after (it reworks how models load).
+The app's pipeline builder (step 9's second half, above); run both test suites before and after.
 Test suite follow-ups (DESIGN.md step 8): an accuracy tier on the full labeled footage, the MCP
 server over a real browser. Audio follow-ups (DESIGN.md step 6): sound-alike name matching, drawing audio
 spans in the app, highlights in the reading view, audio-only review. Lead application (decided 2026-10-27) stays search

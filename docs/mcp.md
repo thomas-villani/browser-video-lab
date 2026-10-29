@@ -22,10 +22,10 @@ be in place first ([getting started](getting-started.md)); the `check` tool says
 |---|---|---|
 | `markdown` | The video as Markdown (shots, timed speech, silences, keyframes); analyzes missing layers first | `video`, `from`, `to`, `images`, `embedImages`, `imageSize`, `layers`, `out` |
 | `search` | Where something is said across videos: ranked passages with times, snippet, nearest keyframe | `query`, `paths` (files or folders), `top` |
-| `analyze` | Compute layers into the doc (a folder: every video) and summarize them | `video`, `layers`, `set`, `force`, `dryRun` |
+| `analyze` | Compute layers into the doc (a folder: every video) and summarize them | `video`, `layers`, `pipeline`, `set`, `force`, `dryRun` |
 | `redact` | A copy with faces and license plates covered and listed words bleeped, plus the redaction log | `video`, `out`, `style`, `margin`, `hold`, `keep`, `keepPlates`, `cover`, `words`, `profanity`, `sound`, `lead`, `tail`, `keepWords`, `plan` |
 | `info` | Summarize a saved doc (no compute) | `video` |
-| `layers` | Layers, dependencies, every setting with its default | — |
+| `layers` | Layers, dependencies, every setting with its default | `pipeline` |
 | `check` | Browser, WebGPU, decoders, model files | — |
 
 Argument schemas are generated from the layer definitions, so `layers` enums and `set` help

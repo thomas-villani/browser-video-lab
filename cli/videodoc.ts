@@ -42,6 +42,9 @@ analyze options:
   --layers <list>        Comma-separated (default: ${DEFAULT_LAYERS.join(',')}); dependencies are added.
                          Available: ${LAYER_NAMES.join(', ')}.
   --set <layer.key=v>    Override a setting, repeatable (e.g. --set faces.every=4). See 'videodoc layers'.
+  --pipeline <file>      A pipeline preset (JSON, docs/pipelines.md): its layers (unless --layers),
+                         settings (--set wins), models and track layers (e.g. vehicles from a COCO
+                         detector). Also for markdown, redact and layers.
   --out <path>           Doc path (default: <video>.videodoc.json).
   --force                Recompute the requested layers even if cached.
   --dry-run              Print the plan and exit.
@@ -62,8 +65,10 @@ redact options:
   --hold <s>             Keep covering this long before and after each face track (default ${REDACT_DEFAULTS.hold}).
   --keep <ids>           Face track ids to leave visible, e.g. 3,7 (ids are in the log and the doc).
   --keep-plates <ids>    Plate track ids to leave visible (a sign taken for a plate; ids are per layer).
-  --cover <list>         What to cover: faces,plates (default), faces, plates, or none (audio only:
-                         the video is copied).
+  --cover <list>         What to cover: faces,plates (default), faces, plates, a pipeline's track
+                         layers (faces,vehicles with --pipeline), or none (audio only: the video
+                         is copied).
+  --keep-tracks <l=ids>  A pipeline track layer's ids to leave visible, repeatable (vehicles=3,7).
   --words <list>         Words and phrases to bleep, comma-separated, e.g. "Okafor,Daniel Reyes".
                          Plain words also match plurals, possessives, -ed and -ing; * is a
                          wildcard ("fuck*"); "quoted" matches exactly. Spell names as the
@@ -96,6 +101,8 @@ const { values: a, positionals } = parseArgs({
   options: {
     layers: { type: 'string' },
     set: { type: 'string', multiple: true, default: [] },
+    pipeline: { type: 'string' },
+    'keep-tracks': { type: 'string', multiple: true },
     out: { type: 'string' },
     force: { type: 'boolean', default: false },
     'dry-run': { type: 'boolean', default: false },
@@ -197,7 +204,7 @@ async function main() {
     if (!r.ok) process.exitCode = 1;
     return;
   }
-  if (cmd === 'layers') return out(layers());
+  if (cmd === 'layers') return out(layers(ctx, a.pipeline));
   if (cmd === 'ui') {
     const port = Number(a.port);
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new UsageError(`--port takes a port number, got '${a.port}'`);
@@ -215,7 +222,7 @@ async function main() {
   }
   if (!['analyze', 'markdown', 'redact', 'info'].includes(cmd)) throw new UsageError(`unknown command '${cmd}' (have: ui, check, analyze, markdown, search, redact, info, layers; see --help)`);
   if (rest.length !== 1) throw new UsageError(`usage: videodoc ${cmd} <video>`);
-  const common = { layers: list(a.layers), set: a.set, force: a.force, dryRun: a['dry-run'] };
+  const common = { layers: list(a.layers), set: a.set, force: a.force, dryRun: a['dry-run'], pipeline: a.pipeline };
   if (cmd === 'info') return out(info(ctx, rest[0]));
   if (cmd === 'analyze') return out(await analyze(ctx, rest[0], { ...common, doc: a.out }));
   if (cmd === 'redact') {
@@ -227,8 +234,8 @@ async function main() {
     };
     return out(
       await redact(ctx, rest[0], {
-        set: a.set, force: a.force, dryRun: a['dry-run'], out: a.out, style: a.style, margin: num(a.margin, 'margin'), hold: num(a.hold, 'hold'), keep: a.keep,
-        keepPlates: a['keep-plates'], cover: a.cover, words: a.words, wordsFile: a['words-file'], profanity: a.profanity, sound: a.sound,
+        set: a.set, force: a.force, dryRun: a['dry-run'], pipeline: a.pipeline, out: a.out, style: a.style, margin: num(a.margin, 'margin'), hold: num(a.hold, 'hold'), keep: a.keep,
+        keepPlates: a['keep-plates'], keepTracks: a['keep-tracks'], cover: a.cover, words: a.words, wordsFile: a['words-file'], profanity: a.profanity, sound: a.sound,
         lead: num(a.lead, 'lead'), tail: num(a.tail, 'tail'), keepWords: a['keep-words'], plan: !a['no-plan'],
       }),
     );

@@ -30,6 +30,9 @@ when an agent or a script makes the copy later.
 `cover` picks the layers: faces and plates by default; `--cover faces` (or `cover: ["faces"]`)
 leaves plates alone, and `--cover none` (`cover: []`) copies the video as it is, for a copy with
 only words bleeped. Faces and plates missing from the doc are detected first, in one decode.
+Track layers from a [pipeline](pipelines.md) (vehicles, logos, screens: any ONNX detector) are
+covered the same way when listed (`--cover faces,plates,vehicles`); their kept ids are
+`keepTracks` (`--keep-tracks vehicles=3`).
 
 For every frame, the regions are the covered tracks' boxes on that frame, adjusted:
 
@@ -41,7 +44,7 @@ For every frame, the regions are the covered tracks' boxes on that frame, adjust
    hold never crosses a shot cut (it would leave a stray blob in the next shot).
 3. **No double cover.** Tracks fragment under motion, so a held box that overlaps a live box of
    the same kind by more than 30% is the same face (or plate) re-acquired, and is dropped.
-4. **Keep.** Face tracks listed in `keep` and plate tracks in `keepPlates` are left visible (the
+4. **Keep.** Face tracks listed in `keep`, plate tracks in `keepPlates` and a pipeline's tracks in `keepTracks` are left visible (the
    official at the podium, the person who consented; a shop sign the detector took for a plate).
    Ids are per layer: face 3 and plate 3 are different tracks.
 5. **Added.** Regions drawn by hand in a review are covered like any other (see below).

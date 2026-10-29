@@ -11,4 +11,5 @@ Start with the [project README](../README.md) for what videodoc is for.
 | [The VideoDoc format](format.md) | Layers, items, settings, caching, serialization, the Markdown view |
 | [Library API](library.md) | Using videodoc from TypeScript: reading docs in Node, analysis and redaction in the browser |
 | [Redaction](redaction.md) | What gets covered, the review, the plan and log files, limits |
+| [Pipelines and your own models](pipelines.md) | Presets of layers and settings, track layers on your own ONNX detectors, decoder presets |
 | [The lab](lab.md) | Benchmarks, evaluation scripts, labeling tools, repository layout |

@@ -20,7 +20,9 @@ test('mcp: tools are listed with schemas generated from the layer registry', asy
   const { tools } = await client.listTools();
   assert.deepEqual(tools.map((t) => t.name), ['markdown', 'search', 'analyze', 'redact', 'info', 'layers', 'check']);
   const analyze = tools.find((t) => t.name === 'analyze')!;
-  assert.deepEqual((analyze.inputSchema.properties!.layers as { items: { enum: string[] } }).items.enum, LAYER_NAMES);
+  const layersDoc = (analyze.inputSchema.properties!.layers as { description: string }).description;
+  for (const n of LAYER_NAMES) assert.ok(layersDoc.includes(`\n${n}: `), `${n} described`);
+  assert.ok(analyze.inputSchema.properties!.pipeline, 'analyze takes a pipeline');
   assert.match((analyze.inputSchema.properties!.set as { description: string }).description, /faces\.every=2/);
   assert.match(client.getInstructions() ?? '', /call markdown/);
 });

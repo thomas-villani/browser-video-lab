@@ -292,6 +292,17 @@ loaded. Reading and searching work without WebGPU.
    passes they share, the time estimate, save it as a preset, run it on many videos), built on
    the planner (`plan()` already resolves dependencies and passes) rather than a free-form
    graph editor. Presets double as CLI/MCP input (`--pipeline preset.json`).
+   **Built, library half (2026-10-28):** models are data (`ModelConfig` in `src/doc/models.ts`:
+   URL, decoder preset `yolo` / `yolo-end2end` / `detr` / `yunet`, labels, input settings; the
+   decoders are pure and unit-tested), `registerModel` for specs with their own decode; pipeline
+   presets (`src/doc/pipeline.ts`, `videodoc-pipeline/0`: layers, settings, models, track
+   layers) for the CLI (`--pipeline`), MCP (`pipeline`) and library; track layers with any name
+   (`producer.kind: 'track'`), planned after the built-in ones, run as extra heads over the
+   shared decode, tracked like plates, covered by redaction (`--cover faces,vehicles`,
+   `keepTracks`) and shown in the review in their own color; the config hash includes the
+   model's description and its file's fingerprint. Docs: docs/pipelines.md. Not yet: the app's
+   pipeline builder; labels per track (a track layer tracks its labels together); a model's
+   session shared by two layers; a fast permissive COCO detector (RF-DETR nano is ~3 fps).
 10. **Speakers** (diarization): segmentation (pyannote segmentation-3.0, ONNX) + speaker
     embeddings (WeSpeaker / ECAPA class) + clustering, speakers assigned per word from the word
     times. Diarization errs (overlap, short turns, noisy bodycam audio, the wearer's voice

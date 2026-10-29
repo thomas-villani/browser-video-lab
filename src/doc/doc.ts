@@ -1,5 +1,5 @@
 // Creating, merging, validating and summarizing VideoDocs. Pure TS.
-import { LAYER_NAMES, SCHEMA, type Layers, type SourceInfo, type VideoDoc } from './schema.ts';
+import { LAYER_NAME_RE, LAYER_NAMES, SCHEMA, TRACK_LAYERS, type DocLayers, type Layer, type Layers, type SourceInfo, type Track, type VideoDoc } from './schema.ts';
 
 export class DocError extends Error {}
 
@@ -11,13 +11,25 @@ export function newDoc(source: SourceInfo): VideoDoc {
 }
 
 /** A new doc with `layers` added or replaced (layers are never edited in place). */
-export function withLayers(doc: VideoDoc, layers: Partial<Layers>): VideoDoc {
-  const merged = { ...doc.layers, ...layers };
-  // Keep a stable key order so diffs of saved docs stay readable.
-  const ordered: Partial<Layers> = {};
-  for (const n of LAYER_NAMES) if (merged[n]) (ordered as Record<string, unknown>)[n] = merged[n];
+export function withLayers(doc: VideoDoc, layers: DocLayers): VideoDoc {
+  const merged: DocLayers = { ...doc.layers, ...layers };
+  // Keep a stable key order so diffs of saved docs stay readable: built-in layers, then a
+  // pipeline's by name.
+  const ordered: DocLayers = {};
+  const custom = Object.keys(merged).filter((n) => !(LAYER_NAMES as string[]).includes(n)).sort();
+  for (const n of [...LAYER_NAMES, ...custom]) if (merged[n]) ordered[n] = merged[n];
   return { ...doc, layers: ordered };
 }
+
+/** Whether the layer `name` holds tracks (faces, plates, a pipeline's track layers). */
+export const isTrackLayer = (doc: VideoDoc, name: string) =>
+  !!doc.layers[name] && ((TRACK_LAYERS as string[]).includes(name) || doc.layers[name]!.producer.kind === 'track');
+
+/** The doc's track layers, in doc order. */
+export const trackLayers = (doc: VideoDoc) => Object.keys(doc.layers).filter((n) => isTrackLayer(doc, n));
+
+/** A track layer by name (undefined when the doc has none by that name). */
+export const tracksOf = (doc: VideoDoc, name: string) => (isTrackLayer(doc, name) ? (doc.layers[name] as Layer<Track>) : undefined);
 
 /** Serialize with one layer item per line: compact for long videos, readable, greppable, and
  *  diffs stay small when a layer is replaced. */
@@ -44,8 +56,10 @@ export function parseDoc(text: string, where = 'doc'): VideoDoc {
   if (!d.source || typeof d.source.fingerprint !== 'string') throw new DocError(`${where}: missing source.fingerprint`);
   if (!d.layers || typeof d.layers !== 'object') throw new DocError(`${where}: missing layers`);
   for (const [name, layer] of Object.entries(d.layers)) {
-    if (!(LAYER_NAMES as string[]).includes(name)) throw new DocError(`${where}: unknown layer '${name}'`);
     if (!layer?.producer?.configHash || !Array.isArray(layer.items)) throw new DocError(`${where}: layer '${name}' is missing producer or items`);
+    // A pipeline's layers are track layers; other kinds would need code that reads them.
+    const known = (LAYER_NAMES as string[]).includes(name) || (LAYER_NAME_RE.test(name) && layer.producer.kind === 'track');
+    if (!known) throw new DocError(`${where}: unknown layer '${name}'`);
   }
   return d as VideoDoc;
 }
@@ -65,7 +79,7 @@ const r1 = (v: number) => Math.round(v * 10) / 10;
 export function summarize(doc: VideoDoc): Record<string, LayerSummary> {
   const out: Record<string, LayerSummary> = {};
   const { speech, transcript, scenes, keyframes, faces, plates } = doc.layers;
-  const base = (l: NonNullable<VideoDoc['layers'][keyof Layers]>) => ({
+  const base = (l: Layer<unknown>) => ({
     items: l.items.length,
     ms: Math.round(l.ms),
     device: l.device,
@@ -90,6 +104,11 @@ export function summarize(doc: VideoDoc): Record<string, LayerSummary> {
   if (plates) {
     const frames = plates.items.reduce((n, t) => n + t.f1 - t.f0 + 1, 0);
     out.plates = { ...base(plates), samples: plates.items.reduce((n, t) => n + t.samples.length, 0), plateFrames: frames };
+  }
+  for (const name of trackLayers(doc)) {
+    if ((TRACK_LAYERS as string[]).includes(name)) continue;
+    const l = tracksOf(doc, name)!;
+    out[name] = { ...base(l), samples: l.items.reduce((n, t) => n + t.samples.length, 0), trackFrames: l.items.reduce((n, t) => n + t.f1 - t.f0 + 1, 0) };
   }
   return out;
 }

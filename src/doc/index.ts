@@ -10,3 +10,5 @@ export * from './search.ts';
 export * from './doc.ts';
 export * from './redact.ts';
 export * from './words.ts';
+export * from './models.ts';
+export * from './pipeline.ts';

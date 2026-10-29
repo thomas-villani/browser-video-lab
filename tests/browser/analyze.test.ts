@@ -1,11 +1,11 @@
 // Every layer computed in headless Edge on the fixtures, with figures pinned in baseline.json.
 // Run: npm run test:browser (cut the local fixtures first: node scripts/fixtures.mjs).
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { copyFileSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { analyze, ROOT } from '../../cli/lib.ts';
-import { normWord, summarize } from '../../src/doc/index.ts';
+import { normWord, redactionLog, REDACT_DEFAULTS, summarize, type Layer, type Track } from '../../src/doc/index.ts';
 import { context, fixture, fresh, identical, loadDoc, LOCAL_FIXTURES, near, notReady, saveBaseline, speed } from './lib.ts';
 
 const ctx = context();
@@ -94,3 +94,35 @@ for (const name of LOCAL_FIXTURES) {
     for (const [l, s] of Object.entries(again.layers)) assert.equal(s.status, 'cached', l);
   });
 }
+
+test('rickroll-cuts: a pipeline\'s track layer, on a model file next to the preset, is computed, cached and redactable', async (t) => {
+  const why = await notReady(ctx);
+  if (why) return t.skip(why);
+  const path = fixture('rickroll-cuts');
+  if (!path) return t.skip('fixture not cut: node scripts/fixtures.mjs');
+  const video = fresh(path);
+  // The model is a copy of YuNet beside the preset, named by a relative path: the CLI serves it to the page.
+  const dir = dirname(video);
+  copyFileSync(join(ROOT, 'public/models/yunet_face_dyn.onnx'), join(dir, 'heads.onnx'));
+  const preset = join(dir, 'heads.json');
+  writeFileSync(preset, JSON.stringify({
+    schema: 'videodoc-pipeline/0',
+    layers: ['heads'],
+    models: { heads: { url: './heads.onnx', decoder: 'yunet', labels: ['face'], name: 'yunet copy' } },
+    tracks: { heads: { model: 'heads', maxStride: 8, minScore: 0.6 } },
+  }));
+  await analyze(ctx, video, { pipeline: preset });
+  const doc = loadDoc(video);
+  const heads = doc.layers.heads as Layer<Track>;
+  assert.equal(heads.producer.kind, 'track');
+  assert.equal(heads.producer.model, 'yunet copy');
+  assert.ok(heads.items.length > 0, 'heads found');
+  near(t, 'rickroll-cuts.heads.tracks', heads.items.length, { rel: 0.05, abs: 2 });
+  identical(t, 'rickroll-cuts.heads', heads.items);
+  const again = (await analyze(ctx, video, { pipeline: preset })) as { layers: Record<string, { status: string }> };
+  assert.deepEqual(Object.values(again.layers).map((s) => s.status), ['cached', 'cached']);
+  // Redaction covers it when listed.
+  const log = redactionLog(doc, { ...REDACT_DEFAULTS, cover: ['heads'] });
+  assert.equal(log.totals.tracks, heads.items.length);
+  assert.ok(log.totals.framesWithRegions > 0);
+});

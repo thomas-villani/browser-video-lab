@@ -4,9 +4,10 @@
 // (analyze below) and the CLI (which plans in Node).
 import { CanvasSink } from 'mediabunny';
 import {
-  deriveLayers, fingerprint, newDoc, plan, VERSION, withLayers, linkTracks, DEFAULT_TRACKS,
-  type Box, type Layer, type LayerName, type Layers, type Overrides, type PlannedLayer, type SpeechItem, type TranscriptItem, type VideoDoc, type Word,
+  deriveLayers, fingerprint, mergeOverrides, newDoc, pipelineContext, plan, VERSION, withLayers, linkTracks, DEFAULT_TRACKS,
+  type Box, type DocLayers, type Layer, type Layers, type Overrides, type Pipeline, type PlannedLayer, type PlannedModel, type SpeechItem, type TranscriptItem, type VideoDoc, type Word,
 } from './doc/index.ts';
+import { modelSpec, specFor, type ModelSpec } from './models';
 import { decodeAudio } from './runtime/audio';
 import { Detector } from './runtime/detector';
 import { sceneStream } from './runtime/scenes';
@@ -32,12 +33,22 @@ export interface ComputeOptions {
 
 export interface Computed {
   probe: Probe;
-  layers: Partial<Layers>;
+  layers: DocLayers;
   /** Adapter used for the frame pass, for the run summary. */
   adapter?: { vendor: string; architecture: string; description: string };
 }
 
-const MODEL_NAMES: Record<string, string> = { yunet: 'yunet_face_dyn (2023mar)', 'yolo-plate': 'yolo-v9-t-640-license-plates (open-image-models)' };
+/** A planned track layer's detector: a model registered in this page by that name (it may have
+ *  its own decode), else the plan's description of it. */
+function specOf(m: PlannedModel): ModelSpec {
+  try {
+    const s = modelSpec(m.id);
+    // The plan may point the same model at another URL (the CLI serves local files).
+    return s.url === m.url ? s : { ...s, url: m.url };
+  } catch {
+    return specFor(m.id, m);
+  }
+}
 
 /** Compute every layer of `planned` with status 'compute'. Cached ones only supply configs. */
 export async function computeLayers(input: MediaInput, planned: PlannedLayer[], opts: ComputeOptions = {}): Promise<Computed> {
@@ -46,13 +57,13 @@ export async function computeLayers(input: MediaInput, planned: PlannedLayer[], 
   const cfg = new Map(planned.map((l) => [l.name, l]));
   onProgress?.({ pass: 'probe', stage: 'reading container', done: 0, total: 1 });
   const info = await probe(input);
-  const layers: Partial<Layers> = {};
+  const layers: DocLayers = {};
   let adapter: Computed['adapter'];
 
-  const layer = <T>(name: LayerName, items: T[], ms: number, device: 'webgpu' | 'wasm', coverage: [number, number][], model?: string): Layer<T> => {
+  const layer = <T>(name: string, items: T[], ms: number, device: 'webgpu' | 'wasm', coverage: [number, number][], model?: string): Layer<T> => {
     const p = want.get(name)!;
     return {
-      producer: { module: name, version: VERSION, ...(model && { model }), config: p.config, configHash: p.configHash },
+      producer: { module: name, version: VERSION, ...(model && { model }), ...(p.kind && { kind: p.kind }), config: p.config, configHash: p.configHash },
       coverage,
       createdAt: new Date().toISOString(),
       ms: Math.round(ms),
@@ -105,7 +116,7 @@ export async function computeLayers(input: MediaInput, planned: PlannedLayer[], 
     }
   }
 
-  const tracked = (['faces', 'plates'] as const).filter((n) => want.has(n));
+  const tracked = [...want.values()].filter((l) => l.kind === 'track').map((l) => l.name);
   if (want.has('scenes') || tracked.length) {
     const t0 = performance.now();
     const source = await VideoSource.open(input);
@@ -122,21 +133,25 @@ export async function computeLayers(input: MediaInput, planned: PlannedLayer[], 
     if (tracked.length) {
       const heads: Head[] = [];
       for (const name of tracked) {
+        const l = want.get(name)!;
+        const spec = specOf(l.model!);
         if (name === 'faces') {
-          const c = want.get('faces')!.config as {
-            model: string; longSide: number; maxStride: number; minIou: number; minScore: number; refine: boolean; tile: string; every: number; trigger: number; small: number;
+          const c = l.config as {
+            longSide: number; maxStride: number; minIou: number; minScore: number; refine: boolean; tile: string; every: number; trigger: number; small: number;
           };
           const [tileW, tileH] = c.tile.split('x').map(Number);
           heads.push({
-            detector: await Detector.create({ model: c.model, depth: 2, score: Math.min(c.minScore, c.refine ? c.trigger : 1) }),
+            detector: await Detector.create({ model: spec, depth: 2, score: Math.min(c.minScore, c.refine ? c.trigger : 1) }),
             maxStride: c.maxStride, minIou: c.minIou, minScore: c.minScore,
             detect: c.longSide ? { longSide: c.longSide } : undefined,
             refine: c.refine ? { tileW, tileH, overlap: 32, trigger: c.trigger, grow: 0, every: c.every, small: c.small } : undefined,
           });
         } else {
-          const c = want.get('plates')!.config as { model: string; maxStride: number; minIou: number; minScore: number; lowScore: number };
+          // Plates and a pipeline's track layers.
+          const c = l.config as { maxStride: number; minIou: number; minScore: number; lowScore: number; labels?: string };
+          const labels = c.labels ? c.labels.split(',').map((x) => x.trim()).filter(Boolean) : undefined;
           heads.push({
-            detector: await Detector.create({ model: c.model, depth: 2, score: Math.min(c.minScore, c.lowScore) }),
+            detector: await Detector.create({ model: spec, depth: 2, score: Math.min(c.minScore, c.lowScore), labels }),
             maxStride: c.maxStride, minIou: c.minIou, minScore: c.minScore, lowScore: c.lowScore,
           });
         }
@@ -178,10 +193,9 @@ export async function computeLayers(input: MediaInput, planned: PlannedLayer[], 
       layers.scenes = layer('scenes', n ? items : [], ms, 'webgpu', [[0, end]]);
     }
     tracked.forEach((name, i) => {
-      const c = want.get(name)!.config;
-      const model = c.model as string;
-      const link = name === 'plates' ? { ...DEFAULT_TRACKS, maxShift: c.maxShift as number, maxGap: c.maxGap as number } : DEFAULT_TRACKS;
-      layers[name] = layer(name, linkTracks(boxes[i], cuts, link), ms, 'webgpu', [[0, end]], MODEL_NAMES[model] ?? model);
+      const { config: c, model } = want.get(name)!;
+      const link = name === 'faces' ? DEFAULT_TRACKS : { ...DEFAULT_TRACKS, maxShift: c.maxShift as number, maxGap: c.maxGap as number };
+      layers[name] = layer(name, linkTracks(boxes[i], cuts, link), ms, 'webgpu', [[0, end]], model!.name ?? model!.id);
     });
     // The decoded frame count is the truth when the container's packet count disagrees.
     info.frames = n;
@@ -199,11 +213,12 @@ export async function fingerprintOf(input: MediaInput): Promise<{ size: number; 
     return { size: input.size, fingerprint: await fingerprint(input.size, read) };
   }
   const read = async (a: number, b: number) => {
-    const r = await fetch(input, { headers: { Range: `bytes=${a}-${b - 1}` } });
+    const r = await fetch(input, { headers: { Range: `bytes=${a}-${b - 1}` }, cache: 'no-store' });
     if (r.status !== 206) throw new Error(`${input}: the server ignores range requests (status ${r.status}); pass the file as a Blob instead`);
     return new Uint8Array(await r.arrayBuffer());
   };
-  const head = await fetch(input, { headers: { Range: 'bytes=0-0' } });
+  // bytes=0-1, not 0-0: sirv (vite preview) reads an end of 0 as the end of the file.
+  const head = await fetch(input, { headers: { Range: 'bytes=0-1' }, cache: 'no-store' });
   const size = Number(head.headers.get('Content-Range')?.split('/')[1]);
   await head.body?.cancel();
   if (!Number.isFinite(size)) throw new Error(`${input}: no Content-Range in the response; the server must support range requests`);
@@ -215,6 +230,18 @@ export interface AnalyzeOptions extends Omit<ComputeOptions, 'inputs'> {
   doc?: VideoDoc;
   settings?: Overrides;
   force?: boolean;
+  /** A pipeline preset (pipeline.ts): its track layers, models and settings (`settings` win). */
+  pipeline?: Pipeline;
+}
+
+/** Identity of a model file (range requests: the first and last MiB, not the whole file). */
+async function modelFingerprint(url: string): Promise<string | undefined> {
+  try {
+    return (await fingerprintOf(new URL(url, location.href).href)).fingerprint;
+  } catch {
+    // A server without range requests: the URL stands in for the file.
+    return undefined;
+  }
 }
 
 /**
@@ -222,10 +249,11 @@ export interface AnalyzeOptions extends Omit<ComputeOptions, 'inputs'> {
  *
  *   const doc = await analyze(file, ['transcript', 'scenes', 'faces'], { onProgress });
  */
-export async function analyze(input: MediaInput, layers: LayerName[], opts: AnalyzeOptions = {}): Promise<VideoDoc> {
+export async function analyze(input: MediaInput, layers: string[], opts: AnalyzeOptions = {}): Promise<VideoDoc> {
   const id = await fingerprintOf(input);
   let doc = opts.doc?.source.fingerprint === id.fingerprint ? opts.doc : undefined;
-  const p = await plan(doc, layers, opts.settings, opts.force);
+  const pc = pipelineContext(opts.pipeline);
+  const p = await plan(doc, layers, mergeOverrides(pc.settings, opts.settings ?? {}), opts.force, { ...pc, fingerprint: modelFingerprint });
   if (doc && !Object.keys(p.passes).length) return doc;
   if (!doc || p.passes.audio || p.passes.frames) {
     const r = await computeLayers(input, p.layers, { ...opts, inputs: doc?.layers });

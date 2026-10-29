@@ -20,7 +20,7 @@ return in well under a second.
 ## analyze
 
 ```bash
-videodoc analyze <video|folder> [--layers a,b] [--set layer.key=value]... [--out doc.json] [--force] [--dry-run]
+videodoc analyze <video|folder> [--layers a,b] [--set layer.key=value]... [--pipeline preset.json] [--out doc.json] [--force] [--dry-run]
 ```
 
 Computes layers into `<video>.videodoc.json`. Given a folder, analyzes every video in it and its
@@ -31,6 +31,9 @@ subfolders (`.mp4 .m4v .mov .mkv .webm`) one after another.
 - `--set`: override a setting, repeatable: `--set faces.every=4 --set transcript.language=de`.
   `videodoc layers` lists every setting with its default; unknown keys and wrong types are
   rejected with the list of valid ones.
+- `--pipeline preset.json`: a [pipeline preset](pipelines.md): its layers (when `--layers` is not
+  given), its settings (`--set` wins) and its track layers on your own detectors (e.g. `vehicles`).
+  Also for `markdown`, `redact` and `layers`.
 - Layers already in the doc with the same settings (and computed from the same inputs) are
   reused; with nothing to compute no browser starts. `--force` recomputes the requested layers.
 - `--dry-run` prints the plan (each layer `cached` or `compute`, and the decode passes) and exits.
@@ -83,8 +86,8 @@ transcript, so a caller can analyze them and search again.
 ## redact
 
 ```bash
-videodoc redact <video> [--out file.mp4] [--style blur|pixelate|fill] [--margin f] [--hold s] [--keep ids] [--keep-plates ids] [--cover faces,plates|none]
-                [--words list] [--words-file path] [--profanity] [--sound bleep|mute] [--lead s] [--tail s] [--keep-words keys] [--no-plan] [--set ...] [--force]
+videodoc redact <video> [--out file.mp4] [--style blur|pixelate|fill] [--margin f] [--hold s] [--keep ids] [--keep-plates ids] [--keep-tracks layer=ids]... [--cover faces,plates|none]
+                [--words list] [--words-file path] [--profanity] [--sound bleep|mute] [--lead s] [--tail s] [--keep-words keys] [--no-plan] [--pipeline preset.json] [--set ...] [--force]
 ```
 
 Writes a copy with every face and license plate covered (H.264 MP4) and the listed words
@@ -104,7 +107,10 @@ copied.
 - `--keep-plates 2`: plate track ids to leave visible (a sign taken for a plate). Ids are per
   layer: face 2 and plate 2 are different tracks.
 - `--cover faces`: cover faces only (default `faces,plates`); `--cover none` copies the video
-  and only bleeps words.
+  and only bleeps words. A [pipeline's](pipelines.md) track layers are covered when listed:
+  `--cover faces,plates,vehicles` (with `--pipeline`, or after analyzing with it: a track layer
+  already in the doc is used as saved).
+- `--keep-tracks vehicles=3,7`: a pipeline track layer's ids to leave visible, repeatable.
 - `--words "Ackover,Daniel Reyes"`: words and phrases to bleep. Plain words also match plurals,
   possessives, -ed and -ing; `*` is a wildcard (`fuck*`); `"quoted"` matches only that word.
   Spell names as the transcript does (`videodoc markdown` shows it).
@@ -135,11 +141,11 @@ device, model, settings hash and figures, plus the layers still `missing`.
 ## layers
 
 ```bash
-videodoc layers
+videodoc layers [--pipeline preset.json]
 ```
 
 Every layer: what it needs, which pass computes it, its description, and every setting with its
-default and meaning (JSON). The CLI help and the MCP tool schemas are generated from the same
+default and meaning (JSON); with a pipeline, its track layers too. The CLI help and the MCP tool schemas are generated from the same
 definition (`PRODUCERS` in `src/doc/plan.ts`).
 
 ## check

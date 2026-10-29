@@ -37,8 +37,12 @@ const layerList = LAYER_NAMES.map((n) => `${n}: ${PRODUCERS[n].description}${PRO
 const VIDEO = { type: 'string', description: 'Path to a local video file (absolute, or relative to the server\'s working directory).' };
 const LAYERS = {
   type: 'array',
-  items: { type: 'string', enum: LAYER_NAMES },
-  description: `Layers to compute; dependencies are added, layers already in the doc with the same settings are reused.\n${layerList}`,
+  items: { type: 'string' },
+  description: `Layers to compute; dependencies are added, layers already in the doc with the same settings are reused. Built-in layers:\n${layerList}\nA pipeline's track layers too (see pipeline).`,
+};
+const PIPELINE = {
+  type: 'string',
+  description: 'Path to a pipeline preset (JSON, videodoc-pipeline/0): its layers (when layers is not given), settings (set wins), models and track layers, e.g. a "vehicles" layer from a COCO detector. The layers tool lists its layers and settings.',
 };
 const SET = {
   type: 'array',
@@ -67,6 +71,7 @@ const TOOLS = [
         out: { type: 'string', description: 'Also write the Markdown to this path (image links relative to it).' },
         from: { type: ['string', 'number'], description: 'Only render from this time: seconds, "mm:ss" or "h:mm:ss" (e.g. a search hit\'s start minus a minute).' },
         to: { type: ['string', 'number'], description: 'Only render up to this time (same formats).' },
+        pipeline: PIPELINE,
         set: SET,
         force: FORCE,
         dryRun: DRY_RUN,
@@ -98,7 +103,7 @@ const TOOLS = [
       `Default layers: ${DEFAULT_LAYERS.join(', ')}. Cached layers are reused, so repeating a call is cheap.`,
     inputSchema: {
       type: 'object',
-      properties: { video: { ...VIDEO, description: `${VIDEO.description} A folder analyzes every video in it.` }, layers: LAYERS, set: SET, force: FORCE, dryRun: DRY_RUN },
+      properties: { video: { ...VIDEO, description: `${VIDEO.description} A folder analyzes every video in it.` }, layers: LAYERS, pipeline: PIPELINE, set: SET, force: FORCE, dryRun: DRY_RUN },
       required: ['video'],
     },
   },
@@ -123,7 +128,9 @@ const TOOLS = [
         hold: { type: 'number', minimum: 0, maximum: 10, description: `Seconds to keep covering before and after each face track, within its shot (default ${REDACT_DEFAULTS.hold}).` },
         keep: { type: 'array', items: { type: 'integer', minimum: 1 }, description: "Face track ids to leave visible (replaces the review's)." },
         keepPlates: { type: 'array', items: { type: 'integer', minimum: 1 }, description: "Plate track ids to leave visible, e.g. a sign taken for a plate (replaces the review's)." },
-        cover: { type: 'array', items: { type: 'string', enum: REDACT_KINDS }, description: 'What to cover (default faces and plates; [] copies the video and redacts audio only).' },
+        cover: { type: 'array', items: { type: 'string' }, description: `Track layers to cover: ${REDACT_KINDS.join(', ')} or a pipeline's (default faces and plates; [] copies the video and redacts audio only).` },
+        keepTracks: { type: 'object', additionalProperties: { type: 'array', items: { type: 'integer', minimum: 1 } }, description: 'A pipeline\'s track layers: ids to leave visible, by layer, e.g. {"vehicles": [3]}.' },
+        pipeline: PIPELINE,
         words: { type: 'array', items: { type: 'string' }, description: 'Words and phrases to bleep (names, places, numbers). Plain words also match plurals, possessives, -ed and -ing; * is a wildcard; a "quoted" entry matches exactly. Replaces the review\'s.' },
         profanity: { type: 'boolean', description: 'Also bleep the built-in strong-language list (default false).' },
         sound: { type: 'string', enum: REDACT_SOUNDS, description: `bleep (a 1 kHz tone) or mute (default ${REDACT_DEFAULTS.sound}).` },
@@ -147,8 +154,8 @@ const TOOLS = [
   {
     name: 'layers',
     title: 'List layers',
-    description: 'Layers videodoc can compute, their dependencies, and every setting with its default and meaning.',
-    inputSchema: { type: 'object', properties: {} },
+    description: 'Layers videodoc can compute, their dependencies, and every setting with its default and meaning (with a pipeline, its track layers too).',
+    inputSchema: { type: 'object', properties: { pipeline: PIPELINE } },
   },
   {
     name: 'check',
@@ -212,6 +219,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra): Promise<Call
     set: args.set as string[] | undefined,
     force: args.force as boolean | undefined,
     dryRun: args.dryRun as boolean | undefined,
+    pipeline: args.pipeline as string | undefined,
   };
   const video = () => {
     if (typeof args.video !== 'string' || !args.video) throw new UsageError('video is required: a path to a local video file');
@@ -253,7 +261,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra): Promise<Call
               type: 'text',
               text: json(
                 await redact(ctx, video(), {
-                  set: common.set, force: common.force, dryRun: common.dryRun,
+                  set: common.set, force: common.force, dryRun: common.dryRun, pipeline: common.pipeline, keepTracks: args.keepTracks as Record<string, number[]> | undefined,
                   out: args.out as string | undefined, style: args.style as string | undefined,
                   margin: args.margin as number | undefined, hold: args.hold as number | undefined, keep: args.keep as number[] | undefined,
                   keepPlates: args.keepPlates as number[] | undefined, cover: args.cover as string[] | undefined, plan: args.plan as boolean | undefined,
@@ -267,7 +275,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra): Promise<Call
       case 'info':
         return { content: [{ type: 'text', text: json(info(ctx, video())) }] };
       case 'layers':
-        return { content: [{ type: 'text', text: json(layers()) }] };
+        return { content: [{ type: 'text', text: json(layers(ctx, args.pipeline as string | undefined)) }] };
       case 'check':
         return { content: [{ type: 'text', text: json(await check(ctx, a.browser!)) }] };
       default:

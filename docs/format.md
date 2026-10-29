@@ -45,6 +45,7 @@ interface Layer<T> {
     module: string;          // the layer name
     version: string;         // videodoc version that wrote it
     model?: string;          // e.g. "onnx-community/whisper-base_timestamped"
+    kind?: 'track';          // a pipeline's track layer: items are Tracks
     config: Record<string, number | string | boolean>;   // every setting, defaults included
     configHash: string;      // hash of config + the hashes of the layers it was computed from
   };
@@ -64,6 +65,7 @@ interface Layer<T> {
 | `keyframes` | `{ t, frame, scene, why: 'scene' \| 'silence' \| 'coverage' }` | scenes, speech | pure | derived in Node or the browser, no decode |
 | `faces` | `Track` (below) | scenes | frames | YuNet with adaptive sampling and native-resolution tiles |
 | `plates` | `Track` (below) | scenes | frames | YOLOv9-t license plates (open-image-models), adaptive sampling, motion-linked |
+| any name a [pipeline](pipelines.md) gives (`vehicles`) | `Track` | scenes | frames | the pipeline's detector, tracked like plates; `producer.kind` is `"track"` |
 
 **Passes.** Audio is decoded once for speech and transcript. Every frame layer shares one video
 decode. Pure layers are computed from other layers without touching the video.
@@ -134,7 +136,9 @@ hashes each requested layer's settings together with the hashes of the layers it
 - different hash (a setting changed, or an input layer did): **compute** and replace it.
 
 So repeating a request is free, `--set scenes.threshold=0.2` recomputes scenes and also faces
-and keyframes (they were computed from the old shots), and `--force` recomputes regardless. With
+and keyframes (they were computed from the old shots), and `--force` recomputes regardless.
+Track layers also hash their model: its description (decoder, labels, input settings) and the
+file's fingerprint, so a replaced model file recomputes them (a moved one does not). With
 nothing to compute, the CLI and MCP server never start a browser.
 
 **Provenance** is always there: the model, every setting, the device, how long it took. A

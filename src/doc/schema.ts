@@ -29,6 +29,8 @@ export interface Producer {
   module: string;
   version: string;
   model?: string;
+  /** 'track': the items are Tracks (built-in faces and plates, and a pipeline's track layers). */
+  kind?: 'track';
   config: Record<string, unknown>;
   /** Hash of config + model + the hashes of the layers this one was computed from. Re-running
    *  with the same hash is a no-op. */
@@ -76,15 +78,23 @@ export interface Layers {
   plates: Layer<Track>;
 }
 
+/** The built-in layers. */
 export type LayerName = keyof Layers;
 /** In dependency order. */
 export const LAYER_NAMES: LayerName[] = ['speech', 'transcript', 'scenes', 'keyframes', 'faces', 'plates'];
+/** The built-in track layers (a pipeline can add more: their producer.kind is 'track'). */
+export const TRACK_LAYERS: LayerName[] = ['faces', 'plates'];
+/** Names a pipeline may give its layers. */
+export const LAYER_NAME_RE = /^[a-z][a-z0-9_]*$/;
+
+/** A doc's layers: the built-in ones, plus track layers a pipeline added (e.g. `vehicles`). */
+export type DocLayers = Partial<Layers> & { [custom: string]: Layer<unknown> | undefined };
 
 export interface VideoDoc {
   schema: typeof SCHEMA;
   source: SourceInfo;
-  layers: Partial<Layers>;
+  layers: DocLayers;
 }
 
 /** Pointer to an item in a layer, e.g. "transcript/12". */
-export type Ref = `${LayerName}/${number}`;
+export type Ref = `${string}/${number}`;
