@@ -2,9 +2,9 @@
 // search it, seek from a hit; review a crowd's faces and download the blurred copy and its log.
 // Run: npm run test:browser
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { ROOT } from '../../cli/lib.ts';
 import { context, fixture, fresh, notReady } from './lib.ts';
@@ -95,6 +95,44 @@ test('app: review a crowd, then download the blurred copy and its log', async (t
   const log = JSON.parse(readFileSync(logPath, 'utf8'));
   assert.ok(log.totals.tracks > 100, `log lists the crowd's tracks (${log.totals.tracks})`);
   assert.equal(log.output.frames, 300);
+  assert.deepEqual(errors, []);
+  await page.close();
+});
+
+test('app: a preset picked with its model file adds its track layer, which the review can cover', async (t) => {
+  if (skip) return t.skip(skip);
+  const path = fixture('rickroll-cuts');
+  if (!path) return t.skip('fixture not cut: node scripts/fixtures.mjs');
+  const video = fresh(path);
+  const dir = dirname(video);
+  copyFileSync(join(ROOT, 'public/models/yunet_face_dyn.onnx'), join(dir, 'heads.onnx'));
+  writeFileSync(join(dir, 'heads.json'), JSON.stringify({
+    schema: 'videodoc-pipeline/0',
+    name: 'heads',
+    layers: ['faces', 'plates', 'heads'],
+    models: { heads: { url: './heads.onnx', decoder: 'yunet', labels: ['face'], name: 'yunet copy' } },
+    tracks: { heads: { model: 'heads', maxStride: 8, minScore: 0.6, description: 'heads (a YuNet copy)' } },
+  }));
+  const { page, errors } = await open();
+  await page.setInputFiles('#preset-file', [join(dir, 'heads.json'), join(dir, 'heads.onnx')]);
+  await page.waitForSelector('#preset input[data-track=heads]', { state: 'attached' });
+  assert.equal(await page.$eval('#preset input[data-track=heads]', (e: HTMLInputElement) => e.checked), true, 'the preset ticks its layer');
+  assert.equal(await page.$eval('#opt-transcript', (e: HTMLInputElement) => e.checked), false, 'and only what it lists');
+  assert.match(clean(await page.textContent('#plan-line')), /over the frames \(shots, faces, plates and heads\)/);
+
+  await page.setInputFiles('#add-files', [video]);
+  await page.waitForSelector('#list li');
+  await page.click('#list li');
+  await page.click('#read .analyze-this');
+  await page.waitForSelector('#doc-actions #review-faces', { timeout: 300_000 });
+  assert.match(clean(await page.textContent('#read .made')), /heads/, 'the doc has the layer');
+
+  await page.click('#doc-actions #review-faces');
+  await page.waitForSelector('#review .rv-head', { timeout: 300_000 });
+  assert.doesNotMatch(clean(await page.textContent('#review .rv-head h1')), /heads/, 'a preset layer is not covered until ticked');
+  await page.check('#review input[data-cover=heads]');
+  await page.waitForFunction(() => /heads/.test(document.querySelector('#review .rv-head h1')!.textContent!));
+  assert.ok(await page.$('#review [data-track^="heads:"]'), 'its tracks are listed');
   assert.deepEqual(errors, []);
   await page.close();
 });

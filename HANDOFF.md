@@ -24,13 +24,13 @@ difference, denser visual analysis where nobody speaks.
 - Branch `main`. Commit and push only when the user asks.
 - Built: roadmap steps 1-6 (doc + planner, keyframes + markdown, MCP server, search, the app,
   redaction of faces, plates and spoken words with the review UI), the browser test suite
-  (step 8's first part) and step 9's library half (models as data, pipeline presets, track
-  layers on any detector). Captions (step 7) not started.
+  (step 8's first part) and step 9 (models as data, pipeline presets, track layers on any
+  detector; presets in the app). Captions (step 7) not started.
 - Layers: `speech` (Silero VAD), `transcript` (whisper-base_timestamped, word times),
   `scenes`, `keyframes` (pure), `faces` (YuNet + adaptive sampling + tile refinement), `plates`
   (YOLOv9-t, same decode as faces), and any track layer a pipeline defines (`vehicles`).
   Defaults in `PRODUCERS` (`src/doc/plan.ts`); a pipeline's in `pipelineContext`.
-- Tests: `npm test` 66 pure-TS tests (seconds); `npm run test:browser` 10 tests in headless Edge
+- Tests: `npm test` 67 pure-TS tests (seconds); `npm run test:browser` 11 tests in headless Edge
   (~4 min; `npm run fixtures` first; docs/lab.md "Tests").
 - Audience (user, 2026-10-28): creators (bodycam/dashcam channels, podcasts, tutorials), not
   institutions; DESIGN.md "Audience" and roadmap steps 10-16.
@@ -58,13 +58,17 @@ difference, denser visual analysis where nobody speaks.
 - The config hash of a track layer includes its model description and file fingerprint (size +
   first/last MiB; range requests in the browser), so saved docs recompute faces and plates once.
 
-## Next: step 9, the app's pipeline builder
+## Done: step 9, the app's presets (2026-10-29)
 
-- On `plan()`: choose layers and models (built-in and a pipeline's), see the order and shared
-  decode passes, an estimate, save and load presets (`videodoc-pipeline/0`, same files as the
-  CLI), run on a folder. The app's analysis is `analyze()` in `src/app/main.ts`
-  (`layersWanted`); the review's covered layers come from `plan.options.cover`, so the builder
-  must also let a person cover a pipeline's layers.
+- `src/app/presets.ts`: a preset picked with its model files (matched by name) or read from
+  `videodoc.pipeline.json` at the top of an opened folder; local model paths become object URLs,
+  and `modelFingerprint` (src/analyze.ts) hashes a `blob:` model by its content, so results are
+  reused across sessions. What to analyze lists its track layers, its settings and a plan line
+  (passes, time per hour; `trackCost` in render.ts: DETR ~9 s/s, others as plates); Save as
+  preset writes what is ticked. `layersWanted` adds ticked and covered preset layers;
+  `reviewable` needs every covered layer the session can compute. The review's **Cover**
+  checkboxes set `plan.options.cover` (preset layers start uncovered); colors are by the layer's
+  place in the doc, so they stay put when toggled.
 - Model licenses (user, 2026-10-29): users pick their own models (any license, e.g. Ultralytics
   AGPL); videodoc bundles none and only its defaults must be permissive.
 - Open: a fast, permissively licensed COCO detector as a default for `vehicles`/`people` (RF-DETR nano is ~3
@@ -213,7 +217,7 @@ benchmarks and evaluation tools that used to fill the README). Keep it current w
 
 ## Next
 
-The app's pipeline builder (step 9's second half, above); run both test suites before and after.
+Step 10 (speakers) or step 7 (captions/OCR), the user's pick; open step 9 items above.
 Test suite follow-ups (DESIGN.md step 8): an accuracy tier on the full labeled footage, the MCP
 server over a real browser. Audio follow-ups (DESIGN.md step 6): sound-alike name matching, drawing audio
 spans in the app, highlights in the reading view, audio-only review. Lead application (decided 2026-10-27) stays search

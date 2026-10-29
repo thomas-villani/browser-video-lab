@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { highlight, newDoc, toMarkdown, withLayers, type Layer } from '../src/doc/index.ts';
-import { analysisSteps, estimate, markdownToHtml, secs, stepOf, suggestions } from '../src/app/render.ts';
+import { analysisSteps, estimate, markdownToHtml, secs, stepOf, suggestions, trackCost } from '../src/app/render.ts';
+import { decoderOf, readPreset } from '../src/app/presets.ts';
 
 const layer = <T>(items: T[]) => ({ producer: { configHash: 'h', config: {} }, items }) as unknown as Layer<T>;
 const doc = withLayers(
@@ -42,6 +43,10 @@ test('guidance: estimates, analysis steps, search suggestions', () => {
   const steps = analysisSteps(['speech', 'scenes', 'keyframes', 'transcript', 'faces'], new Set(['speech', 'transcript', 'scenes', 'keyframes']));
   assert.deepEqual(steps, ['Finding faces']);
   assert.deepEqual(analysisSteps(['scenes', 'faces', 'plates'], new Set(['scenes', 'faces'])), ['Finding plates']);
+  // A preset's track layers are found in the same pass.
+  assert.deepEqual(analysisSteps(['scenes', 'faces', 'plates', 'vehicles'], new Set(['scenes']), ['faces', 'plates', 'vehicles']), ['Finding faces, plates and vehicles']);
+  assert.equal(estimate(3600, { transcript: true, faces: false, extra: trackCost('detr') }), 'about 9.3 h');
+  assert.equal(trackCost('yolo'), trackCost('yolo-end2end'));
   assert.equal(stepOf({ pass: 'frames', stage: 'scenes + plates' }, ['Finding plates', 'Blurring']), 0);
   const full = ['Listening', 'Transcribing', 'Finding shots'];
   assert.equal(stepOf({ pass: 'probe', stage: 'reading container' }, full), -1);
@@ -54,4 +59,24 @@ test('guidance: estimates, analysis steps, search suggestions', () => {
     ['The Senate in Alaska met.', 'Alaska again, and Alaska.'],
   ]);
   assert.deepEqual(s, ['Michigan', 'Alaska', 'Detroit']);
+});
+
+test('presets: local model files become object URLs; missing ones say how to supply them', async () => {
+  const text = JSON.stringify({
+    schema: 'videodoc-pipeline/0',
+    name: 'dashcam',
+    layers: ['faces', 'vehicles', 'logos'],
+    models: { logos: { url: './models/logos.onnx', decoder: 'yolo', labels: ['logo'] }, web: { url: 'https://example.com/m.onnx', decoder: 'detr' } },
+    tracks: { vehicles: { model: 'rfdetr', labels: 'car,truck' }, logos: { model: 'logos' } },
+  });
+  const asked: string[] = [];
+  const p = await readPreset(text, 'dashcam.json', async (path) => (asked.push(path), new Blob(['onnx'])), 'pick them');
+  assert.deepEqual(asked, ['./models/logos.onnx'], 'only local paths are looked up');
+  assert.match(p.run.models!.logos.url, /^blob:/);
+  assert.equal(p.run.models!.web.url, 'https://example.com/m.onnx');
+  assert.equal(p.pipeline.models!.logos.url, './models/logos.onnx', 'the preset keeps its paths, for saving');
+  assert.equal(decoderOf(p.pipeline, 'vehicles'), 'detr', 'built-in models are known');
+  assert.equal(decoderOf(p.pipeline, 'logos'), 'yolo');
+  await assert.rejects(readPreset(text, 'dashcam.json', async () => undefined, 'pick them'), /model file \.\/models\/logos\.onnx not found; pick them/);
+  await assert.rejects(readPreset('{"schema": "x"', 'bad.json', async () => undefined, ''), /bad\.json: not JSON/);
 });

@@ -300,8 +300,14 @@ loaded. Reading and searching work without WebGPU.
    (`producer.kind: 'track'`), planned after the built-in ones, run as extra heads over the
    shared decode, tracked like plates, covered by redaction (`--cover faces,vehicles`,
    `keepTracks`) and shown in the review in their own color; the config hash includes the
-   model's description and its file's fingerprint. Docs: docs/pipelines.md. Not yet: the app's
-   pipeline builder; labels per track (a track layer tracks its labels together); a model's
+   model's description and its file's fingerprint. Docs: docs/pipelines.md.
+   **Built, app half (2026-10-29):** presets in the app (`src/app/presets.ts`): loaded in What
+   to analyze with their model files (matched by name; object URLs, fingerprinted by content)
+   or from `videodoc.pipeline.json` at the top of an opened folder; their track layers become
+   checkboxes, a plan line shows the passes and the time per hour of video, Save as preset
+   writes what is ticked; the review ticks which track layers to cover. Kept simple on purpose:
+   no editor for models or track settings in the app (the preset file is the place; the CLI
+   and docs explain it). Not yet: labels per track (a track layer tracks its labels together); a model's
    session shared by two layers; a fast permissive COCO detector (RF-DETR nano is ~3 fps).
 10. **Speakers** (diarization): segmentation (pyannote segmentation-3.0, ONNX) + speaker
     embeddings (WeSpeaker / ECAPA class) + clustering, speakers assigned per word from the word

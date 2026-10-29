@@ -13,7 +13,9 @@ videodoc layers --pipeline examples/pipelines/dashcam.json      # its layers and
 ```
 
 The MCP tools `analyze`, `markdown`, `redact` and `layers` take the same file as `pipeline`;
-the library takes the parsed object (`analyze(file, layers, { pipeline })`).
+the library takes the parsed object (`analyze(file, layers, { pipeline })`). The app loads it
+in What to analyze (with its model files), or from `videodoc.pipeline.json` at the top of an
+opened folder, and saves what is ticked as one ([app](app.md#presets)).
 
 ## The file
 

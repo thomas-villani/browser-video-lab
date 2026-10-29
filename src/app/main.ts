@@ -2,13 +2,15 @@
 // (the same Markdown view agents get, with a player beside it) and search across them. Nothing
 // is uploaded: analysis runs here on WebGPU, docs are saved next to the videos or kept in memory.
 // Faces and license plates can be reviewed over the player (review.ts) and blurred into a copy.
-import { coversAudio, formatLog, highlight, REDACT_DEFAULTS, redactionLog, search, toMarkdown, type LayerName } from '../doc/index.ts';
+// A pipeline preset (presets.ts) adds its track layers and settings to what is analyzed.
+import { coversAudio, formatLog, highlight, PIPELINE_SCHEMA, pipelineContext, REDACT_DEFAULTS, redactionLog, resolve, search, toMarkdown, type Pipeline } from '../doc/index.ts';
 import { analyze, frameImages } from '../analyze';
 import { redact } from '../redact';
 import {
   canOpenFolders, download, downloadDoc, fromFiles, loadPlan, loadSavedImages, openFolder, probeDuration, redactTarget, saveDoc, savePlan, storeImages, type Entry,
 } from './library';
-import { analysisSteps, esc, estimate, markdownToHtml, marks, stepOf, suggestions } from './render';
+import { decoderOf, dropPreset, folderPreset, pickedPreset, PRESET_FILE, type Preset } from './presets';
+import { analysisSteps, esc, estimate, list, markdownToHtml, marks, stepOf, suggestions, trackCost } from './render';
 import { Review } from './review';
 import './style.css';
 
@@ -19,6 +21,11 @@ const state = {
   selected: undefined as Entry | undefined,
   query: '',
   folder: '',
+  /** The opened folder (its preset is read from and saved to its top). */
+  root: undefined as FileSystemDirectoryHandle | undefined,
+  /** The pipeline preset in use, and which of its track layers are ticked. */
+  preset: undefined as Preset | undefined,
+  tracksOn: new Set<string>(),
   gpu: undefined as boolean | undefined,
   /** Object URL of the video in the player. */
   videoUrl: '',
@@ -58,19 +65,35 @@ let running = false;
 /** The job running now, to cancel it. */
 let current: { e: Entry; ctl: AbortController } | undefined;
 
-function layersWanted(e?: Entry): LayerName[] {
-  const layers: LayerName[] = ['speech', 'scenes', 'keyframes'];
+const checked = (id: string) => $<HTMLInputElement>(`#opt-${id}`).checked;
+
+/** The preset's track layers. */
+const presetTracks = () => Object.keys(state.preset?.pipeline.tracks ?? {});
+
+/** Every track layer this session can compute: faces, plates and the preset's. */
+const trackNames = () => ['faces', 'plates', ...presetTracks()];
+
+/** The layers a review or redaction of e covers that can be computed here (faces always). */
+function coverWanted(e: Entry): string[] {
+  const cover = e.plan?.options.cover ?? REDACT_DEFAULTS.cover;
+  return ['faces', ...cover.filter((k) => k !== 'faces' && trackNames().includes(k))];
+}
+
+function layersWanted(e?: Entry): string[] {
+  const layers = ['speech', 'scenes', 'keyframes'];
   // Redaction needs faces and plates, and the transcript (with word times) for words to bleep;
   // a video analyzed before keeps the layers it has.
   const redacting = e?.redactTo || e?.reviewAfter;
-  if ($<HTMLInputElement>('#opt-transcript').checked || e?.wantWords || (e?.redactTo && e.plan && coversAudio(e.plan.options))) layers.push('transcript');
-  if ($<HTMLInputElement>('#opt-faces').checked || redacting || e?.doc?.layers.faces) layers.push('faces');
-  if ($<HTMLInputElement>('#opt-plates').checked || (redacting && (e?.plan?.options.cover ?? REDACT_DEFAULTS.cover).includes('plates')) || e?.doc?.layers.plates) layers.push('plates');
+  if (checked('transcript') || e?.wantWords || (e?.redactTo && e.plan && coversAudio(e.plan.options))) layers.push('transcript');
+  for (const k of trackNames())
+    if (state.tracksOn.has(k) || ((k === 'faces' || k === 'plates') && checked(k)) || (redacting && coverWanted(e).includes(k)) || e?.doc?.layers[k]) layers.push(k);
   return layers;
 }
 
-const timeFor = (seconds: number) =>
-  estimate(seconds, { transcript: $<HTMLInputElement>('#opt-transcript').checked, faces: $<HTMLInputElement>('#opt-faces').checked, plates: $<HTMLInputElement>('#opt-plates').checked });
+/** Seconds per second of video the ticked preset layers add. */
+const presetCost = () => [...state.tracksOn].reduce((s, k) => s + trackCost(decoderOf(state.preset!.pipeline, k)), 0);
+
+const timeFor = (seconds: number) => estimate(seconds, { transcript: checked('transcript'), faces: checked('faces'), plates: checked('plates'), extra: presetCost() });
 
 /** Queue every video not analyzed yet (or failed), saying what happens next. */
 function analyzeAll() {
@@ -100,7 +123,7 @@ async function runQueue() {
     // A transcript without word times is made again when words are wanted.
     const have = new Set(Object.keys(e.doc?.layers ?? {}));
     if (e.wantWords) have.delete('transcript');
-    e.steps = [...analysisSteps(layersWanted(e), have), ...(e.redactTo ? ['Making the copy'] : [])];
+    e.steps = [...analysisSteps(layersWanted(e), have, trackNames()), ...(e.redactTo ? ['Making the copy'] : [])];
     e.step = -1;
     renderList();
     if (state.selected === e && !e.doc) renderPending(e);
@@ -114,7 +137,7 @@ async function runQueue() {
         renderEntry(e);
         if (state.selected === e && !e.doc) renderPending(e);
       };
-      e.doc = await analyze(await e.file(), layersWanted(e), { doc: e.doc, onProgress, signal: ctl.signal });
+      e.doc = await analyze(await e.file(), layersWanted(e), { doc: e.doc, pipeline: state.preset?.run, onProgress, signal: ctl.signal });
       const saved = await saveDoc(e);
       if (e.redactTo) {
         await redactEntry(e, onProgress, ctl.signal);
@@ -174,10 +197,10 @@ function cancelJob(e: Entry) {
 
 // ---- redaction ----
 
-/** Whether e's doc has every layer its redaction covers (faces, and plates unless left out). */
+/** Whether e's doc has every layer its redaction covers (faces, plates unless left out, and the
+ *  preset's layers it lists). */
 function reviewable(e: Entry) {
-  const cover = e.plan?.options.cover ?? REDACT_DEFAULTS.cover;
-  return !!e.doc?.layers.faces && (!cover.includes('plates') || !!e.doc.layers.plates);
+  return coverWanted(e).every((k) => !!e.doc?.layers[k]);
 }
 
 /** Ask where to save a redacted copy of e (from the click), then queue it: faces and plates first if needed. */
@@ -569,12 +592,112 @@ async function addEntries(entries: Entry[], folder = '') {
 
 async function pickFolder() {
   try {
-    const { folder, entries } = await openFolder();
+    const { folder, root, entries } = await openFolder();
     if (!entries.length) return void toast(`No videos (mp4, mov, mkv, webm) in ${esc(folder)}.`);
+    state.root = root;
+    try {
+      const p = await folderPreset(root);
+      if (p) {
+        usePreset(p);
+        toast(`Using this folder's <b>${esc(p.pipeline.name ?? PRESET_FILE)}</b> preset (${PRESET_FILE}): see What to analyze.`);
+      }
+    } catch (err) {
+      toast(`This folder's ${PRESET_FILE} was not used: ${esc((err as Error).message)}`, { ms: 0 });
+    }
     await addEntries(entries, folder);
   } catch (err) {
     if ((err as DOMException).name !== 'AbortError') alert((err as Error).message);
   }
+}
+
+// ---- what to analyze: the layers ticked, the preset, the plan ----
+
+/** What a person calls each layer in the plan line. */
+const SAYS: Record<string, string> = { speech: 'when people speak', transcript: "what's said", scenes: 'shots', faces: 'faces', plates: 'plates' };
+
+/** The preset part of "What to analyze": its track layers to tick, and the plan line. */
+function renderPreset() {
+  const p = state.preset?.pipeline;
+  const tracks = Object.keys(p?.tracks ?? {});
+  const settings = Object.keys(p?.settings ?? {});
+  const about = (k: string) => {
+    const t = p!.tracks![k];
+    const slow = trackCost(decoderOf(p!, k)) > 1 ? '; slow' : '';
+    return `${esc(t.description ?? `${t.model}${t.labels ? `: ${t.labels}` : ''}`)}${slow}`;
+  };
+  $('#preset').innerHTML = p
+    ? `<p class="preset-head"><b>${esc(p.name ?? state.preset!.source)}</b> preset${p.description ? ` <span class="muted">${esc(p.description)}</span>` : ''} <button id="preset-drop" title="Stop using this preset">×</button></p>
+       ${tracks.map((k) => `<label><input type="checkbox" data-track="${esc(k)}"${state.tracksOn.has(k) ? ' checked' : ''}> ${esc(k)} <span class="muted">(${about(k)})</span></label>`).join('')}
+       ${settings.length ? `<p class="muted">${settings.length} setting${settings.length === 1 ? '' : 's'} from the preset: ${esc(settings.join(', '))}</p>` : ''}`
+    : '';
+  const wanted = resolve(layersWanted(), pipelineContext(state.preset?.run).producers);
+  const frames = wanted.filter((n) => n === 'scenes' || trackNames().includes(n)).map((n) => SAYS[n] ?? n);
+  const sound = wanted.filter((n) => n === 'speech' || n === 'transcript').map((n) => SAYS[n]);
+  $('#plan-line').textContent = `One pass over the sound (${list(sound)}), one over the frames (${list(frames)}), then key pictures: ${timeFor(3600)} per hour of video.`;
+}
+
+/** Use a preset (or none): tick what it computes. */
+function usePreset(p: Preset | undefined) {
+  if (state.preset) dropPreset(state.preset);
+  state.preset = p;
+  state.tracksOn = new Set(p ? presetTracks().filter((k) => p.pipeline.layers.includes(k)) : []);
+  if (p) for (const id of ['transcript', 'faces', 'plates']) $<HTMLInputElement>(`#opt-${id}`).checked = p.pipeline.layers.includes(id);
+  optionsChanged();
+}
+
+/** Picked or dropped files that hold a preset (a .json other than docs and reviews) with its
+ *  model files: use it. Returns the other files. */
+async function takePreset(files: File[]): Promise<File[]> {
+  const json = files.find((f) => f.name.endsWith('.json') && !/\.(videodoc|redact|redactions)\.json$/.test(f.name));
+  if (!json) return files;
+  try {
+    const p = await pickedPreset(json, files);
+    usePreset(p);
+    toast(`Using the <b>${esc(p.pipeline.name ?? json.name)}</b> preset for the videos analyzed from now on: see What to analyze.`);
+  } catch (err) {
+    toast(`Could not use ${esc(json.name)}: ${esc((err as Error).message)}`, { ms: 0 });
+  }
+  return files.filter((f) => f !== json && !f.name.endsWith('.onnx'));
+}
+
+/** A preset of what is ticked now, with the loaded one's models, track layers and settings. */
+function currentPipeline(): Pipeline {
+  const p = state.preset?.pipeline;
+  const layers = ['keyframes', ...['transcript', 'faces', 'plates'].filter(checked), ...presetTracks().filter((k) => state.tracksOn.has(k))];
+  return {
+    schema: PIPELINE_SCHEMA,
+    name: p?.name ?? (state.folder || 'videodoc'),
+    ...(p?.description && { description: p.description }),
+    layers,
+    ...(p?.settings && { settings: p.settings }),
+    ...(p?.models && { models: p.models }),
+    ...(p?.tracks && { tracks: p.tracks }),
+  };
+}
+
+/** Save what is ticked as a preset: at the top of the opened folder (used whenever it is
+ *  opened), or as a download. */
+async function savePreset() {
+  const text = `${JSON.stringify(currentPipeline(), null, 2)}\n`;
+  if (!state.root) {
+    download(PRESET_FILE, text, 'application/json');
+    return void toast(`Downloaded <b>${PRESET_FILE}</b>. Put it at the top of a folder to use it for every video there, or pass it to the CLI (<code>videodoc analyze --pipeline</code>).`);
+  }
+  try {
+    const w = await (await state.root.getFileHandle(PRESET_FILE, { create: true })).createWritable();
+    await w.write(text);
+    await w.close();
+    toast(`Saved as <b>${PRESET_FILE}</b> in ${esc(state.folder)}: used whenever this folder is opened, and by <code>videodoc analyze --pipeline</code>.`);
+  } catch (err) {
+    toast(`Could not save the preset: ${esc((err as Error).message)}`, { ms: 0 });
+  }
+}
+
+/** Time estimates and the plan line depend on what is analyzed. */
+function optionsChanged() {
+  renderPreset();
+  renderList();
+  if (state.selected && !state.selected.doc && !state.query) renderPending(state.selected);
 }
 
 // ---- wiring ----
@@ -587,16 +710,28 @@ function wire() {
   $('#start-files').addEventListener('click', () => $('#add-files').click());
   $('#add-files').addEventListener('change', async (ev) => {
     const input = ev.target as HTMLInputElement;
+    const files = await takePreset([...(input.files ?? [])]);
+    input.value = '';
+    if (files.length) await addEntries(await fromFiles(files));
+  });
+  for (const id of ['#opt-transcript', '#opt-faces', '#opt-plates']) $(id).addEventListener('change', optionsChanged);
+  $('#preset').addEventListener('change', (ev) => {
+    const k = (ev.target as HTMLInputElement).dataset.track;
+    if (!k) return;
+    if ((ev.target as HTMLInputElement).checked) state.tracksOn.add(k);
+    else state.tracksOn.delete(k);
+    optionsChanged();
+  });
+  $('#preset').addEventListener('click', (ev) => {
+    if ((ev.target as HTMLElement).id === 'preset-drop') usePreset(undefined);
+  });
+  $('#preset-file').addEventListener('change', async (ev) => {
+    const input = ev.target as HTMLInputElement;
     const files = [...(input.files ?? [])];
     input.value = '';
-    await addEntries(await fromFiles(files));
+    if ((await takePreset(files)).length === files.length) toast('Choose a pipeline preset (.json), with the model files it names.');
   });
-  // Time estimates depend on what is analyzed.
-  for (const id of ['#opt-transcript', '#opt-faces', '#opt-plates'])
-    $(id).addEventListener('change', () => {
-      renderList();
-      if (state.selected && !state.selected.doc && !state.query) renderPending(state.selected);
-    });
+  $('#preset-save').addEventListener('click', () => void savePreset());
   $('#tip-ok').addEventListener('click', () => {
     $('#tip').hidden = true;
     try {
@@ -672,9 +807,11 @@ function wire() {
   body.addEventListener('drop', async (ev) => {
     ev.preventDefault();
     body.classList.remove('dragging');
-    const entries = await fromFiles([...(ev.dataTransfer?.files ?? [])]);
+    const files = [...(ev.dataTransfer?.files ?? [])];
+    const rest = await takePreset(files);
+    const entries = await fromFiles(rest);
     if (entries.length) await addEntries(entries);
-    else toast('Only video files (mp4, mov, mkv, webm) and their .videodoc.json and .redact.json files can be added.');
+    else if (rest.length === files.length) toast('Only video files (mp4, mov, mkv, webm) and their .videodoc.json and .redact.json files can be added.');
   });
 }
 
@@ -690,5 +827,6 @@ async function checkGpu() {
 }
 
 wire();
+renderPreset();
 renderList();
 void checkGpu();

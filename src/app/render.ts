@@ -56,22 +56,32 @@ export function markdownToHtml(md: string, image: (frame: number) => string | un
  */
 /** Plates, seconds per second of video (measured: see NOTES.md). */
 const PLATES_COST = 0.6;
+/** A pipeline's track layer on a DETR model (RF-DETR nano: ~9 s per second of busy 1080p, NOTES.md). */
+const DETR_COST = 9;
 
-export function estimate(seconds: number, o: { transcript: boolean; faces: boolean; plates?: boolean }): string {
-  const s = seconds * ((o.transcript ? 0.22 : 0.02) + (o.faces ? 0.2 : 0.05) + (o.plates ? PLATES_COST : 0));
+/** Seconds per second of video a pipeline's track layer adds, by its model's decoder. */
+export const trackCost = (decoder?: string) => (decoder === 'detr' ? DETR_COST : PLATES_COST);
+
+/** `extra`: seconds per second of video for a pipeline's track layers (trackCost). */
+export function estimate(seconds: number, o: { transcript: boolean; faces: boolean; plates?: boolean; extra?: number }): string {
+  const s = seconds * ((o.transcript ? 0.22 : 0.02) + (o.faces ? 0.2 : 0.05) + (o.plates ? PLATES_COST : 0) + (o.extra ?? 0));
   if (s < 60) return 'under a minute';
   const m = Math.round(s / 60);
   return m < 90 ? `about ${m} min` : `about ${(s / 3600).toFixed(1)} h`;
 }
 
-/** The steps a person sees for computing `want` when the doc already `has` some layers. */
-export function analysisSteps(want: string[], has: Set<string>): string[] {
+/** "a, b and c". */
+export const list = (xs: string[]) => (xs.length < 2 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+
+/** The steps a person sees for computing `want` when the doc already `has` some layers; `tracks`
+ *  are the track layers (found together in one pass over the frames). */
+export function analysisSteps(want: string[], has: Set<string>, tracks: string[] = ['faces', 'plates']): string[] {
   const missing = (n: string) => want.includes(n) && !has.has(n);
   const steps: string[] = [];
   if (missing('speech')) steps.push('Listening');
   if (missing('transcript')) steps.push('Transcribing');
-  const found = [missing('faces') && 'faces', missing('plates') && 'plates'].filter(Boolean);
-  if (found.length) steps.push(`Finding ${found.join(' and ')}`);
+  const found = want.filter((n) => tracks.includes(n) && missing(n));
+  if (found.length) steps.push(`Finding ${list(found)}`);
   else if (missing('scenes')) steps.push('Finding shots');
   return steps;
 }

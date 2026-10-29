@@ -27,7 +27,27 @@ kept (a cancelled blurred copy is not saved, and a file created for it is remove
 **What to analyze** (top right) chooses the layers for new analyses: speech, shots and keyframes
 always; the transcript (on by default; needed for search); faces (off by default; about doubles
 the time); license plates (off by default; found anyway when you review or blur). **Add layers**
-on an analyzed video computes the ones ticked and missing.
+on an analyzed video computes the ones ticked and missing. Under them, a line says what runs (one
+pass over the sound, one over the frames for shots and every detector, then key pictures) and
+how long an hour of video takes with what is ticked.
+
+### Presets
+
+A [pipeline preset](pipelines.md) adds track layers on your own detectors (vehicles, logos,
+screens) and settings to what the app analyzes; it is the same file the CLI takes with
+`--pipeline`.
+
+- **Load a preset…** in What to analyze: choose the preset's `.json` together with the model
+  files it names (or drop them on the page). Model paths in the preset are matched to the chosen
+  files by name.
+- **In a folder**: a `videodoc.pipeline.json` at the top of an opened folder is used for every
+  video in it; its model paths are read relative to the folder.
+- The preset ticks the layers it lists and adds its track layers as checkboxes (slow models are
+  marked); its settings are listed. × stops using it.
+- **Save as preset** saves what is ticked, with the preset's models, track layers and settings:
+  as `videodoc.pipeline.json` at the top of the opened folder, or as a download.
+- Analyze all then runs it on every video not analyzed yet. A track layer's results are reused
+  as long as its model file and settings are unchanged.
 
 ## Reading
 
@@ -50,6 +70,8 @@ first) turns the player into a review tool:
 
 - Boxes over the video show what the copy will cover (plates in cyan), with the blur previewed
   live. **Preview** off shows the boxes only.
+- **Cover** ticks which of the video's other track layers are covered besides faces: plates
+  (on by default) and a preset's layers (off until ticked), each in its own color.
 - **Click a box** to leave it visible (a face that may be shown, a sign taken for a plate); click
   again to cover it.
 - **Drag a box** over anything the detector missed. Step forward and drag it again where it moved

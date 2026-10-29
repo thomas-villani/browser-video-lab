@@ -1,13 +1,15 @@
 // Face and plate review: the regions drawn over the player frame by frame, with the cover previewed
 // live (the same drawing the redacted copy gets). Click a face or plate to leave it visible, drag
 // to cover one the detector missed. Tracks are named by key, `<layer>:<id>` (`faces:3`, hand
-// tracks are faces with negative ids, `plates:7`, a pipeline's `vehicles:2`): ids are per layer. The choices are the entry's RedactPlan (saved as <video>.redact.json
-// for folder entries), which Blur faces and `videodoc redact` use. Nothing is decoded here: the
+// tracks are faces with negative ids, `plates:7`, a pipeline's `vehicles:2`): ids are per layer.
+// Which layers are covered besides faces is ticked in the panel. The choices are the entry's
+// RedactPlan (saved as <video>.redact.json for folder entries), which Blur faces and `videodoc
+// redact` use. Nothing is decoded here: the
 // boxes come from the doc, the picture from the <video> element. Spoken words to bleep are
 // listed above the shots; while the preview plays, the player is muted over them and the tone
 // plays instead.
 import {
-  audioCover, audioSpans, covered, cursorFor, handTrack, keptIds, newPlan, REDACT_SOUNDS, REDACT_STYLES, setBox, setEnd, suggestNames, trackBox, tracksOf,
+  audioCover, audioSpans, covered, cursorFor, handTrack, keptIds, newPlan, REDACT_SOUNDS, REDACT_STYLES, setBox, setEnd, suggestNames, trackBox, trackLayers, tracksOf,
   type AudioSpan, type Box, type RedactionCursor, type RedactKind, type RedactPlan, type RedactSound, type RedactStyle, type Region, type SceneItem, type Track, type VideoDoc,
 } from '../doc/index.ts';
 import { coverer } from '../redact';
@@ -184,6 +186,14 @@ export class Review {
       if (t.id === 'rv-style') {
         o.style = t.value as RedactStyle;
         this.cover = coverer(overlay, o.style);
+        this.changed();
+      } else if (t.dataset.cover) {
+        const k = t.dataset.cover;
+        o.cover = [...o.cover.filter((c) => c !== k), ...(t.checked ? [k] : [])];
+        if (this.selected && parseKey(this.selected).kind === k) this.selected = undefined;
+        this.rebuild();
+        this.renderPanel();
+        this.draw();
         this.changed();
       } else if (t.id === 'rv-profanity') {
         o.profanity = t.checked;
@@ -374,9 +384,10 @@ export class Review {
     return (o.keepTracks[kind] ??= []);
   }
 
-  /** [hex, name] of the layer's box color. */
+  /** [hex, name] of the layer's box color, by its place in the doc (the same whichever are covered). */
   private color(kind: RedactKind) {
-    return KIND_COLORS[Math.max(0, this.kinds().indexOf(kind)) % KIND_COLORS.length];
+    const all = ['faces', ...trackLayers(this.doc).filter((k) => k !== 'faces')];
+    return KIND_COLORS[Math.max(0, all.indexOf(kind)) % KIND_COLORS.length];
   }
 
   private isKept(k: string) {
@@ -856,6 +867,11 @@ export class Review {
         ? `<b>Added by hand</b>, ${span(sel)} (${secs(sel)}). If it moves, pause where it has moved and drag a new box: the box follows. <span class="btns"><button data-act="show">Show</button><button data-act="start">Starts here</button><button data-act="end">Ends here</button><button data-act="delete">Delete</button></span>`
         : `<b>${title(key!)}</b>, ${span(sel)} (${secs(sel)}): ${this.isKept(key!) ? 'left visible' : 'blurred'}. <span class="btns"><button data-act="show">Show</button><button data-act="keep">${this.isKept(key!) ? 'Blur it' : 'Leave visible'}</button></span>`;
     const shotsWithout = this.shots.length - withFaces.length;
+    // The doc's other track layers, to cover or not (faces always are).
+    const others = trackLayers(this.doc).filter((k) => k !== 'faces');
+    const toggles = others.length
+      ? `<span class="rv-cover">Cover ${others.map((k) => `<label><input type="checkbox" data-cover="${esc(k)}"${kinds.includes(k) ? ' checked' : ''}> ${noun(k, 2)}</label>`).join('')}</span>`
+      : '';
     this.h.panel.innerHTML = `<div class="rv-head">
         <h1>Review ${this.what()}</h1>
         <p>Boxes on the video are what the copy covers${kinds.length > 1 ? ` (${kinds.slice(1).map((k) => `${noun(k, 2)} in ${this.color(k)[1]}`).join(', ')})` : ''}. <b>Click a box</b> to leave it visible (click it again to cover it), e.g. a sign taken for a plate. <b>Drag a box</b> over anything the detector missed. Dashed boxes are held a moment before and after something is seen, for faces turning away.</p>
@@ -864,7 +880,7 @@ export class Review {
       </div>
       <div class="rv-sticky">
         <div class="rv-actions"><label>Cover with <select id="rv-style">${REDACT_STYLES.map((s) => `<option value="${s}"${s === p.options.style ? ' selected' : ''}>${STYLE_NAMES[s]}</option>`).join('')}</select></label>
-          <button data-act="redact" class="primary">Blur ${what}…</button><button data-act="done">Done</button></div>
+          ${toggles}<button data-act="redact" class="primary">Blur ${what}…</button><button data-act="done">Done</button></div>
         <div class="rv-sel"${sel ? '' : ' hidden'}>${selHtml}</div>
       </div>
       <details class="rv-audio"${this.doc.layers.transcript?.items.length ? ' open' : ''}><summary>Spoken words</summary>

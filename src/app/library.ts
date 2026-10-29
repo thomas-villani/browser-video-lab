@@ -63,7 +63,7 @@ async function readDoc(dir: DirHandle, name: string): Promise<VideoDoc | undefin
 export const canOpenFolders = () => typeof window.showDirectoryPicker === 'function';
 
 /** Ask for a folder (read-write, so docs can be saved) and list its videos, recursively. */
-export async function openFolder(): Promise<{ folder: string; entries: Entry[] }> {
+export async function openFolder(): Promise<{ folder: string; root: FileSystemDirectoryHandle; entries: Entry[] }> {
   const root = (await window.showDirectoryPicker!({ mode: 'readwrite', id: 'videodoc' })) as DirHandle;
   const entries: Entry[] = [];
   const walk = async (dir: DirHandle, prefix: string) => {
@@ -80,7 +80,7 @@ export async function openFolder(): Promise<{ folder: string; entries: Entry[] }
     }
   };
   await walk(root, '');
-  return { folder: root.name, entries };
+  return { folder: root.name, root, entries };
 }
 
 /** Entries for dropped or picked files; .videodoc.json files among them attach to their video. */

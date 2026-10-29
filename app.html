@@ -12,7 +12,7 @@
       <div class="search"><input id="q" type="search" placeholder="Search what was said across your videos  ( / )" autocomplete="off" /></div>
       <div class="actions">
         <button id="open-folder" class="primary" hidden>Open folder</button>
-        <label class="button">Add videos<input id="add-files" type="file" multiple accept="video/*,.json" hidden /></label>
+        <label class="button">Add videos<input id="add-files" type="file" multiple accept="video/*,.json,.onnx" hidden /></label>
         <details class="opts">
           <summary>What to analyze</summary>
           <div class="menu">
@@ -20,6 +20,12 @@
             <label><input id="opt-transcript" type="checkbox" checked /> What's said <span class="muted">(transcript; most of the time, needed for search)</span></label>
             <label><input id="opt-faces" type="checkbox" /> Who's on screen <span class="muted">(faces; about doubles the time)</span></label>
             <label><input id="opt-plates" type="checkbox" /> License plates <span class="muted">(for redaction; found with faces when blurring)</span></label>
+            <div id="preset"></div>
+            <p class="muted preset-io">
+              <label class="link">Load a preset…<input id="preset-file" type="file" multiple accept=".json,.onnx" hidden /></label>
+              <span>(a pipeline .json, with the model files it names)</span> · <button id="preset-save" class="link">Save as preset</button>
+            </p>
+            <p id="plan-line" class="muted plan"></p>
           </div>
         </details>
         <span id="gpu" class="muted">checking WebGPU…</span>

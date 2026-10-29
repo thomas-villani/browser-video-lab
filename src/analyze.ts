@@ -237,6 +237,8 @@ export interface AnalyzeOptions extends Omit<ComputeOptions, 'inputs'> {
 /** Identity of a model file (range requests: the first and last MiB, not the whole file). */
 async function modelFingerprint(url: string): Promise<string | undefined> {
   try {
+    // An object URL (a model file picked in the app) changes every session; its file does not.
+    if (url.startsWith('blob:')) return (await fingerprintOf(await (await fetch(url)).blob())).fingerprint;
     return (await fingerprintOf(new URL(url, location.href).href)).fingerprint;
   } catch {
     // A server without range requests: the URL stands in for the file.

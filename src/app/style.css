@@ -48,6 +48,12 @@ header { display: flex; align-items: center; gap: 16px; padding: 10px 16px; bord
 .opts .menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 2; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 4px 14px 10px; white-space: nowrap; box-shadow: 0 6px 20px rgb(0 0 0 / 0.12); }
 .opts .menu p { margin: 6px 0; font-size: 12px; }
 .opts .menu label { display: block; padding: 2px 0; }
+.opts .menu label.link { display: inline; }
+.opts .menu .plan { max-width: 460px; white-space: normal; border-top: 1px solid var(--line); padding-top: 6px; }
+.opts .menu .preset-head { max-width: 460px; white-space: normal; }
+.preset-head button { padding: 0 6px; }
+button.link, label.link { background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; text-decoration: underline; }
+.rv-cover label { margin-right: 6px; }
 #gpu { font-size: 12px; }
 #gpu.ok { color: var(--muted); }
 #gpu.warn { color: var(--warn); }
