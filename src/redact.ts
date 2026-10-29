@@ -1,21 +1,31 @@
 // Redaction, the browser half: decode the video, cover the regions the faces layer gives for
-// each frame (RedactionCursor, src/doc/redact.ts), encode H.264 into MP4. Audio is copied
-// as-is when MP4 can hold it. Frames without regions pass through untouched.
-import { BufferTarget, Conversion, Mp4OutputFormat, Output, Quality, QUALITY_HIGH, StreamTarget, type StreamTargetChunk, type VideoSample } from 'mediabunny';
-import { cursorFor, REDACT_DEFAULTS, type Box, type RedactOptions, type RedactStyle, type Track, type VideoDoc } from './doc/index.ts';
+// each frame (RedactionCursor, src/doc/redact.ts), encode H.264 into MP4. Frames without regions
+// pass through untouched. Audio is copied as-is when MP4 can hold it, or, with words to bleep
+// (audioSpans), decoded, rewritten over those spans and encoded again. With no layer to
+// cover, the video is copied and only the audio changes.
+import { AudioSample, BufferTarget, Conversion, Mp4OutputFormat, Output, Quality, QUALITY_HIGH, StreamTarget, type StreamTargetChunk, type VideoSample } from 'mediabunny';
+import {
+  audioCover, audioSpans, covered, coversAudio, cursorFor, REDACT_DEFAULTS,
+  type Box, type RedactOptions, type RedactSound, type RedactStyle, type Track, type VideoDoc,
+} from './doc/index.ts';
 import { fingerprintOf, type Progress } from './analyze';
 import { openInput, type MediaInput } from './runtime/source';
 
 export interface RedactRun extends Partial<RedactOptions> {
   /** Faces added by hand in a review (RedactPlan.added). */
   added?: Track[];
+  /** Audio spans to bleep added by hand (RedactPlan.addedAudio). */
+  addedAudio?: [number, number][];
   onProgress?: (p: Progress) => void;
   signal?: AbortSignal;
 }
 
 export interface Redacted {
-  /** Frames encoded; must equal doc.source.frames for the regions to line up. */
+  /** Frames encoded; must equal doc.source.frames for the regions to line up. 0 when the video
+   *  was copied (no layer covered). */
   frames: number;
+  /** Seconds of audio bleeped or muted. */
+  audioSeconds: number;
   ms: number;
   /** The MP4, when no stream was given. */
   buffer?: ArrayBuffer;
@@ -26,11 +36,14 @@ export interface Redacted {
  * layer). Writes to `stream` (e.g. a FileSystemWritableFileStream) or returns the MP4 bytes.
  */
 export async function redact(input: MediaInput, doc: VideoDoc, stream?: WritableStream<StreamTargetChunk>, o: RedactRun = {}): Promise<Redacted> {
-  const { added, onProgress, signal, ...given } = o;
+  const { added, addedAudio, onProgress, signal, ...given } = o;
   const opts: RedactOptions = { ...REDACT_DEFAULTS, ...Object.fromEntries(Object.entries(given).filter(([, v]) => v !== undefined)) } as RedactOptions;
   const id = await fingerprintOf(input);
   if (id.fingerprint !== doc.source.fingerprint) throw new Error(`the doc is for a different file (${doc.source.name}); analyze this video first`);
   const cursor = cursorFor(doc, opts, added);
+  const video = covered(doc, opts).length > 0 || (added?.length ?? 0) > 0;
+  const spans = coversAudio(opts, addedAudio) ? audioCover(audioSpans(doc, opts, addedAudio)) : [];
+  if (!video && !spans.length) throw new Error('nothing to redact: no layer to cover and no words to bleep');
   const { width, height } = doc.source;
   const canvas = new OffscreenCanvas(width, height);
   const ctx = canvas.getContext('2d')!;
@@ -50,26 +63,30 @@ export async function redact(input: MediaInput, doc: VideoDoc, stream?: Writable
     input: media,
     output,
     tracks: 'primary',
-    video: {
-      codec: 'avc',
-      quality,
-      forceTranscode: true,
-      process: (sample: VideoSample) => {
-        const regions = cursor.at(frame++);
-        if (!regions.length) return sample;
-        sample.draw(ctx, 0, 0, width, height);
-        cover(regions);
-        return canvas;
-      },
-      processedWidth: width,
-      processedHeight: height,
-    },
+    video: video
+      ? {
+        codec: 'avc',
+        quality,
+        forceTranscode: true,
+        process: (sample: VideoSample) => {
+          const regions = cursor.at(frame++);
+          if (!regions.length) return sample;
+          sample.draw(ctx, 0, 0, width, height);
+          cover(regions);
+          return canvas;
+        },
+        processedWidth: width,
+        processedHeight: height,
+      }
+      : undefined,
+    audio: spans.length ? { bitrate: QUALITY_HIGH, forceTranscode: true, process: soundOver(spans, opts.sound) } : undefined,
   });
   if (!conversion.isValid) {
     const why = conversion.discardedTracks.map((d) => `${d.track.type}: ${d.reason}`).join('; ');
     throw new Error(`cannot write this video as MP4 here (${why})`);
   }
-  conversion.onProgress = () => onProgress?.({ pass: 'frames', stage: 'redacting', done: frame, total: Math.max(frame, doc.source.frames) });
+  conversion.onProgress = (p) =>
+    onProgress?.(video ? { pass: 'frames', stage: 'redacting', done: frame, total: Math.max(frame, doc.source.frames) } : { pass: 'audio', stage: 'redacting audio', done: Math.round(p * 100), total: 100 });
   const onAbort = () => void conversion.cancel();
   signal?.addEventListener('abort', onAbort, { once: true });
   try {
@@ -77,7 +94,50 @@ export async function redact(input: MediaInput, doc: VideoDoc, stream?: Writable
   } finally {
     signal?.removeEventListener('abort', onAbort);
   }
-  return { frames: frame, ms: Math.round(performance.now() - t0), ...(target instanceof BufferTarget && { buffer: target.buffer! }) };
+  const audioSeconds = Math.round(spans.reduce((n, [a, b]) => n + b - a, 0) * 100) / 100;
+  return { frames: frame, audioSeconds, ms: Math.round(performance.now() - t0), ...(target instanceof BufferTarget && { buffer: target.buffer! }) };
+}
+
+/** Fade in and out over this long at each span's edges (a hard cut clicks). */
+const FADE = 0.008;
+/** The bleep: a 1 kHz sine at -10 dBFS, the broadcast convention. */
+const TONE_HZ = 1000;
+const TONE_GAIN = 0.32;
+
+/**
+ * Returns the audio `process` hook: samples overlapping `spans` (sorted, merged; seconds) are
+ * crossfaded to the tone or to silence; others pass through. Samples arrive in time order,
+ * so a cursor walks the spans.
+ */
+export function soundOver(spans: [number, number][], sound: RedactSound) {
+  let i = 0;
+  let last = -Infinity;
+  return (s: AudioSample): AudioSample => {
+    const t0 = s.timestamp;
+    const t1 = t0 + s.duration;
+    if (t0 < last) i = 0;
+    last = t0;
+    while (i < spans.length && spans[i][1] + FADE <= t0) i++;
+    if (i >= spans.length || spans[i][0] - FADE >= t1) return s;
+    const n = s.numberOfFrames;
+    const ch = s.numberOfChannels;
+    const rate = s.sampleRate;
+    const data = new Float32Array(n * ch);
+    for (let c = 0; c < ch; c++) s.copyTo(data.subarray(c * n, (c + 1) * n), { planeIndex: c, format: 'f32-planar' });
+    for (let k = 0; k < n; k++) {
+      const t = t0 + k / rate;
+      // Gain of the cover at t: 1 inside a span, ramping to 0 over FADE outside its edges.
+      let g = 0;
+      for (let j = i; j < spans.length && spans[j][0] - FADE < t1; j++) {
+        g = Math.max(g, Math.min(1, (t - spans[j][0] + FADE) / FADE, (spans[j][1] + FADE - t) / FADE));
+      }
+      if (g <= 0) continue;
+      const tone = sound === 'bleep' ? TONE_GAIN * Math.sin(2 * Math.PI * TONE_HZ * t) : 0;
+      for (let c = 0; c < ch; c++) data[c * n + k] = data[c * n + k] * (1 - g) + tone * g;
+    }
+    s.close();
+    return new AudioSample({ data, format: 'f32-planar', numberOfChannels: ch, sampleRate: rate, timestamp: t0 });
+  };
 }
 
 /** Strength levels: level k blurs with radius 6 * 2^k px, or pixelates with blocks 4 * 2^k px. */

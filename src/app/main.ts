@@ -2,7 +2,7 @@
 // (the same Markdown view agents get, with a player beside it) and search across them. Nothing
 // is uploaded: analysis runs here on WebGPU, docs are saved next to the videos or kept in memory.
 // Faces and license plates can be reviewed over the player (review.ts) and blurred into a copy.
-import { formatLog, highlight, REDACT_DEFAULTS, redactionLog, search, toMarkdown, type LayerName } from '../doc/index.ts';
+import { coversAudio, formatLog, highlight, REDACT_DEFAULTS, redactionLog, search, toMarkdown, type LayerName } from '../doc/index.ts';
 import { analyze, frameImages } from '../analyze';
 import { redact } from '../redact';
 import {
@@ -60,9 +60,10 @@ let current: { e: Entry; ctl: AbortController } | undefined;
 
 function layersWanted(e?: Entry): LayerName[] {
   const layers: LayerName[] = ['speech', 'scenes', 'keyframes'];
-  if ($<HTMLInputElement>('#opt-transcript').checked) layers.push('transcript');
-  // Redaction needs faces and plates; a video analyzed before keeps the layers it has.
+  // Redaction needs faces and plates, and the transcript (with word times) for words to bleep;
+  // a video analyzed before keeps the layers it has.
   const redacting = e?.redactTo || e?.reviewAfter;
+  if ($<HTMLInputElement>('#opt-transcript').checked || e?.wantWords || (e?.redactTo && e.plan && coversAudio(e.plan.options))) layers.push('transcript');
   if ($<HTMLInputElement>('#opt-faces').checked || redacting || e?.doc?.layers.faces) layers.push('faces');
   if ($<HTMLInputElement>('#opt-plates').checked || (redacting && (e?.plan?.options.cover ?? REDACT_DEFAULTS.cover).includes('plates')) || e?.doc?.layers.plates) layers.push('plates');
   return layers;
@@ -96,7 +97,10 @@ async function runQueue() {
     const e = queue.shift()!;
     e.status = 'analyzing';
     e.progress = '';
-    e.steps = [...analysisSteps(layersWanted(e), new Set(Object.keys(e.doc?.layers ?? {}))), ...(e.redactTo ? ['Blurring'] : [])];
+    // A transcript without word times is made again when words are wanted.
+    const have = new Set(Object.keys(e.doc?.layers ?? {}));
+    if (e.wantWords) have.delete('transcript');
+    e.steps = [...analysisSteps(layersWanted(e), have), ...(e.redactTo ? ['Making the copy'] : [])];
     e.step = -1;
     renderList();
     if (state.selected === e && !e.doc) renderPending(e);
@@ -105,7 +109,7 @@ async function runQueue() {
     try {
       const t0 = performance.now();
       const onProgress = (p: { pass: string; stage: string; done: number; total: number }) => {
-        e.step = p.stage === 'redacting' ? e.steps!.length - 1 : stepOf(p, e.steps!);
+        e.step = p.stage.startsWith('redacting') ? e.steps!.length - 1 : stepOf(p, e.steps!);
         e.progress = p.total > 1 ? `${Math.floor((100 * p.done) / p.total)}%` : '';
         renderEntry(e);
         if (state.selected === e && !e.doc) renderPending(e);
@@ -123,7 +127,8 @@ async function runQueue() {
         const more = queue.length ? ` ${queue.length} more to go.` : '';
         const said = e.doc.layers.transcript?.items.length;
         if (e.reviewAfter) {
-          if (state.selected !== e) toast(`Faces and plates found in <b>${esc(e.name)}</b>.${more}`, { action: 'Review them', onAction: () => void openReview(e), ms: 0 });
+          const found = e.wantWords ? 'Word times found' : 'Faces and plates found';
+          if (state.selected !== e) toast(`${found} in <b>${esc(e.name)}</b>.${more}`, { action: 'Review them', onAction: () => void openReview(e), ms: 0 });
         } else toast(`<b>${esc(e.name)}</b> is ready to read${said ? ' and search' : said === 0 ? ' (no speech found, so nothing to search)' : ''}.${more}`, state.selected === e ? {} : { action: 'Open', onAction: () => void showEntry(e) });
       }
     } catch (err) {
@@ -143,6 +148,7 @@ async function runQueue() {
     }
     current = undefined;
     e.redactTo = undefined;
+    e.wantWords = undefined;
     renderList();
     if (state.selected === e && review.entry !== e) {
       await showEntry(e);
@@ -161,7 +167,7 @@ function cancelJob(e: Entry) {
   if (i < 0) return;
   queue.splice(i, 1);
   e.status = e.doc ? 'ready' : 'new';
-  e.redactTo = e.reviewAfter = undefined;
+  e.redactTo = e.reviewAfter = e.wantWords = undefined;
   renderList();
   if (state.selected === e && !e.doc) renderPending(e);
 }
@@ -184,7 +190,9 @@ async function startRedact(e: Entry) {
   const faces = reviewable(e) ? '' : ' Faces and plates are found first, which takes a while.';
   const kept = (e.plan?.options.keep.length ?? 0) + (e.plan?.options.keepPlates.length ?? 0);
   const what = kept ? `faces and plates covered except the ${plural(kept, 'one')} you left visible` : 'every face and plate covered';
-  toast(`Making <b>${esc(to.name)}</b>: ${what}, sound kept.${faces} Progress shows in the list.`);
+  const o = e.plan?.options ?? REDACT_DEFAULTS;
+  const sound = coversAudio(o, e.plan?.addedAudio) ? `the words you listed ${o.sound === 'bleep' ? 'bleeped' : 'silenced'}` : 'sound kept';
+  toast(`Making <b>${esc(to.name)}</b>: ${what}, ${sound}.${faces} Progress shows in the list.`);
 }
 
 async function redactEntry(e: Entry, onProgress: (p: { pass: string; stage: string; done: number; total: number }) => void, signal: AbortSignal) {
@@ -193,10 +201,11 @@ async function redactEntry(e: Entry, onProgress: (p: { pass: string; stage: stri
   await loadPlan(e);
   const opts = e.plan?.options ?? REDACT_DEFAULTS;
   const added = e.plan?.added ?? [];
+  const addedAudio = e.plan?.addedAudio ?? [];
   const writable = to.file ? ((await to.file.createWritable()) as unknown as WritableStream) : undefined;
   let r: Awaited<ReturnType<typeof redact>>;
   try {
-    r = await redact(await e.file(), doc, writable, { ...opts, added, onProgress, signal });
+    r = await redact(await e.file(), doc, writable, { ...opts, added, addedAudio, onProgress, signal });
   } catch (err) {
     // A file stream only replaces the file when closed: aborting it keeps whatever was there.
     await writable?.abort().catch(() => {});
@@ -204,7 +213,7 @@ async function redactEntry(e: Entry, onProgress: (p: { pass: string; stage: stri
     throw err;
   }
   if (r.buffer) download(to.name, r.buffer, 'video/mp4');
-  const log = formatLog(redactionLog(doc, opts, { name: to.name, frames: r.frames, ms: r.ms }, added));
+  const log = formatLog(redactionLog(doc, opts, { name: to.name, frames: r.frames, ms: r.ms }, added, addedAudio));
   if (to.log) {
     const w = await to.log.createWritable();
     await w.write(log);
@@ -212,7 +221,8 @@ async function redactEntry(e: Entry, onProgress: (p: { pass: string; stage: stri
   } else download(`${to.name}.redactions.json`, log, 'application/json');
   const where = e.dir ? ' next to the video' : '';
   const watch = to.file ? { action: 'Watch it', onAction: async () => playFile(await to.file!.getFile()) } : {};
-  toast(`Saved <b>${esc(to.name)}</b>${where}, with its redaction log. Detection misses some faces and plates: watch it before you share it.`, { ms: 0, ...watch });
+  const check = r.audioSeconds ? 'Detection misses some faces and plates, and transcription some words: watch and listen to it before you share it.' : 'Detection misses some faces and plates: watch it before you share it.';
+  toast(`Saved <b>${esc(to.name)}</b>${where}, with its redaction log. ${check}`, { ms: 0, ...watch });
 }
 
 // ---- face review ----
@@ -228,6 +238,14 @@ const review = new Review({
   },
   keptWhere: (e) => (e.dir ? `saved next to the video as ${e.name}.redact.json` : 'kept in this tab until you close it'),
   redact: (e) => void startRedact(e),
+  findWords: (e) => {
+    if (state.gpu === false) return void toast('Transcribing needs WebGPU (Chrome or Edge).');
+    closeReview();
+    e.wantWords = e.reviewAfter = true;
+    e.status = 'new';
+    enqueue(e);
+    toast(`Transcribing <b>${esc(e.name)}</b> again with word times (about a third of its length). The review opens again when it is done.`);
+  },
   close: () => closeReview(),
 });
 let planTimer: ReturnType<typeof setTimeout> | undefined;

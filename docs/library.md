@@ -152,13 +152,15 @@ const plan = newPlan(doc, { style: 'blur', margin: 0.15, hold: 0.3, keep: [12] }
 plan.added.push(handTrack(-1, 300, [100, 80, 60, 70], 360));   // a face the detector missed
 
 const out = await (await fileHandle.createWritable());          // or omit for an in-memory MP4
-const r = await redact(file, doc, out, { ...plan.options, added: plan.added, onProgress, signal });
-// r: { frames, ms, buffer? }; r.frames must equal doc.source.frames
-const log = formatLog(redactionLog(doc, plan.options, { name: 'out.mp4', frames: r.frames, ms: r.ms }, plan.added));
+plan.options.words = ['Ackover', 'Daniel Reyes'];                // bleep these where they are said
+const r = await redact(file, doc, out, { ...plan.options, added: plan.added, addedAudio: plan.addedAudio, onProgress, signal });
+// r: { frames, audioSeconds, ms, buffer? }; r.frames must equal doc.source.frames (0: video copied)
+const log = formatLog(redactionLog(doc, plan.options, { name: 'out.mp4', frames: r.frames, ms: r.ms }, plan.added, plan.addedAudio));
 ```
 
 `redact(input, doc, stream?, opts)` checks the doc's fingerprint against the input, re-encodes
-H.264 at 1.25x the source bitrate, copies the audio, and writes to `stream` (any
+H.264 at 1.25x the source bitrate (or copies the video when nothing visual is covered), copies
+the audio or rewrites it over the words to bleep, and writes to `stream` (any
 `WritableStream` of mediabunny chunks, e.g. a `FileSystemWritableFileStream`) or returns the MP4
 in `buffer`. `coverer(canvas, style)` is the drawing function it uses, exported for previews.
 
@@ -168,10 +170,12 @@ The regions themselves are pure and can be computed in Node:
 |---|---|
 | `cursorFor(doc, options, added?)` | A `RedactionCursor` for the doc's covered layers (`options.cover`: faces, plates) less the kept tracks, plus hand tracks. |
 | `cursor.regions(frame)` / `cursor.at(frame)` | Regions on a frame (`{ id, kind, box, held }`, `kind` 'faces' or 'plates') / just the boxes. Fast in increasing frame order; going back restarts the sweep. |
-| `redactionLog(doc, options, output?, added?)` | The log, totals computed by sweeping every frame. `formatLog` serializes it. |
+| `redactionLog(doc, options, output?, added?, addedAudio?)` | The log, totals computed by sweeping every frame, and the audio spans. `formatLog` serializes it. |
+| `audioSpans(doc, options, addedAudio?)` / `audioCover(spans)` | Every spoken match of `options.words` (and `profanity`) with lead and tail, kept or not / the merged stretches to rewrite. |
+| `findWords(doc, terms)`, `suggestNames(doc)`, `PROFANITY` | Word matching on the transcript's word times; recurring names to offer; the built-in list. |
 | `newPlan`, `checkPlan`, `parsePlan`, `formatPlan`, `planPathFor` | The review plan (`<video>.redact.json`). |
 | `handTrack`, `setBox`, `setEnd` | Build and edit hand-drawn tracks. |
-| `REDACT_DEFAULTS`, `REDACT_STYLES`, `REDACTION_CAVEAT`, `parseKeep` | |
+| `REDACT_DEFAULTS`, `REDACT_STYLES`, `REDACT_SOUNDS`, `REDACTION_CAVEAT`, `AUDIO_CAVEAT`, `parseKeep` | |
 
 See [redaction](redaction.md) for how regions are chosen.
 

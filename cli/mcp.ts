@@ -11,7 +11,7 @@ import { parseArgs } from 'node:util';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { LAYER_NAMES, PlanError, PRODUCERS, REDACT_DEFAULTS, REDACT_KINDS, REDACT_STYLES, VERSION } from '../src/doc/index.ts';
+import { LAYER_NAMES, PlanError, PRODUCERS, REDACT_DEFAULTS, REDACT_KINDS, REDACT_SOUNDS, REDACT_STYLES, VERSION } from '../src/doc/index.ts';
 import {
   analyze, check, DEFAULT_IMAGE_SIZE, DEFAULT_LAYERS, info, layers, MARKDOWN_LAYERS, markdown, redact, search, UsageError, warmBrowser,
   type Context, type Progress,
@@ -104,11 +104,14 @@ const TOOLS = [
   },
   {
     name: 'redact',
-    title: 'Blur faces and license plates in a video',
+    title: 'Blur faces and license plates, bleep words',
     description:
-      'Write a copy of the video with every detected face and license plate blurred (or pixelated, or filled), audio copied, plus a redaction log (<out>.redactions.json) listing every track and which were kept visible. ' +
-      'Analyzes faces and plates first if needed (slow: roughly 2-12x real time on an integrated GPU, crowds slowest). Detection misses some faces and plates, so a person must review the output before release; ' +
-      'say so when reporting the result. Track ids for keep and keepPlates come from a previous log or the doc. ' +
+      'Write a copy of the video with every detected face and license plate blurred (or pixelated, or filled) and, when words or profanity are given, those words bleeped (or muted) wherever they are spoken, ' +
+      'plus a redaction log (<out>.redactions.json) listing every track and bleeped word and which were kept. ' +
+      'Analyzes what it needs first (faces and plates are slow: roughly 2-12x real time on an integrated GPU, crowds slowest; the transcript with word times about 3x faster than real time). ' +
+      'Detection and transcription miss some faces, plates and words, so a person must watch and listen to the output before release; say so when reporting the result. ' +
+      'Names are matched as the transcript spells them, which can differ from the real spelling: read the transcript (markdown) first and list the spellings it uses. ' +
+      'Track ids for keep and keepPlates, and word keys for keepWords, come from a previous log or the doc. ' +
       'A review saved in the app (<video>.redact.json: kept tracks, regions added by hand) is used when present; options given here override it.',
     inputSchema: {
       type: 'object',
@@ -120,7 +123,13 @@ const TOOLS = [
         hold: { type: 'number', minimum: 0, maximum: 10, description: `Seconds to keep covering before and after each face track, within its shot (default ${REDACT_DEFAULTS.hold}).` },
         keep: { type: 'array', items: { type: 'integer', minimum: 1 }, description: "Face track ids to leave visible (replaces the review's)." },
         keepPlates: { type: 'array', items: { type: 'integer', minimum: 1 }, description: "Plate track ids to leave visible, e.g. a sign taken for a plate (replaces the review's)." },
-        cover: { type: 'array', items: { type: 'string', enum: REDACT_KINDS }, description: 'What to cover (default faces and plates; faces is required).' },
+        cover: { type: 'array', items: { type: 'string', enum: REDACT_KINDS }, description: 'What to cover (default faces and plates; [] copies the video and redacts audio only).' },
+        words: { type: 'array', items: { type: 'string' }, description: 'Words and phrases to bleep (names, places, numbers). Plain words also match plurals, possessives, -ed and -ing; * is a wildcard; a "quoted" entry matches exactly. Replaces the review\'s.' },
+        profanity: { type: 'boolean', description: 'Also bleep the built-in strong-language list (default false).' },
+        sound: { type: 'string', enum: REDACT_SOUNDS, description: `bleep (a 1 kHz tone) or mute (default ${REDACT_DEFAULTS.sound}).` },
+        lead: { type: 'number', minimum: 0, maximum: 5, description: `Seconds covered before each word (default ${REDACT_DEFAULTS.lead}; word times run late).` },
+        tail: { type: 'number', minimum: 0, maximum: 5, description: `Seconds covered after each word (default ${REDACT_DEFAULTS.tail}).` },
+        keepWords: { type: 'array', items: { type: 'string' }, description: 'Matches to leave audible, by word key from the log, e.g. "12.3".' },
         plan: { type: 'boolean', description: 'false: ignore <video>.redact.json (default true).' },
         set: SET,
         force: FORCE,
@@ -156,7 +165,7 @@ const server = new Server(
     instructions:
       'videodoc analyzes local video files on this machine (in a headless browser with WebGPU) into a saved document of time-indexed layers, then answers from it. ' +
       'To understand a video, call markdown (add images: true or embedImages to see keyframes). To find where something is said across videos, ' +
-      'call search over files or folders, then markdown with from/to around a hit. To blur faces before sharing a video, call redact. ' +
+      'call search over files or folders, then markdown with from/to around a hit. To blur faces and plates, or bleep names and profanity, before sharing a video, call redact. ' +
       'Analysis is cached per video and settings; analyze takes a folder.',
   },
 );
@@ -248,6 +257,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra): Promise<Call
                   out: args.out as string | undefined, style: args.style as string | undefined,
                   margin: args.margin as number | undefined, hold: args.hold as number | undefined, keep: args.keep as number[] | undefined,
                   keepPlates: args.keepPlates as number[] | undefined, cover: args.cover as string[] | undefined, plan: args.plan as boolean | undefined,
+                  words: args.words as string[] | undefined, profanity: args.profanity as boolean | undefined, sound: args.sound as string | undefined,
+                  lead: args.lead as number | undefined, tail: args.tail as number | undefined, keepWords: args.keepWords as string[] | undefined,
                 }),
               ),
             },

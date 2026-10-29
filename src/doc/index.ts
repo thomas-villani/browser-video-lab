@@ -9,3 +9,4 @@ export * from './markdown.ts';
 export * from './search.ts';
 export * from './doc.ts';
 export * from './redact.ts';
+export * from './words.ts';

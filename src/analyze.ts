@@ -5,14 +5,14 @@
 import { CanvasSink } from 'mediabunny';
 import {
   deriveLayers, fingerprint, newDoc, plan, VERSION, withLayers, linkTracks, DEFAULT_TRACKS,
-  type Box, type Layer, type LayerName, type Layers, type Overrides, type PlannedLayer, type SpeechItem, type VideoDoc,
+  type Box, type Layer, type LayerName, type Layers, type Overrides, type PlannedLayer, type SpeechItem, type TranscriptItem, type VideoDoc, type Word,
 } from './doc/index.ts';
 import { decodeAudio } from './runtime/audio';
 import { Detector } from './runtime/detector';
 import { sceneStream } from './runtime/scenes';
 import { openInput, probe, VideoSource, type MediaInput, type Probe } from './runtime/source';
 import { multiStream, type Head } from './runtime/stream';
-import { Transcriber } from './runtime/transcribe';
+import { Transcriber, type Segment } from './runtime/transcribe';
 import { Vad } from './runtime/vad';
 import { groupSpans } from './transcript';
 
@@ -84,22 +84,23 @@ export async function computeLayers(input: MediaInput, planned: PlannedLayer[], 
     if (want.has('transcript')) {
       if (!speech) throw new Error('transcript needs the speech layer');
       const ta = performance.now();
-      const c = want.get('transcript')!.config as { model: string; encoder: string; decoder: string; language: string; device: 'webgpu' | 'wasm' };
+      const c = want.get('transcript')!.config as { model: string; encoder: string; decoder: string; language: string; device: 'webgpu' | 'wasm'; words: boolean };
       const chunks = groupSpans(speech.map((s) => ({ start: s.t0, end: s.t1 })));
       // No speech, no Whisper (it takes seconds to load).
-      let segs: { start: number; end: number; text: string }[] = [];
+      let segs: Segment[] = [];
       if (chunks.length) {
         step(`loading ${c.model}`);
         const asr = await Transcriber.create({ model: c.model, device: c.device, dtype: { encoder_model: c.encoder, decoder_model_merged: c.decoder } });
         segs = await asr.transcribeSpans(pcm, chunks, {
           language: c.language,
+          words: c.words,
           onSpan: (i) => {
             signal?.throwIfAborted();
             step('transcribing', i, chunks.length);
           },
         });
       }
-      const items = segs.map((s) => ({ t0: s.start, t1: s.end, text: s.text }));
+      const items: TranscriptItem[] = segs.map((s) => ({ t0: s.start, t1: s.end, text: s.text, ...(s.words && { words: s.words.map((w): Word => [w.start, w.end, w.text]) }) }));
       layers.transcript = layer('transcript', items, performance.now() - ta, c.device, [span], c.model);
     }
   }

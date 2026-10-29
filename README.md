@@ -56,12 +56,14 @@ everything it covered. In the app, **Review faces and plates** shows exactly wha
 covered over the playing video; click a box to leave it visible (the official at the podium),
 drag a box over anything the detector missed. Detection misses some faces (8.1% of hand-labeled
 faces on a crowded street) and some plates (angled, blurred or distant), so a person reviews the
-result; the tools say so.
+result; the tools say so. Spoken names, numbers and strong language can be bleeped too: list
+them (`--words`, `--profanity`, or in the review) and every place they are said is covered,
+from the transcript's word times.
 
 **Skim a long recording.** The reading view puts the transcript beside the player with a frame
 for each shot and each silent gap, so a two-hour recording becomes a page you can scroll.
 
-On the roadmap: spoken names and chosen words (profanity) in redaction, captions for keyframes from a
+On the roadmap: captions for keyframes from a
 small vision model, audio-only files (podcasts, lectures), and transcript-driven editing
 (finding the "um"s and long pauses in a podcast or YouTube video and cutting them).
 
@@ -71,7 +73,7 @@ small vision model, audio-only files (podcasts, lectures), and transcript-driven
 # council-2026-10-14.mp4
 
 1:12:40 · 1920×1080 · 30 fps · 9 shots · 94% speech · 11,204 words
-<!-- videodoc/0 · speech (silero_vad v5) · transcript (onnx-community/whisper-base) · scenes · keyframes -->
+<!-- videodoc/0 · speech (silero_vad v5) · transcript (onnx-community/whisper-base_timestamped) · scenes · keyframes -->
 
 ## Shot 3 · 0:14:05–0:31:50
 
@@ -108,6 +110,7 @@ npm run videodoc -- analyze videos/                          # transcribe and in
 npm run videodoc -- search "sidewalk contract" videos/       # where was it said? (no GPU, instant)
 npm run videodoc -- markdown videos/council.mp4 --from 14:00 --to 20:00   # read that stretch
 npm run videodoc -- redact videos/bodycam.mp4                # faces and plates blurred -> bodycam.redacted.mp4
+npm run videodoc -- redact videos/bodycam.mp4 --profanity --words "Fairfield"   # ... and words bleeped
 ```
 
 For an agent (Claude Code shown; any MCP client works):

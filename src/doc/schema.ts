@@ -50,7 +50,10 @@ export interface Layer<T> {
 
 /** VAD speech span. */
 export interface SpeechItem { t0: number; t1: number }
-export interface TranscriptItem { t0: number; t1: number; text: string }
+/** A spoken word: start and end in seconds, and the text as transcribed (with punctuation). */
+export type Word = [t0: number, t1: number, text: string];
+/** A transcript segment; `words` when the model gave word timestamps (transcript.words). */
+export interface TranscriptItem { t0: number; t1: number; text: string; words?: Word[] }
 /** A shot: frames [f0, f1] inclusive; `score` is the cut score that started it (0 for the first). */
 export interface SceneItem { t0: number; t1: number; f0: number; f1: number; score: number }
 /** A frame worth looking at: the start of a shot, the middle of a silent gap, or a fill-in

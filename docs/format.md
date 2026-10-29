@@ -44,7 +44,7 @@ interface Layer<T> {
   producer: {
     module: string;          // the layer name
     version: string;         // videodoc version that wrote it
-    model?: string;          // e.g. "onnx-community/whisper-base"
+    model?: string;          // e.g. "onnx-community/whisper-base_timestamped"
     config: Record<string, number | string | boolean>;   // every setting, defaults included
     configHash: string;      // hash of config + the hashes of the layers it was computed from
   };
@@ -59,7 +59,7 @@ interface Layer<T> {
 | Layer | Item | Needs | Pass | Produced by |
 |---|---|---|---|---|
 | `speech` | `{ t0, t1 }` | — | audio | Silero VAD v5 (wasm) |
-| `transcript` | `{ t0, t1, text }` | speech | audio | Whisper via transformers.js (WebGPU), speech spans only |
+| `transcript` | `{ t0, t1, text, words? }` (`words`: `[t0, t1, text][]`) | speech | audio | Whisper via transformers.js (WebGPU), speech spans only; word times from cross-attention |
 | `scenes` | `{ t0, t1, f0, f1, score }` (a shot; frames inclusive) | — | frames | GPU thumbnails, ffmpeg-style scene score |
 | `keyframes` | `{ t, frame, scene, why: 'scene' \| 'silence' \| 'coverage' }` | scenes, speech | pure | derived in Node or the browser, no decode |
 | `faces` | `Track` (below) | scenes | frames | YuNet with adaptive sampling and native-resolution tiles |
@@ -99,7 +99,8 @@ or `settings` (library). `videodoc layers` prints this table as JSON.
 | `speech.minSilence` | 0.3 | seconds below threshold − 0.15 that end a span |
 | `speech.minSpeech` | 0.25 | drop spans shorter than this, seconds |
 | `speech.pad` | 0.2 | grow each span on both sides, seconds |
-| `transcript.model` | `onnx-community/whisper-base` | Whisper repo under `public/models` (`whisper-small`: ~2.5x slower, fewer errors) |
+| `transcript.model` | `onnx-community/whisper-base_timestamped` | Whisper repo under `public/models` (`whisper-small_timestamped`: ~3x slower, fewer errors; word times need a `_timestamped` export) |
+| `transcript.words` | `true` | word times (audio redaction needs them; about a third slower) |
 | `transcript.encoder` / `.decoder` | `fp32` / `q4` | ONNX dtypes |
 | `transcript.language` | `en` | spoken language code |
 | `transcript.device` | `webgpu` | `webgpu` or `wasm` |

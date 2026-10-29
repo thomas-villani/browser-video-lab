@@ -58,11 +58,16 @@ first) turns the player into a review tool:
 - The panel lists faces, then plates, shot by shot, longest first, with thumbnails; click one to
   jump to it. Crowded shots list 24, then more on request.
 - **Cover with** picks blur, pixelate or solid boxes.
+- **Spoken words**, above the shots: list words and phrases to bleep, one per line (the names the
+  transcript repeats are offered as buttons), tick **Strong language too**, and pick bleep or
+  silence. Each match is listed with its time; click the time to hear it (the preview mutes the
+  player over it and plays the tone) or **Leave audible**. A video transcribed before word times
+  existed offers **Transcribe again with word times**.
 - Keys: Space plays, ← → step a frame (Shift: 10), `[` `]` previous / next shot, Esc deselects,
   Delete removes a hand-drawn box.
 
 The review is saved next to the video as `<video>.redact.json` (folder mode) and used by
-**Blur faces and plates…**, which makes the copy: next to the video in folder mode, else where you choose
+**Blur faces and plates…** (**Blur and bleep…** with words listed), which makes the copy: next to the video in folder mode, else where you choose
 (or as a download), with its redaction log. When the copy was saved to a file, **Watch it** in the
 toast that follows plays it. See [redaction](redaction.md) for what is covered and the file formats.
 

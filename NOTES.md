@@ -714,3 +714,41 @@ Findings:
    same plates found on 86 frames, scores within a few hundredths.
 5. Redacting the dashcam clip: 720 face + 92 plate tracks on 1,544 of 1,801 frames, 39 s
    (46 fps); plates visibly blurred in sampled output frames.
+
+## Audio redaction: word times and bleeps (2026-10-28)
+
+Iris Xe, Edge headless, AC, "Best performance" overlay.
+
+**Word times exist only in the `_timestamped` exports.** `onnx-community/whisper-base`'s decoder
+outputs logits only; `whisper-base_timestamped` (same size: 82 MB encoder fp32 + 124 MB decoder
+q4) adds `cross_attentions.*`, which transformers.js aligns to words (`return_timestamps:
+'word'`). Briefing, first 120 s: ASR 23.7 s with segments, 31.6 s with words (+34%), same text.
+Bodycam 17:35 with words: 513 s (2.1x real time; segments-only base was 5.3x on the briefing).
+
+**Ground truth.** Windows TTS (System.Speech) speaking a 138-word script (57 s) with names,
+profanity and numbers; `SpeakProgress` gives each word's start. Its `AudioPosition` counts at
+16 kHz while writing 22.05 kHz, so true time = reported x 16000/22050; checked against energy
+onsets after pauses: within 0.02 s on 22 of 23. 117 words matched to Whisper's output:
+
+| Model | Start error p50 | p95 | max | min | Covered whole, lead 0.4 / tail 0.2 | lead 0.5 / tail 0.3 |
+|---|---|---|---|---|---|---|
+| base_timestamped, q4 decoder | +0.17 s | +0.37 | +0.48 | +0.06 | 110/117 | 116/117 |
+| base_timestamped, fp32 decoder | +0.17 | +0.37 | +0.48 | +0.06 | 111/117 | 116/117 |
+| small_timestamped, q4 decoder (1.1x real time) | +0.18 | +0.37 | +0.45 | +0.08 | 116/118 | 117/118 |
+
+Word starts run late by a fairly steady 0.1-0.4 s whatever the model or quantization (the
+alignment method, not the model), so the lead is the longer pad. On real speech (briefing,
+24 onsets after pauses, measured from room-noise energy so rougher): median +0.07, range
+-0.46 to +0.50. Ends spill into the following pause ("Trump" 23.30-24.80).
+
+**Faithfulness.** Whisper wrote "damn", "shit", "bullshit", "hell", "bitch", "son of a bitch"
+as spoken. Names suffered: "Okafor" -> "Ackover", "Lindqvist" -> "Lindquist", "Moore" ->
+"more"; "three o'clock" -> "3 o 'clock"; the phone number as "555 -213 -4987". Hence matching
+on the transcript's spelling (and name suggestions from it), and hyphen-split tokens.
+
+**End to end.** TTS clip, `--cover none --profanity --words "Ackover,Daniel Reyes,Lindquist,Patel"`:
+8 matches, 7.48 s; decoded output, 1 kHz detector (10 ms frames, >80% of power at 1 kHz):
+every target word 100% toned, 7.48 s toned in all; audio pass 0.8 s (video copied). Bodycam
+17:35, faces + 4 names + profanity: 10 matches, 9.88 s; tone runs in the output equal the
+log's merged spans to the 10 ms frame; 31,661 frames in 467 s (68 fps, with the audio rewrite);
+audio and video lengths unchanged (1055.42 / 1055.37 s).

@@ -26,6 +26,7 @@ const cfg = {
   seconds: Number(q.get('seconds') ?? 0),
   minGap: Number(q.get('mingap') ?? 2),
   vad: q.get('vad') !== '0',
+  words: q.get('words') === '1',
 };
 const r1 = (v: number) => Math.round(v * 10) / 10;
 
@@ -55,7 +56,7 @@ async function run() {
   const t3a = performance.now();
   status.textContent = 'transcribing...';
   const segments = chunks
-    ? await asr.transcribeSpans(pcm, chunks, { language: cfg.lang, onSpan: (i) => (status.textContent = `transcribing chunk ${i + 1}/${chunks!.length}`) })
+    ? await asr.transcribeSpans(pcm, chunks, { language: cfg.lang, words: cfg.words, onSpan: (i) => (status.textContent = `transcribing chunk ${i + 1}/${chunks!.length}`) })
     : await asr.transcribe(pcm, { language: cfg.lang });
   const t3 = performance.now();
   const audioSeconds = pcm.samples.length / pcm.sampleRate;

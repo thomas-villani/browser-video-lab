@@ -48,8 +48,8 @@ const api = {
     );
   },
 
-  /** Redact the video at `url` with the faces in `doc`, writing the MP4 to `outUrl` (PUT, by byte offset). */
-  async redact(url: string, outUrl: string, doc: VideoDoc, opts: Partial<RedactOptions> & { added?: Track[] }) {
+  /** Redact the video at `url` with the regions and words from `doc`, writing the MP4 to `outUrl` (PUT, by byte offset). */
+  async redact(url: string, outUrl: string, doc: VideoDoc, opts: Partial<RedactOptions> & { added?: Track[]; addedAudio?: [number, number][] }) {
     const sink = new WritableStream<{ type: 'write'; data: Uint8Array<ArrayBuffer>; position: number }>({
       async write(chunk) {
         const r = await fetch(`${outUrl}?pos=${chunk.position}`, { method: 'PUT', body: chunk.data });
@@ -57,7 +57,7 @@ const api = {
       },
     });
     const r = await redact(url, doc, sink, { ...opts, onProgress: (p) => window.__videodocProgress?.(p) });
-    return { frames: r.frames, ms: r.ms };
+    return { frames: r.frames, audioSeconds: r.audioSeconds, ms: r.ms };
   },
 
   /** What this browser can do: WebGPU adapter, decoders, isolation (threaded wasm). */

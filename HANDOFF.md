@@ -144,11 +144,33 @@ benchmarks and evaluation tools that used to fill the README). Keep it current w
   The app finds plates whenever it reviews or blurs.
 - Trap: `check` now requires the plate model (redaction covers plates by default).
 
+## Done: audio redaction (2026-10-28)
+
+- Transcript default is now `onnx-community/whisper-base_timestamped` with `transcript.words`
+  (word times from cross-attention; the plain onnx-community exports output logits only).
+  `TranscriptItem.words: [t0, t1, text][]`; segments are rebuilt from words (sentence ends,
+  pauses of 1 s). Word ends are clamped to their VAD chunk.
+- `src/doc/words.ts`: `findWords` (inflections, `*`, "exact", phrases; hyphenated words split
+  into tokens sharing times; a match inside a longer one dropped), `PROFANITY`, `suggestNames`.
+- `src/doc/redact.ts`: options `words`, `profanity`, `sound`, `lead` 0.4, `tail` 0.2,
+  `keepWords` (keys `<item>.<word>`); `audioSpans`, `audioCover`; `cover: []` allowed (faces
+  required only when covered); log `audio` section and `detectors.transcript`; plan
+  `transcript` hash (stale `keepWords` dropped), `addedAudio`, `faces` optional.
+- `src/redact.ts`: `soundOver` audio `process` hook (1 kHz at -10 dBFS or silence, 8 ms fades);
+  video copied when nothing visual is covered (`frames` 0). CLI `--words`, `--words-file`,
+  `--profanity`, `--sound`, `--lead`, `--tail`, `--keep-words`, `--cover none`; MCP likewise.
+- App review: Spoken words section (word box, name suggestions, matches to play or leave
+  audible, preview mutes the player and plays the tone); "Transcribe again with word times" for
+  old transcripts (`Entry.wantWords`).
+- Trap: every doc made before today has a transcript with the old config hash, so the next
+  command that wants `transcript` (markdown, search-prep, the app's analysis) transcribes again.
+- Trap: the preview server serves `dist/`: with `--no-build`, new files in `public/` are missing.
+
 ## Next
 
-Audio redaction (bleep spoken names and chosen words, with word lists the user configures:
-DESIGN.md step 6 sketch). Then pluggable models and a pipeline builder in the app (DESIGN.md
-step 9, user direction 2026-10-28). Lead application (decided 2026-10-27) stays search
+Pluggable models and a pipeline builder in the app (DESIGN.md step 9, user direction
+2026-10-28). Audio follow-ups (DESIGN.md step 6): sound-alike name matching, drawing audio
+spans in the app, highlights in the reading view, audio-only review. Lead application (decided 2026-10-27) stays search
 and read. Smaller follow-ups for the app: hosted build with a model registry, analysis in a
 worker, persistence for dropped files. Ideas noted in DESIGN.md (not scheduled): audio-only
 files (lectures, podcasts) and transcript-driven editing (filler words, cuts).

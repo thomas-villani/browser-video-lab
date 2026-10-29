@@ -6,7 +6,7 @@
 // stdout: JSON results (one object per command; `markdown` without --out prints Markdown).
 // stderr: progress and human summaries. Exit codes: 0 ok, 1 failure, 2 usage error, 130 cancelled.
 import { parseArgs } from 'node:util';
-import { DocError, LAYER_NAMES, PlanError, REDACT_DEFAULTS, REDACT_STYLES } from '../src/doc/index.ts';
+import { DocError, LAYER_NAMES, PlanError, REDACT_DEFAULTS, REDACT_SOUNDS, REDACT_STYLES } from '../src/doc/index.ts';
 import {
   analyze, check, DEFAULT_IMAGE_SIZE, DEFAULT_LAYERS, info, layers, MARKDOWN_LAYERS, markdown, oneShotBrowser, openUrl, redact, search, serveApp, UsageError,
   type Context, type Progress,
@@ -29,11 +29,12 @@ Commands:
   search <query> <paths...>
                          Find where something is said: ranked transcript passages across videos
                          and folders, with times and the nearest keyframe (no browser; analyze first).
-  redact <video>         Blur every face and license plate: writes <name>.redacted.mp4 (audio copied)
-                         and a redaction log (<out>.redactions.json: every track, which were kept
-                         visible). Analyzes faces and plates first if needed. Uses <video>.redact.json
-                         when there (a review made in the app: kept tracks, regions added by hand).
-                         Watch the output before release: detection misses some faces and plates.
+  redact <video>         Blur every face and license plate, and bleep listed words (--words,
+                         --profanity): writes <name>.redacted.mp4 and a redaction log
+                         (<out>.redactions.json: every track and bleeped word, which were kept).
+                         Analyzes what it needs first. Uses <video>.redact.json when there (a
+                         review made in the app: kept tracks, regions added by hand).
+                         Watch and listen before release: detection and transcription miss some.
   info <video|doc>       Summarize a saved doc (no browser).
   layers                 Layers, their dependencies and settings with defaults (JSON).
 
@@ -61,7 +62,18 @@ redact options:
   --hold <s>             Keep covering this long before and after each face track (default ${REDACT_DEFAULTS.hold}).
   --keep <ids>           Face track ids to leave visible, e.g. 3,7 (ids are in the log and the doc).
   --keep-plates <ids>    Plate track ids to leave visible (a sign taken for a plate; ids are per layer).
-  --cover <list>         What to cover: faces,plates (default) or faces.
+  --cover <list>         What to cover: faces,plates (default), faces, plates, or none (audio only:
+                         the video is copied).
+  --words <list>         Words and phrases to bleep, comma-separated, e.g. "Okafor,Daniel Reyes".
+                         Plain words also match plurals, possessives, -ed and -ing; * is a
+                         wildcard ("fuck*"); "quoted" matches exactly. Spell names as the
+                         transcript does (videodoc markdown shows it).
+  --words-file <path>    Words and phrases to bleep, one per line (# comments); adds to --words.
+  --profanity            Also bleep the built-in strong-language list (src/doc/words.ts).
+  --sound <s>            ${REDACT_SOUNDS.join(' | ')} (default ${REDACT_DEFAULTS.sound}).
+  --lead, --tail <s>     Seconds covered before and after each word (default ${REDACT_DEFAULTS.lead}, ${REDACT_DEFAULTS.tail}:
+                         word times from Whisper run late).
+  --keep-words <keys>    Matches to leave audible, by word key from the log (e.g. 12.3).
                          Options given here override the review's.
   --no-plan              Ignore <video>.redact.json.
   --set, --force         As for analyze (detection settings, e.g. --set faces.every=1).
@@ -98,6 +110,13 @@ const { values: a, positionals } = parseArgs({
     keep: { type: 'string' },
     'keep-plates': { type: 'string' },
     cover: { type: 'string' },
+    words: { type: 'string' },
+    'words-file': { type: 'string' },
+    profanity: { type: 'boolean' },
+    sound: { type: 'string' },
+    lead: { type: 'string' },
+    tail: { type: 'string' },
+    'keep-words': { type: 'string' },
     port: { type: 'string', default: '4317' },
     'no-open': { type: 'boolean', default: false },
     'no-plan': { type: 'boolean', default: false },
@@ -206,7 +225,13 @@ async function main() {
       if (!Number.isFinite(n)) throw new UsageError(`--${what} takes a number, got '${v}'`);
       return n;
     };
-    return out(await redact(ctx, rest[0], { set: a.set, force: a.force, dryRun: a['dry-run'], out: a.out, style: a.style, margin: num(a.margin, 'margin'), hold: num(a.hold, 'hold'), keep: a.keep, keepPlates: a['keep-plates'], cover: a.cover, plan: !a['no-plan'] }));
+    return out(
+      await redact(ctx, rest[0], {
+        set: a.set, force: a.force, dryRun: a['dry-run'], out: a.out, style: a.style, margin: num(a.margin, 'margin'), hold: num(a.hold, 'hold'), keep: a.keep,
+        keepPlates: a['keep-plates'], cover: a.cover, words: a.words, wordsFile: a['words-file'], profanity: a.profanity, sound: a.sound,
+        lead: num(a.lead, 'lead'), tail: num(a.tail, 'tail'), keepWords: a['keep-words'], plan: !a['no-plan'],
+      }),
+    );
   }
   const size = Number(a['image-size']);
   if (!Number.isFinite(size)) throw new UsageError(`--image-size takes a number of pixels, got '${a['image-size']}'`);

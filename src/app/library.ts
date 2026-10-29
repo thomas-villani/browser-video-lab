@@ -41,6 +41,8 @@ export interface Entry {
   planFile?: File;
   /** Open the review once the faces are found (Review faces on a video without them). */
   reviewAfter?: boolean;
+  /** Transcribe again with word times (the review asked for them to bleep words). */
+  wantWords?: boolean;
   /** Keyframe images by frame: object URLs. */
   images: Map<number, string>;
 }

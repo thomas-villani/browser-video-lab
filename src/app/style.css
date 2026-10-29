@@ -169,3 +169,19 @@ body.dragging .drop-hint { display: flex; }
 .face.sel { outline: 2px solid var(--accent); }
 .more { align-self: center; font-size: 12px; }
 .rv-foot { font-size: 12px; }
+.rv-audio { margin: 4px 0 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); display: flex; flex-direction: column; gap: 8px; }
+.rv-audio summary { font-weight: 600; cursor: pointer; }
+.rv-audio[open] summary { margin-bottom: 6px; }
+.rv-audio > * + * { margin-top: 6px; }
+.rv-audio p { margin: 0; }
+.rv-words-label { display: block; font-size: 13px; color: var(--muted); }
+.rv-audio textarea { width: 100%; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); resize: vertical; }
+.rv-suggest { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; font-size: 13px; }
+.rv-suggest button { padding: 1px 8px; border-radius: 999px; }
+.rv-warn { padding: 6px 10px; border-radius: 6px; background: var(--accent-soft); }
+.rv-wordlist { list-style: none; margin: 4px 0 0; padding: 0; max-height: 280px; overflow-y: auto; }
+.rv-wordlist li { display: flex; gap: 6px; align-items: baseline; padding: 2px 0; }
+.rv-wordlist .said { font-weight: 600; }
+.rv-wordlist li > button:last-child { margin-left: auto; font-size: 12px; padding: 1px 8px; }
+.rv-wordlist li.kept .said { color: #15803d; }
+.rv-wordlist .ts { font-variant-numeric: tabular-nums; padding: 1px 6px; }

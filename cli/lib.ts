@@ -10,8 +10,8 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { fileURLToPath } from 'node:url';
 import {
   deriveLayers, docPathFor, fingerprint, fmtTime, formatDoc, formatLog, LAYER_NAMES, newDoc, parseDoc, parseKeep, parseSettings, plan, PRODUCERS,
-  parsePlan, planPathFor, REDACT_DEFAULTS, REDACT_KINDS, REDACT_STYLES, redactionLog, search as searchDocs, summarize, toMarkdown, withLayers,
-  type KeyframeItem, type Layers, type Plan, type RedactKind, type RedactOptions as RedactSettings, type RedactStyle, type Track, type VideoDoc,
+  parsePlan, planPathFor, REDACT_DEFAULTS, REDACT_KINDS, REDACT_SOUNDS, REDACT_STYLES, coversAudio, redactionLog, search as searchDocs, summarize, toMarkdown, withLayers,
+  type KeyframeItem, type Layers, type Plan, type RedactKind, type RedactOptions as RedactSettings, type RedactSound, type RedactStyle, type Track, type VideoDoc,
 } from '../src/doc/index.ts';
 
 export const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -463,11 +463,24 @@ export interface RedactOptions extends Omit<AnalyzeOptions, 'layers' | 'doc'> {
   keep?: string | number[];
   /** Plate track ids to leave visible, likewise. */
   keepPlates?: string | number[];
-  /** Layers to cover: "faces,plates" (default) or "faces". */
+  /** Layers to cover: "faces,plates" (default), "faces", or "none" (audio only). */
   cover?: string | string[];
+  /** Words and phrases to bleep: "Okafor,Daniel Reyes" or a list. Replaces the review plan's. */
+  words?: string | string[];
+  /** A file of words and phrases to bleep, one per line (# starts a comment); added to `words`. */
+  wordsFile?: string;
+  /** Also bleep the built-in strong-language list. */
+  profanity?: boolean;
+  sound?: string;
+  lead?: number;
+  tail?: number;
+  /** Matches to leave audible, by first-word key ("12.3"): "12.3,40.0" or a list. */
+  keepWords?: string | string[];
   /** false: ignore <video>.redact.json (the app's review). */
   plan?: boolean;
 }
+
+const list = (v: string | string[] | undefined) => (v === undefined ? undefined : (Array.isArray(v) ? v : v.split(',')).map((x) => x.trim()).filter(Boolean));
 
 /** Check and complete redaction settings (the unset ones from `base`: a review plan's, or the defaults). */
 export function redactSettings(o: RedactOptions, base: RedactSettings = REDACT_DEFAULTS): RedactSettings {
@@ -486,37 +499,58 @@ export function redactSettings(o: RedactOptions, base: RedactSettings = REDACT_D
   } catch (e) {
     throw new UsageError((e as Error).message);
   }
-  const cover = o.cover === undefined ? base.cover : (Array.isArray(o.cover) ? o.cover : o.cover.split(',')).map((k) => k.trim());
+  let cover = list(o.cover) ?? base.cover;
+  if (cover.length === 1 && cover[0] === 'none') cover = [];
   const bad = cover.find((k) => !REDACT_KINDS.includes(k as RedactKind));
-  if (bad !== undefined || !cover.includes('faces')) throw new UsageError(`cover takes faces or faces,plates, got '${cover.join(',')}'`);
-  return { style, margin: num(o.margin, base.margin, 'margin', 2), hold: num(o.hold, base.hold, 'hold', 10), keep, keepPlates, cover: cover as RedactKind[] };
+  if (bad !== undefined) throw new UsageError(`cover takes faces, plates (comma-separated) or none, got '${cover.join(',')}'`);
+  const sound = (o.sound ?? base.sound) as RedactSound;
+  if (!REDACT_SOUNDS.includes(sound)) throw new UsageError(`sound takes ${REDACT_SOUNDS.join(', ')}, got '${o.sound}'`);
+  let words = list(o.words) ?? base.words;
+  if (o.wordsFile) {
+    if (!existsSync(o.wordsFile)) throw new UsageError(`no words file at ${o.wordsFile}`);
+    const lines = readFileSync(o.wordsFile, 'utf8').split(/\r?\n/).map((l) => l.replace(/#.*/, '').trim()).filter(Boolean);
+    words = [...(o.words === undefined ? [] : words), ...lines];
+  }
+  const keepWords = list(o.keepWords) ?? base.keepWords;
+  const badKey = keepWords.find((k) => !/^\d+\.\d+$/.test(k));
+  if (badKey !== undefined) throw new UsageError(`keepWords takes word keys like 12.3 (from the redaction log), got '${badKey}'`);
+  return {
+    style, margin: num(o.margin, base.margin, 'margin', 2), hold: num(o.hold, base.hold, 'hold', 10), keep, keepPlates, cover: cover as RedactKind[],
+    words, profanity: o.profanity ?? base.profanity, sound, lead: num(o.lead, base.lead, 'lead', 5), tail: num(o.tail, base.tail, 'tail', 5), keepWords,
+  };
 }
 
 /**
- * Blur (or pixelate, or fill) every face: analyzes faces first if needed, writes the redacted
- * MP4 (audio copied) and a redaction log, <out>.redactions.json, listing every face track and
- * which were kept visible. A review saved by the app (<video>.redact.json: kept faces, faces
- * added by hand, options) is used when present; options given here override it.
+ * Blur (or pixelate, or fill) every face and plate, and bleep (or mute) listed words: analyzes
+ * what is needed first, writes the redacted MP4 and a redaction log, <out>.redactions.json,
+ * listing every track and bleeped word and which were kept. A review saved by the app
+ * (<video>.redact.json: kept faces, faces added by hand, options) is used when present; options
+ * given here override it.
  */
 export async function redact(ctx: Context, videoArg: string, o: RedactOptions = {}) {
   const video = videoPath(ctx, videoArg);
+  if (o.wordsFile) o = { ...o, wordsFile: userPath(ctx, o.wordsFile) };
   let settings = redactSettings(o);
   const out = o.out ? userPath(ctx, o.out) : join(dirname(video), `${basename(video).replace(/\.[^.]+$/, '')}.redacted.mp4`);
   if (resolve(out) === resolve(video)) throw new UsageError('the output would overwrite the video; pass another --out');
   if (!/\.mp4$/i.test(out)) throw new UsageError(`the output is MP4; name it .mp4, got ${out}`);
-  // The review's cover applies only when no --cover is given, so read it before deciding layers.
+  // What the review covers applies where no option overrides it, so read it before deciding layers.
   const planPath = planPathFor(video);
   const usePlan = o.plan !== false && existsSync(planPath);
-  let cover = settings.cover;
-  if (o.cover === undefined && usePlan) {
+  let need = settings;
+  let addedAudio: [number, number][] = [];
+  if (usePlan) {
     try {
-      const c = (JSON.parse(readFileSync(planPath, 'utf8')) as { options?: { cover?: RedactKind[] } }).options?.cover;
-      if (Array.isArray(c)) cover = c.filter((k) => REDACT_KINDS.includes(k));
+      const p = JSON.parse(readFileSync(planPath, 'utf8')) as { options?: Partial<RedactSettings>; addedAudio?: [number, number][] };
+      need = redactSettings(o, { ...REDACT_DEFAULTS, ...p.options, cover: (p.options?.cover ?? REDACT_DEFAULTS.cover).filter((k) => REDACT_KINDS.includes(k)) });
+      addedAudio = Array.isArray(p.addedAudio) ? p.addedAudio : [];
     } catch {
       // parsePlan below reports it.
     }
   }
-  const r = await ensure(ctx, video, docPathFor(video), cover.includes('plates') ? ['faces', 'plates'] : ['faces'], o);
+  const layers = [...need.cover, ...(need.words.length || need.profanity ? ['transcript'] : [])];
+  if (!layers.length && !addedAudio.length) throw new UsageError('nothing to redact: cover is none and there are no words to bleep (pass --words, --words-file or --profanity)');
+  const r = await ensure(ctx, video, docPathFor(video), layers, o);
   if ('dryRun' in r) return r.dryRun;
   let added: Track[] = [];
   const warnings: string[] = [];
@@ -529,27 +563,43 @@ export async function redact(ctx: Context, videoArg: string, o: RedactOptions = 
     }
     settings = redactSettings(o, p.plan.options);
     added = p.plan.added;
+    addedAudio = p.plan.addedAudio ?? [];
     warnings.push(...p.warnings);
     ctx.report.log(`review: ${planPath}`);
     for (const w of p.warnings) ctx.report.log(`  warning: ${w}`);
   }
-  const pre = redactionLog(r.doc, settings, undefined, added);
+  let pre: ReturnType<typeof redactionLog>;
+  try {
+    pre = redactionLog(r.doc, settings, undefined, added, addedAudio);
+  } catch (e) {
+    throw new UsageError((e as Error).message);
+  }
   const t = pre.totals;
   const n = (k: RedactKind) => pre.tracks.filter((x) => x.layer === k && !x.kept).length;
-  const what = `${n('faces')} face${pre.detectors.plates ? ` and ${n('plates')} plate` : ''} tracks`;
-  ctx.report.log(`redacting ${what}${t.added ? ` (${t.added} added by hand)` : ''}${t.kept ? `, keeping ${t.kept} visible,` : ''} on ${t.framesWithRegions} of ${r.doc.source.frames} frames (${settings.style})`);
+  const coversVideo = settings.cover.length > 0 || added.length > 0;
+  if (coversVideo) {
+    const what = `${n('faces')} face${pre.detectors.plates ? ` and ${n('plates')} plate` : ''} tracks`;
+    ctx.report.log(`redacting ${what}${t.added ? ` (${t.added} added by hand)` : ''}${t.kept ? `, keeping ${t.kept} visible,` : ''} on ${t.framesWithRegions} of ${r.doc.source.frames} frames (${settings.style})`);
+  }
+  if (pre.audio) {
+    const a = pre.audio.totals;
+    ctx.report.log(`${settings.sound === 'bleep' ? 'bleeping' : 'muting'} ${a.matches - a.kept} spoken matches${a.added ? ` and ${a.added} spans added by hand` : ''}${a.kept ? `, leaving ${a.kept} audible` : ''}: ${a.seconds} s of audio`);
+    for (const s of pre.audio.spans.filter((x) => !x.kept).slice(0, 20)) ctx.report.log(`  ${fmtTime(s.t0, r.doc.source.duration >= 3600)}  ${s.added ? '(added by hand)' : `"${s.text}"${s.term === s.text ? '' : ` (${s.term})`}`}`);
+    if (pre.audio.spans.length > 20) ctx.report.log(`  ... (all ${pre.audio.spans.length} in the log)`);
+    if (a.matches === 0 && !a.added) ctx.report.log('  note: no listed word is in the transcript (check its spelling there: names are often transcribed differently)');
+  }
   const part = `${out}.part`;
   writeFileSync(part, '');
   let result: { frames: number; ms: number };
   try {
     // The page gets the doc without the layers it does not need (a transcript can be large).
-    const doc = { ...r.doc, layers: { faces: r.doc.layers.faces, plates: r.doc.layers.plates, scenes: r.doc.layers.scenes } };
+    const doc = { ...r.doc, layers: { faces: r.doc.layers.faces, plates: r.doc.layers.plates, scenes: r.doc.layers.scenes, ...(pre.audio && { transcript: r.doc.layers.transcript }) } };
     result = await ctx.browser.run(
       { video, out: part },
       (page, base) =>
         page.evaluate(
-          ([url, outUrl, d, s]: [string, string, VideoDoc, RedactSettings & { added: Track[] }]) => window.videodoc.redact(url, outUrl, d, s),
-          [`${base}@file/video`, `${base}@file/out`, doc, { ...settings, added }],
+          ([url, outUrl, d, s]: [string, string, VideoDoc, RedactSettings & { added: Track[]; addedAudio: [number, number][] }]) => window.videodoc.redact(url, outUrl, d, s),
+          [`${base}@file/video`, `${base}@file/out`, doc, { ...settings, added, addedAudio }],
         ),
       ctx.report.progress,
       ctx.signal,
@@ -558,19 +608,20 @@ export async function redact(ctx: Context, videoArg: string, o: RedactOptions = 
     rmSync(part, { force: true });
     throw e;
   }
-  if (result.frames !== r.doc.source.frames) {
+  if (coversVideo && result.frames !== r.doc.source.frames) {
     rmSync(part, { force: true });
     throw new Error(`decoded ${result.frames} frames but the doc has ${r.doc.source.frames}; the regions would not line up (re-analyze with --force)`);
   }
   renameSync(part, out);
-  const log = redactionLog(r.doc, settings, { name: basename(out), frames: result.frames, ms: result.ms }, added);
+  const log = redactionLog(r.doc, settings, { name: basename(out), frames: result.frames, ms: result.ms }, added, addedAudio);
   const logPath = `${out}.redactions.json`;
   writeFileSync(logPath, formatLog(log));
-  ctx.report.log(`  ${result.frames} frames in ${(result.ms / 1000).toFixed(1)} s (${((result.frames * 1000) / result.ms).toFixed(0)} fps)`);
+  if (coversVideo) ctx.report.log(`  ${result.frames} frames in ${(result.ms / 1000).toFixed(1)} s (${((result.frames * 1000) / result.ms).toFixed(0)} fps)`);
+  else ctx.report.log(`  audio in ${(result.ms / 1000).toFixed(1)} s (video copied)`);
   ctx.report.log(`  -> ${out}\n  -> ${logPath}`);
   ctx.report.log(`  note: ${log.caveat}`);
   return {
-    out, log: logPath, doc: r.docPath, ...(usePlan && { review: planPath, warnings }), settings, totals: log.totals,
+    out, log: logPath, doc: r.docPath, ...(usePlan && { review: planPath, warnings }), settings, totals: log.totals, ...(log.audio && { audio: log.audio.totals }),
     frames: result.frames, ms: result.ms, wallMs: r.wallMs + result.ms, caveat: log.caveat,
   };
 }
@@ -657,7 +708,7 @@ export function layers() {
 export async function check(ctx: Context, browserName: string) {
   const problems: string[] = [];
   const models = Object.fromEntries(
-    ['yunet_face_dyn.onnx', 'silero_vad.onnx', 'yolo_plate_t640.onnx', ...['whisper-base', 'whisper-small'].map((m) => `onnx-community/${m}`)].map((m) => [m, existsSync(join(ROOT, 'public/models', m))]),
+    ['yunet_face_dyn.onnx', 'silero_vad.onnx', 'yolo_plate_t640.onnx', ...['whisper-base_timestamped', 'whisper-small_timestamped'].map((m) => `onnx-community/${m}`)].map((m) => [m, existsSync(join(ROOT, 'public/models', m))]),
   );
   const env: Awaited<ReturnType<Window['videodoc']['check']>> = await ctx.browser.run({}, (page) => page.evaluate(() => window.videodoc.check()), undefined, ctx.signal);
   if (!env.webgpu) problems.push('no WebGPU adapter: faces and scenes need it (try --browser chrome, or update GPU drivers)');
@@ -665,7 +716,7 @@ export async function check(ctx: Context, browserName: string) {
   if (!env.decode.h264) problems.push('no H.264 decoder in this browser');
   // whisper-small is optional (--set transcript.model=...): listed, never a problem. The plate
   // model is required: redaction covers plates by default.
-  for (const [m, ok] of Object.entries(models)) if (!ok && !m.endsWith('whisper-small')) problems.push(`model not found: public/models/${m}`);
+  for (const [m, ok] of Object.entries(models)) if (!ok && !m.endsWith('whisper-small_timestamped')) problems.push(`model not found: public/models/${m}`);
   const gpu = env.webgpu ? `${env.webgpu.vendor} ${env.webgpu.architecture}${env.webgpu.description ? ` (${env.webgpu.description})` : ''}` : 'none';
   ctx.report.log(`browser   ${browserName}: ${env.userAgent.match(/(Edg|Chrome)\/[\d.]+/g)?.join(' ') ?? env.userAgent}`);
   ctx.report.log(`webgpu    ${gpu}${env.webgpu?.shaderF16 ? ', shader-f16' : ''}`);

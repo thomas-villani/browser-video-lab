@@ -3,10 +3,12 @@
 // to cover one the detector missed. Tracks are named by key, `f:<id>` (faces, and hand tracks with
 // negative ids) or `p:<id>` (plates): ids are per layer. The choices are the entry's RedactPlan (saved as <video>.redact.json
 // for folder entries), which Blur faces and `videodoc redact` use. Nothing is decoded here: the
-// boxes come from the doc, the picture from the <video> element.
+// boxes come from the doc, the picture from the <video> element. Spoken words to bleep are
+// listed above the shots; while the preview plays, the player is muted over them and the tone
+// plays instead.
 import {
-  cursorFor, handTrack, newPlan, REDACT_STYLES, setBox, setEnd, trackBox,
-  type Box, type RedactionCursor, type RedactKind, type RedactPlan, type RedactStyle, type Region, type SceneItem, type Track, type VideoDoc,
+  audioCover, audioSpans, cursorFor, handTrack, newPlan, REDACT_SOUNDS, REDACT_STYLES, setBox, setEnd, suggestNames, trackBox,
+  type AudioSpan, type Box, type RedactionCursor, type RedactKind, type RedactPlan, type RedactSound, type RedactStyle, type Region, type SceneItem, type Track, type VideoDoc,
 } from '../doc/index.ts';
 import { coverer } from '../redact';
 import { esc } from './render';
@@ -24,10 +26,15 @@ export interface ReviewHost {
   /** Where the plan is kept ("saved next to the video" or "kept in this tab"). */
   keptWhere: (e: Entry) => string;
   redact: (e: Entry) => void;
+  /** Transcribe e again with word times (its transcript has none), then reopen the review. */
+  findWords: (e: Entry) => void;
   close: () => void;
 }
 
 const STYLE_NAMES: Record<RedactStyle, string> = { blur: 'Blur', pixelate: 'Pixelate', fill: 'Solid box' };
+const SOUND_NAMES: Record<RedactSound, string> = { bleep: 'Bleep', mute: 'Silence' };
+/** Spoken matches listed until more are asked for. */
+const WORDS_LISTED = 100;
 /** Faces listed per shot (longest first) until more are asked for, a page at a time (a crowded
  *  shot has thousands). */
 const PER_SHOT = 24;
@@ -72,6 +79,17 @@ export class Review {
   private press?: { x: number; y: number; cx: number; cy: number; moved: boolean };
   private drag?: Box;
   private thumbs = new WeakMap<Entry, Map<string, string>>();
+  /** Spoken matches and spans added by hand (audioSpans), and the merged stretches covered. */
+  private spans: AudioSpan[] = [];
+  private bleeps: [number, number][] = [];
+  /** Whether the transcript has word times (matching needs them). */
+  private hasWords = false;
+  private wordsListed = WORDS_LISTED;
+  private wordsTimer?: ReturnType<typeof setTimeout>;
+  /** The preview's tone, made on first use (an AudioContext needs a click first). */
+  private tone?: { ctx: AudioContext; gain: GainNode };
+  /** Whether the preview has the player muted over a covered word now. */
+  private muting = false;
   private rvfc = 0;
   private unlisten: (() => void)[] = [];
   private resize = new ResizeObserver(() => this.layout());
@@ -114,6 +132,7 @@ export class Review {
     this.shots = doc.layers.scenes?.items.length ? doc.layers.scenes.items : [{ t0: 0, t1: doc.source.duration, f0: 0, f1: doc.source.frames - 1, score: 0 }];
     this.selected = this.hover = undefined;
     this.listed.clear();
+    this.wordsListed = WORDS_LISTED;
     this.preview = true;
     this.rebuild();
 
@@ -153,11 +172,28 @@ export class Review {
     });
     on(this.h.panel, 'click', (ev) => this.onPanel(ev.target as HTMLElement));
     on(this.h.panel, 'change', (ev) => {
-      const t = ev.target as HTMLSelectElement;
-      if (t.id !== 'rv-style') return;
-      this.plan.options.style = t.value as RedactStyle;
-      this.cover = coverer(overlay, this.plan.options.style);
-      this.changed();
+      const t = ev.target as HTMLSelectElement & HTMLInputElement;
+      const o = this.plan.options;
+      if (t.id === 'rv-style') {
+        o.style = t.value as RedactStyle;
+        this.cover = coverer(overlay, o.style);
+        this.changed();
+      } else if (t.id === 'rv-profanity') {
+        o.profanity = t.checked;
+        this.wordsChanged();
+      } else if (t.id === 'rv-sound') {
+        o.sound = t.value as RedactSound;
+        this.wordsChanged();
+      }
+    });
+    on(this.h.panel, 'input', (ev) => {
+      const t = ev.target as HTMLTextAreaElement;
+      if (t.id !== 'rv-words') return;
+      clearTimeout(this.wordsTimer);
+      this.wordsTimer = setTimeout(() => {
+        this.plan.options.words = t.value.split('\n').map((w) => w.trim()).filter(Boolean);
+        this.wordsChanged();
+      }, 400);
     });
     on(overlay, 'pointerdown', (ev) => this.onDown(ev));
     on(overlay, 'pointermove', (ev) => this.onMove(ev));
@@ -188,6 +224,8 @@ export class Review {
   close() {
     if (!this.e) return;
     const { video, overlay, bar } = this.h;
+    clearTimeout(this.wordsTimer);
+    this.sound(false);
     video.cancelVideoFrameCallback(this.rvfc);
     this.unlisten.forEach((f) => f());
     this.unlisten = [];
@@ -221,6 +259,9 @@ export class Review {
     this.frame = frame;
     this.regions = this.cursor.regions(frame);
     this.draw();
+    const v = this.h.video;
+    const t = v.currentTime;
+    this.sound(this.preview && !v.paused && this.bleeps.some(([a, b]) => t >= a && t < b));
     const range = this.h.bar.querySelector<HTMLInputElement>('input[type=range]');
     if (range && document.activeElement !== range) range.value = String(frame);
     const time = this.h.bar.querySelector('.time');
@@ -255,6 +296,30 @@ export class Review {
   private playing(on: boolean) {
     const b = this.h.bar.querySelector('.play');
     if (b) b.textContent = on ? '❚❚' : '▶';
+    if (!on) this.sound(false);
+  }
+
+  /** The preview of the audio cover: the player muted over a covered word, the tone on for bleeps.
+   *  Checked once per video frame, so edges are a frame late (the copy is exact). */
+  private sound(on: boolean) {
+    if (on === this.muting) return;
+    this.muting = on;
+    const v = this.h.video;
+    v.muted = on;
+    const bleep = on && this.plan.options.sound === 'bleep';
+    if (bleep && !this.tone) {
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = 1000;
+      gain.gain.value = 0;
+      osc.connect(gain).connect(ctx.destination);
+      osc.start();
+      this.tone = { ctx, gain };
+    }
+    if (!this.tone) return;
+    void this.tone.ctx.resume();
+    this.tone.gain.gain.setTargetAtTime(bleep ? 0.25 * v.volume : 0, this.tone.ctx.currentTime, 0.004);
   }
 
   // ---- drawing ----
@@ -424,6 +489,33 @@ export class Review {
     for (const [k, t] of all) this.shotTracks[this.shotOf(t.f0)].push(k);
     for (const ids of this.shotTracks) ids.sort((a, b) => rank(a) - rank(b) || len(b) - len(a));
     this.regions = this.cursor.regions(this.frame);
+    this.rebuildWords();
+  }
+
+  private rebuildWords() {
+    const t = this.doc.layers.transcript;
+    this.hasWords = !!t?.items.some((i) => i.words);
+    // Without word times only the spans added by hand can be covered.
+    const o = this.hasWords ? this.plan.options : { ...this.plan.options, words: [], profanity: false };
+    this.spans = audioSpans(this.doc, o, this.plan.addedAudio ?? []);
+    this.bleeps = audioCover(this.spans);
+  }
+
+  /** The word list or its settings changed: save, and redo the matches (not the whole panel,
+   *  so the word box keeps its focus). */
+  private wordsChanged() {
+    this.rebuildWords();
+    this.h.changed(this.e!);
+    this.renderMatches();
+    this.renderTitle();
+  }
+
+  private toggleWord(key: string) {
+    const keep = this.plan.options.keepWords;
+    const i = keep.indexOf(key);
+    if (i >= 0) keep.splice(i, 1);
+    else keep.push(key);
+    this.wordsChanged();
   }
 
   private changed() {
@@ -582,6 +674,32 @@ export class Review {
     const sel = this.selected !== undefined ? this.byId.get(this.selected) : undefined;
     if (act === 'done') return this.h.close();
     if (act === 'redact') return this.h.redact(this.e!);
+    if (act === 'find-words') return this.h.findWords(this.e!);
+    if (act === 'suggest') {
+      const w = el.closest<HTMLElement>('[data-word]')!.dataset.word!;
+      this.plan.options.words = [...this.plan.options.words, w];
+      const box = this.h.panel.querySelector<HTMLTextAreaElement>('#rv-words');
+      if (box) box.value = this.plan.options.words.join('\n');
+      const row = el.closest('.rv-suggest');
+      el.closest('button')?.remove();
+      if (row && !row.querySelector('button')) row.remove();
+      return this.wordsChanged();
+    }
+    if (act === 'word-keep') return this.toggleWord(el.closest<HTMLElement>('[data-key]')!.dataset.key!);
+    if (act === 'hear') {
+      const s = this.spans[Number(el.closest<HTMLElement>('[data-i]')!.dataset.i)];
+      // From a moment before, with the preview on, so the cover is heard in context.
+      this.preview = true;
+      const box = this.h.bar.querySelector<HTMLInputElement>('input[data-act=preview]');
+      if (box) box.checked = true;
+      this.h.video.currentTime = Math.max(0, s.t0 - 1);
+      void this.h.video.play();
+      return;
+    }
+    if (act === 'more-words') {
+      this.wordsListed += WORDS_LISTED * 4;
+      return this.renderMatches();
+    }
     if (act === 'keep' && sel) return this.toggleKeep(this.selected!);
     if (act === 'start' && sel) return this.replaceHand(setEnd(sel, this.frame, 'start'));
     if (act === 'end' && sel) return this.replaceHand(setEnd(sel, this.frame, 'end'));
@@ -610,6 +728,61 @@ export class Review {
     }
   }
 
+  // ---- spoken words ----
+
+  /** The word list and its settings (rendered with the panel; typing does not redraw it). */
+  private wordsForm(): string {
+    const o = this.plan.options;
+    const t = this.doc.layers.transcript;
+    if (!t) return '<p class="muted">No transcript: analyze this video with <b>Transcript</b> on to bleep spoken words.</p>';
+    if (!t.items.length) return '<p class="muted">Nobody speaks in this video, so there is nothing to bleep.</p>';
+    const listed = new Set(o.words.map((w) => w.toLowerCase()));
+    const names = suggestNames(this.doc).filter((s) => !listed.has(s.word.toLowerCase())).slice(0, 16);
+    const need = this.hasWords ? '' : `<p class="rv-warn">This transcript was made without word times, which bleeping needs. <button data-act="find-words">Transcribe again with word times</button> (about a third of the video's length; the review reopens when it is done).</p>`;
+    return `${need}
+      <label class="rv-words-label" for="rv-words">Words and phrases to bleep, one per line. Plurals, possessives, -ed and -ing count too; <code>*</code> matches any letters (<code>fuck*</code>); in "quotes", only that word.</label>
+      <textarea id="rv-words" rows="3" spellcheck="false" placeholder="Okafor&#10;Daniel Reyes">${esc(o.words.join('\n'))}</textarea>
+      ${names.length ? `<p class="rv-suggest"><span class="muted">Names in the transcript:</span> ${names.map((n) => `<button data-act="suggest" data-word="${esc(n.word)}" title="Said ${n.count} times: add it">${esc(n.word)} <span class="muted">${n.count}</span></button>`).join('')}</p>` : ''}
+      <div class="rv-actions"><label><input type="checkbox" id="rv-profanity"${o.profanity ? ' checked' : ''}> Strong language too</label>
+        <label>Sound <select id="rv-sound">${REDACT_SOUNDS.map((s) => `<option value="${s}"${s === o.sound ? ' selected' : ''}>${SOUND_NAMES[s]}</option>`).join('')}</select></label></div>`;
+  }
+
+  /** The matches: each one plays from a moment before; any can be left audible. */
+  private renderMatches() {
+    const el = this.h.panel.querySelector('.rv-matches');
+    if (!el) return;
+    const o = this.plan.options;
+    const matches = this.spans.filter((s) => !s.added);
+    const kept = matches.filter((s) => s.kept).length;
+    const secs = this.bleeps.reduce((n, [a, b]) => n + b - a, 0);
+    const verb = o.sound === 'bleep' ? 'bleeped' : 'silenced';
+    const head = !o.words.length && !o.profanity ? ''
+      : !matches.length ? `<p class="muted">None of these words is in the transcript. Names are often spelled differently there: search the transcript, or pick from the names above.</p>`
+        : `<p class="muted">${matches.length - kept} ${verb} (${secs.toFixed(1)} s)${kept ? ` · ${kept} left audible` : ''}. Word times are approximate, so a little before and after each word is covered; play one to check it.</p>`;
+    const rows = this.spans.slice(0, this.wordsListed).map((s, i) => {
+      if (s.added) return '';
+      const say = s.term === s.text || !s.term ? '' : ` <span class="muted">${esc(s.term === 'profanity' ? 'strong language' : s.term)}</span>`;
+      return `<li class="${s.kept ? 'kept' : ''}" data-i="${i}" data-key="${s.key}"><button class="ts" data-act="hear" title="Play it">${fmtT(s.t0 + o.lead)}</button> <span class="said">${esc(s.text ?? '')}</span>${say}
+        <button data-act="word-keep">${s.kept ? (o.sound === 'bleep' ? 'Bleep it' : 'Silence it') : 'Leave audible'}</button></li>`;
+    });
+    const more = this.spans.length - this.wordsListed;
+    el.innerHTML = `${head}<ol class="rv-wordlist">${rows.join('')}</ol>${more > 0 ? `<button class="more" data-act="more-words">${more} more</button>` : ''}`;
+  }
+
+  /** The heading and the summary line under it. */
+  private renderTitle() {
+    const h = this.h.panel.querySelector('.rv-head h1');
+    if (h) h.textContent = `Review ${this.what()}`;
+    const b = this.h.panel.querySelector('[data-act=redact]');
+    if (b) b.textContent = `${this.bleeps.length ? `Blur and ${this.plan.options.sound === 'bleep' ? 'bleep' : 'silence'}` : `Blur ${this.what(false)}`}…`;
+  }
+
+  private what(words = true) {
+    const vis = this.kinds().includes('plates') ? 'faces and plates' : 'faces';
+    if (!words || !this.bleeps.length) return vis;
+    return vis === 'faces' ? 'faces and spoken words' : 'faces, plates and spoken words';
+  }
+
   // ---- the face list ----
 
   private renderPanel() {
@@ -619,7 +792,7 @@ export class Review {
     const faces = this.doc.layers.faces!.items.length;
     const plates = kinds.includes('plates') ? this.doc.layers.plates!.items.length : undefined;
     const kept = p.options.keep.length + (plates === undefined ? 0 : p.options.keepPlates.length);
-    const what = plates === undefined ? 'faces' : 'faces and plates';
+    const what = this.what(false);
     const thumbs = this.thumbs.get(e)!;
     const span = (t: Track) => `${fmtT(t.f0 / this.fps)}–${fmtT((t.f1 + 1) / this.fps)}`;
     const secs = (t: Track) => {
@@ -667,7 +840,7 @@ export class Review {
         : `<b>${title(key!)}</b>, ${span(sel)} (${secs(sel)}): ${this.isKept(key!) ? 'left visible' : 'blurred'}. <span class="btns"><button data-act="show">Show</button><button data-act="keep">${this.isKept(key!) ? 'Blur it' : 'Leave visible'}</button></span>`;
     const shotsWithout = this.shots.length - withFaces.length;
     this.h.panel.innerHTML = `<div class="rv-head">
-        <h1>Review ${what}</h1>
+        <h1>Review ${this.what()}</h1>
         <p>Boxes on the video are what the copy covers${plates === undefined ? '' : ' (plates in cyan)'}. <b>Click a box</b> to leave it visible (click it again to cover it), e.g. a sign taken for a plate. <b>Drag a box</b> over anything the detector missed. Dashed boxes are held a moment before and after something is seen, for faces turning away.</p>
         <p class="muted keys">Space plays · ← → step a frame (Shift: 10) · [ ] previous / next shot · Esc deselects · Delete removes a box added by hand</p>
         <p class="muted">${faces} face${faces === 1 ? '' : 's'}${plates === undefined ? '' : ` and ${plates} plate${plates === 1 ? '' : 's'}`} found · ${kept} left visible · ${p.added.length} added by hand · ${esc(this.h.keptWhere(e))}</p>
@@ -677,8 +850,12 @@ export class Review {
           <button data-act="redact" class="primary">Blur ${what}…</button><button data-act="done">Done</button></div>
         <div class="rv-sel"${sel ? '' : ' hidden'}>${selHtml}</div>
       </div>
+      <details class="rv-audio"${this.doc.layers.transcript?.items.length ? ' open' : ''}><summary>Spoken words</summary>
+        ${this.wordsForm()}<div class="rv-matches"></div></details>
       <ol class="rv-shots">${shots || `<li class="muted">No ${what} were found. Drag a box over anything to cover it.</li>`}</ol>
       ${shotsWithout ? `<p class="muted rv-foot">${shotsWithout} shot${shotsWithout === 1 ? '' : 's'} without ${what} not listed.</p>` : ''}`;
+    this.renderMatches();
+    this.renderTitle();
     this.seen.disconnect();
     this.wanted = [];
     for (const ph of this.h.panel.querySelectorAll('.face .ph')) this.seen.observe(ph.parentElement!);

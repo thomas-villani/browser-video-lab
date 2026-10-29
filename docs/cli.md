@@ -83,13 +83,16 @@ transcript, so a caller can analyze them and search again.
 ## redact
 
 ```bash
-videodoc redact <video> [--out file.mp4] [--style blur|pixelate|fill] [--margin f] [--hold s] [--keep ids] [--keep-plates ids] [--cover faces,plates] [--no-plan] [--set ...] [--force]
+videodoc redact <video> [--out file.mp4] [--style blur|pixelate|fill] [--margin f] [--hold s] [--keep ids] [--keep-plates ids] [--cover faces,plates|none]
+                [--words list] [--words-file path] [--profanity] [--sound bleep|mute] [--lead s] [--tail s] [--keep-words keys] [--no-plan] [--set ...] [--force]
 ```
 
-Writes a copy with every face and license plate covered (H.264 MP4, audio copied) and a
-redaction log next to it (`<out>.redactions.json`). Finds faces and plates first if the doc
-lacks them (one decode; on an integrated GPU faces take about real time, slower in crowds, and
-plates up to about real time again in busy traffic).
+Writes a copy with every face and license plate covered (H.264 MP4) and the listed words
+bleeped, and a redaction log next to it (`<out>.redactions.json`). Finds faces and plates first
+if the doc lacks them (one decode; on an integrated GPU faces take about real time, slower in
+crowds, and plates up to about real time again in busy traffic), and the transcript with word
+times when words are listed (about 3x faster than real time). Without words, the audio is
+copied.
 
 - `--out`: default `<name>.redacted.mp4` next to the video; must be `.mp4` and not the input.
   The file is written as `<out>.part` and renamed when complete.
@@ -100,13 +103,25 @@ plates up to about real time again in busy traffic).
 - `--keep 3,7`: face track ids to leave visible (ids are in the log, the doc and the app).
 - `--keep-plates 2`: plate track ids to leave visible (a sign taken for a plate). Ids are per
   layer: face 2 and plate 2 are different tracks.
-- `--cover faces`: cover faces only (default `faces,plates`).
+- `--cover faces`: cover faces only (default `faces,plates`); `--cover none` copies the video
+  and only bleeps words.
+- `--words "Ackover,Daniel Reyes"`: words and phrases to bleep. Plain words also match plurals,
+  possessives, -ed and -ing; `*` is a wildcard (`fuck*`); `"quoted"` matches only that word.
+  Spell names as the transcript does (`videodoc markdown` shows it).
+- `--words-file names.txt`: one word or phrase per line (`#` comments), added to `--words`.
+- `--profanity`: also bleep the built-in strong-language list.
+- `--sound mute`: silence instead of a 1 kHz tone.
+- `--lead 0.4 --tail 0.2` (defaults): seconds covered before and after each word (Whisper's word
+  times run late).
+- `--keep-words 41.3`: matches to leave audible, by word key from the log.
 - A review saved by the app (`<video>.redact.json`) is used when present; options given here
   override it, `--no-plan` ignores it.
 
 stdout includes the output and log paths, the settings used, totals (tracks, kept, added by
-hand, plate tracks, frames with regions, regions, most per frame), and a caveat: detection
-misses some faces and plates, so watch the output before release. See [redaction](redaction.md).
+hand, plate tracks, frames with regions, regions, most per frame), `audio` totals when words were
+bleeped (matches, kept, added, seconds), and a caveat: detection and transcription miss some
+faces, plates and words, so watch and listen to the output before release. stderr lists the
+first matches with their times. See [redaction](redaction.md).
 
 ## info
 
@@ -162,6 +177,9 @@ videodoc markdown street.mp4 --layers faces
 
 # A redacted copy with solid boxes, leaving the speaker (track 12) visible
 videodoc redact hearing.mp4 --style fill --keep 12 --out hearing.public.mp4
+
+# Bleep two names and strong language, leaving the picture as it is
+videodoc redact interview.mp4 --cover none --words "Ackover,Daniel Reyes" --profanity
 
 # What would be computed?
 videodoc analyze talk.mp4 --layers faces --dry-run

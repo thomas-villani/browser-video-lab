@@ -238,19 +238,22 @@ loaded. Reading and searching work without WebGPU.
    2026-10-28: a `plates` layer (YOLOv9-t from open-image-models, chosen over OpenCV's
    LPD-YuNet, NOTES.md), computed in the same decode as faces (`multiStream`: several detector
    heads, each with its own adaptive sampling), linked by predicted motion; redaction and the
-   review cover both. Next: audio redaction. 8.1% of faces are still missed against human
-   labels, and some plates, so a person must check the result.
+   review cover both. ~~Audio redaction~~ built 2026-10-28: the transcript stores word times
+   (`whisper-base_timestamped`, cross-attention alignment; `transcript.words`), `src/doc/words.ts`
+   matches words and phrases (inflections, `*` wildcards, "exact" quotes, an opt-in
+   strong-language list) and suggests the transcript's recurring names; matches are covered
+   from `lead` before to `tail` after (word starts run late, NOTES.md) with a 1 kHz bleep or
+   silence, crossfaded, in the same Conversion as the video (`cover: []` copies the video).
+   Settings live in the review plan (`words`, `profanity`, `sound`, `lead`, `tail`,
+   `keepWords`, `addedAudio`); the log lists every match. The app's review has a Spoken words
+   section (word list, suggestions, matches to play or leave audible, a live preview that mutes
+   the player and plays the tone). 8.1% of faces are still missed against human labels, some
+   plates, and misspelled names, so a person must check the result.
 
-   Audio redaction (sketch, 2026-10-28): bleep or mute words using word-level timestamps, from
-   lists the user configures: names (suggested from the transcript's recurring proper nouns),
-   an opt-in profanity list for platforms like YouTube, and their own words and phrases
-   (stem-aware, with wildcards). Settings live in the same review plan (`<video>.redact.json`:
-   `audio: { lists, words, mode: bleep | mute, pad }`, plus spans added or removed by hand);
-   the app highlights matches in the reading view, where a click toggles one. The log lists
-   every covered span with its word. Audio-only redaction re-encodes the audio and copies the
-   video. To verify first: word timestamps from transformers.js Whisper (cross-attention
-   alignment), and whether Whisper writes profanity faithfully or softens it (it already drops
-   most "um"s); ASR misses mean a person still listens before release.
+   Not yet: matching names by sound (Whisper wrote "Okafor" as "Ackover"; today a person picks
+   the transcript's spelling), drawing audio spans by hand in the app (`addedAudio` is in the
+   plan and the CLI honors it), highlighting matches in the reading view, audio-only review in
+   the app (the review needs faces), audio-only input files.
 7. Captions with a small VLM, pulled in where they visibly improve search or the Markdown view.
    Together with **on-screen text (OCR)**: slides, screen recordings, whiteboards, documents
    held up to a camera. Plan in NOTES.md ("On-screen text: plan", 2026-10-28): a text detector

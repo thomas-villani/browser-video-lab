@@ -32,6 +32,7 @@ const { values: a } = parseArgs({
     lang: { type: 'string', default: 'en' },
     mingap: { type: 'string', default: '2' },
     vad: { type: 'string', default: '1' },
+    words: { type: 'string', default: '0' },
     browser: { type: 'string', default: 'msedge' },
     headed: { type: 'boolean', default: false },
     'no-build': { type: 'boolean', default: false },
@@ -48,9 +49,9 @@ const rows = [];
 await withBrowser({ build: !a['no-build'], browser: a.browser, headed: a.headed }, async (open) => {
   for (const model of list(a.model))
     for (const device of list(a.device)) {
-      const name = `${model.split('/').pop()}-${a.encoder}-${a.decoder}-${device}${a.vad === '0' ? '-novad' : ''}${a.seconds !== '0' ? `-${a.seconds}s` : ''}`;
+      const name = `${model.split('/').pop()}-${a.encoder}-${a.decoder}-${device}${a.vad === '0' ? '-novad' : ''}${a.words === '1' ? '-words' : ''}${a.seconds !== '0' ? `-${a.seconds}s` : ''}`;
       console.error(`running ${clip} ${name}...`);
-      const params = { video: a.video, model, encoder: a.encoder, decoder: a.decoder, device, seconds: a.seconds, lang: a.lang, mingap: a.mingap, vad: a.vad };
+      const params = { video: a.video, model, encoder: a.encoder, decoder: a.decoder, device, seconds: a.seconds, lang: a.lang, mingap: a.mingap, vad: a.vad, words: a.words };
       const { result, page } = await open('/transcribe.html', params, { timeoutMs: 60 * 60_000 });
       await page.close();
       result.name = name;

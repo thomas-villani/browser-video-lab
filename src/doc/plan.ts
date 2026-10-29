@@ -40,9 +40,10 @@ export const PRODUCERS: Record<LayerName, ProducerSpec> = {
     needs: ['speech'],
     pass: 'audio',
     description: 'Timed transcript (Whisper via transformers.js), speech spans only.',
-    defaults: { model: 'onnx-community/whisper-base', encoder: 'fp32', decoder: 'q4', language: 'en', device: 'webgpu' },
+    defaults: { model: 'onnx-community/whisper-base_timestamped', encoder: 'fp32', decoder: 'q4', language: 'en', device: 'webgpu', words: true },
     help: {
-      model: 'Whisper repo id under public/models (whisper-base ~5x real time, whisper-small ~2x, fewer errors)',
+      model: 'Whisper repo id under public/models (whisper-base ~4x real time, whisper-small ~1.5x, fewer errors; words need a _timestamped export)',
+      words: 'word timestamps (audio redaction needs them; about a third slower)',
       encoder: 'encoder ONNX dtype',
       decoder: 'decoder ONNX dtype',
       language: 'spoken language code',
