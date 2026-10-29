@@ -752,3 +752,25 @@ every target word 100% toned, 7.48 s toned in all; audio pass 0.8 s (video copie
 17:35, faces + 4 names + profanity: 10 matches, 9.88 s; tone runs in the output equal the
 log's merged spans to the 10 ms frame; 31,661 frames in 467 s (68 fps, with the audio rewrite);
 audio and video lengths unchanged (1055.42 / 1055.37 s).
+
+## Browser test suite (2026-10-28)
+
+Iris Xe, Edge headless, AC, "Best performance" overlay. `npm run test:browser`: 9 tests in
+3 min 34 s (analysis 80 s, app 65 s, redaction 60 s, plus builds and browser starts).
+
+- **Results repeat exactly** on one machine: three runs gave identical counts (tracks, face-frames,
+  cuts, keyframes, words, word times), so the baseline pins them with tolerances (5% tracks, 3%
+  face-frames, 3 words) and hashes each layer to report any change at all.
+- **Pinned on the fixtures:** TTS 118/138 words matched, word-start error median +0.176 s, 114
+  words covered whole by lead 0.4 / tail 0.2 (the full-clip measurement above: 110/117 with a
+  stricter alignment); walk-crowd 635 face tracks, 4,102 face-frames in 300 frames, 2 cuts;
+  dashcam 41 plate tracks, 278 plate-frames; rickroll 6 cuts, 21 face tracks; bleeping 6 matches,
+  6.5 s, tone in >95% of every span's 10 ms frames and none outside.
+- **Faces left after blurring** (walk-crowd, YuNet on the blurred copy): 189 face-frames of 4,102
+  (4.6%). Cropped samples were all blurred faces: the detector still fires on a blurred head
+  (head shape, hair, skin tone), and boxes off the source's (82 face-frames) were the same blurred
+  faces with a shifted or larger box, not faces the source pass missed. So re-detecting on the
+  output is a regression guard, not a way to find missed faces.
+- **The suite found a bug on its first run:** a search hit's `at` was its transcript segment's
+  start (0.25 s for "Daniel Reyes", said at 4.48 s), though the docs said "where the first matched
+  word is said". With word times it is now half a second before the word (4.08 s).

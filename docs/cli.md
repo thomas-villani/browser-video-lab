@@ -77,7 +77,7 @@ video collapse to the best one; passages with the words in order rank higher.
  "notAnalyzed": [], "searched": 7, "ms": 22}
 ```
 
-`at` is where the first matched word is said (seek there); `notAnalyzed` lists videos without a
+`at` is where to seek to hear the first matched word (half a second before it is said); `notAnalyzed` lists videos without a
 transcript, so a caller can analyze them and search again.
 
 ## redact

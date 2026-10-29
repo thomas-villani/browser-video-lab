@@ -106,6 +106,36 @@ npm run eval:track -- --dump results/<clip>-<name>.dets.json --cuts results/<cli
 npm test   # tracker unit tests (node:test)
 ```
 
+## Tests
+
+| Command | What | Time |
+|---|---|---|
+| `npm test` | Pure TS: doc, planner, tracking, search, word matching, redaction regions and log, CLI and MCP plumbing (`tests/*.test.ts`) | seconds |
+| `npm run test:browser` | Headless Edge with WebGPU on the fixtures (`tests/browser/`): every layer, redaction, keyframe images, the app | ~4 min |
+
+The browser tests need the models (`videodoc check`), ffmpeg, and the fixtures:
+`tests/fixtures/tts-words.mp4` is synthetic speech (Windows TTS, with each word's true start in
+`tts-words.tsv`; `tts.ps1` says how it was made) and committed; the others are 10-12 s cuts of the
+measured footage, made by `npm run fixtures` into `tests/fixtures/local/` (gitignored; tests on a
+missing fixture are skipped and say so).
+
+- `analyze.test.ts`: speech and transcript against the TTS ground truth (words matched, word-start
+  error, words a bleep covers whole); scenes, faces, plates, keyframes on a crowd, traffic and a
+  music video (scenes tile the video, tracks stay in the frame, a re-run is cached).
+- `redact.test.ts`: a blurred copy has the source's frames and length and few faces left to
+  detect; bleeps carry a 1 kHz tone over every logged span and nowhere else, with the video
+  stream copied byte for byte; keyframe JPEGs are linked from the Markdown.
+- `app.test.ts`: add, analyze, read, search and seek from a hit; review a crowd and download the
+  copy and its log; no page errors.
+
+Figures (counts, word timing, faces left after blurring) are pinned in
+`tests/browser/baseline.json` with tolerances; on one machine they repeat exactly, so each layer's
+output is also hashed and a changed hash is reported (not failed). A figure outside its tolerance
+fails with the baseline value; when the change is intended (a better model, new defaults), run
+`UPDATE_BASELINE=1 npm run test:browser` and commit `baseline.json` with the change. Speeds are
+reported against the baseline, never failed (power mode and load move them). Run the browser tests
+before and after upgrading onnxruntime-web, transformers.js or mediabunny.
+
 ## Repository layout
 
 - `app.html` + `src/app/` — the app (`library.ts`: folders and files, docs, keyframes and reviews on disk; `render.ts`: Markdown to HTML; `review.ts`: face review over the player; `main.ts`: UI)

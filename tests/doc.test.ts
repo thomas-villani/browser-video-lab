@@ -180,6 +180,10 @@ test('search: BM25 over overlapping windows, phrase bonus, no overlapping hits, 
   assert.deepEqual(hits[0].matched.sort(), ['budget', 'school']);
   assert.equal(hits[0].i0, 1);
   assert.equal(hits[0].at, 5);
+  // With word times, `at` is half a second before the first matched word.
+  const w = said([[0, 10, 'Then the school budget.']]);
+  w.layers.transcript!.items[0].words = [[0.2, 0.5, 'Then'], [0.6, 0.8, 'the'], [6.3, 6.8, 'school'], [6.9, 7.4, 'budget.']];
+  assert.equal(search([w], 'budget')[0].at, 6.4);
   // Words in query order score higher than the same words apart.
   const [ordered, apart] = search([said([[0, 3, 'school budget'], [30, 33, 'budget for the school']])], 'school budget', { window: 5 });
   assert.ok(ordered.t0 === 0 && ordered.score > apart.score);

@@ -19,3 +19,7 @@ public/label/*
 *.keyframes/
 *.redact.json
 *.redactions.json
+
+# Browser test fixtures cut from public/media (scripts/fixtures.mjs)
+tests/fixtures/local/
+!tests/fixtures/*.mp4

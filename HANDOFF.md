@@ -166,10 +166,25 @@ benchmarks and evaluation tools that used to fill the README). Keep it current w
   command that wants `transcript` (markdown, search-prep, the app's analysis) transcribes again.
 - Trap: the preview server serves `dist/`: with `--no-build`, new files in `public/` are missing.
 
+## Done: browser test suite (2026-10-28)
+
+- `npm run test:browser` (`tests/browser/`, `--test-concurrency=1`): analysis, redaction and app
+  tests in headless Edge, ~4 min; `npm test` now runs only `tests/*.test.ts` (pure TS).
+- Fixtures: `tests/fixtures/tts-words.mp4` (+ `.tsv` ground truth, `.txt` script, `tts.ps1`)
+  committed; `npm run fixtures` (`scripts/fixtures.mjs`) cuts walk-crowd, dashcam-plates,
+  rickroll-cuts from `public/media` into `tests/fixtures/local/` (gitignored).
+- `tests/browser/baseline.json`: pinned figures and layer hashes; `UPDATE_BASELINE=1` rewrites.
+  `near()` fails outside tolerance, `identical()` reports changed output, `speed()` reports only.
+- Search hits' `at` now uses word times (half a second before the word); found by the app test.
+- Trap: the browser tests copy fixtures to a fresh temp folder each run, so nothing is cached;
+  docs next to fixtures are never read.
+
 ## Next
 
 Pluggable models and a pipeline builder in the app (DESIGN.md step 9, user direction
-2026-10-28). Audio follow-ups (DESIGN.md step 6): sound-alike name matching, drawing audio
+2026-10-28); run `npm run test:browser` before and after (it reworks how models load).
+Test suite follow-ups (DESIGN.md step 8): an accuracy tier on the full labeled footage, the MCP
+server over a real browser. Audio follow-ups (DESIGN.md step 6): sound-alike name matching, drawing audio
 spans in the app, highlights in the reading view, audio-only review. Lead application (decided 2026-10-27) stays search
 and read. Smaller follow-ups for the app: hosted build with a model registry, analysis in a
 worker, persistence for dropped files. Ideas noted in DESIGN.md (not scheduled): audio-only

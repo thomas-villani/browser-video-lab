@@ -74,8 +74,8 @@ stemmed words, stopwords dropped; passages with the query's words in order score
 | `gap` | 2 | hits in one video closer than this (seconds) count as overlapping; the best is kept |
 | `k1`, `b` | 1.2, 0.75 | BM25 parameters |
 
-A `SearchHit` has `doc` (index into `docs`), `t0`/`t1` (the passage), `at` (where the first
-matched word is said: seek there), `score`, `matched` (stems), `snippet` (matches in `**bold**`),
+A `SearchHit` has `doc` (index into `docs`), `t0`/`t1` (the passage), `at` (where to seek to hear the
+first matched word: half a second before it, or its segment's start without word times), `score`, `matched` (stems), `snippet` (matches in `**bold**`),
 `keyframe` (index of the nearest keyframe) and `i0`/`i1` (transcript items spanned). Helpers:
 `terms(text)`, `stem(word)`, `highlight(text, stems)`.
 

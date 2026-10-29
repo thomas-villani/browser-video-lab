@@ -267,8 +267,12 @@ loaded. Reading and searching work without WebGPU.
    for scenes without speech (bodycam stretches, b-roll, silent tutorials), where the
    transcript says nothing; caption those first.
 8. Worker-by-default runtime, single shared GPU device (detector + Whisper), packaging/publishing.
-   **Test suite first** (user direction, 2026-10-28: catch breakage as features land and
-   dependencies change). Today `npm test` covers the pure TS (doc, planner, tracking, matching)
+   ~~**Test suite first**~~ (user direction, 2026-10-28: catch breakage as features land and
+   dependencies change). Built 2026-10-28: `npm run test:browser` (`tests/browser/`, docs/lab.md
+   "Tests"), fixtures cut from the footage plus a committed TTS clip with true word times,
+   figures pinned in `baseline.json`. Not yet: an accuracy tier on the full labeled footage (face
+   recall against the hand labels, transcript WER against captions), the MCP server driving a
+   real browser, CI (needs a GPU runner or a wasm fallback). The original plan: Today `npm test` covers the pure TS (doc, planner, tracking, matching)
    and the CLI/MCP plumbing; nothing checks the browser half (decode, WebGPU models, encode,
    the app) or accuracy. Needed: browser tests in headless Edge on small fixtures (every layer
    computes, outputs are plausible, redaction round-trips, the app's main flows), and a

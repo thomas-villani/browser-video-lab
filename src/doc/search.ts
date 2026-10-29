@@ -54,6 +54,9 @@ export function passages(items: TranscriptItem[], doc: number, window: number): 
   return out;
 }
 
+/** Seconds before a matched word's time that a hit's `at` points to. */
+const AT_LEAD = 0.5;
+
 export interface SearchOptions {
   top?: number;
   /** Passage length, seconds. */
@@ -66,8 +69,8 @@ export interface SearchOptions {
 
 export interface SearchHit extends Passage {
   score: number;
-  /** Start of the first transcript item in the passage that contains a matched term: where to
-   *  seek to hear it (the passage may start a sentence or two earlier). */
+  /** Where to seek to hear the first matched word: half a second before it is said (word times
+   *  run late), or the start of its transcript item when the transcript has no word times. */
   at: number;
   /** Query terms found in the passage (stemmed). */
   matched: string[];
@@ -130,7 +133,9 @@ export function search(docs: VideoDoc[], query: string, o: SearchOptions = {}): 
     const keyframe = nearestKeyframe(docs[s.p.doc].layers.keyframes?.items, s.p.t0, s.p.t1);
     const matched = new Set(s.matched);
     const first = items[s.p.doc].slice(s.p.i0, s.p.i1 + 1).find((x) => terms(x.text).some((w) => matched.has(w)));
-    hits.push({ ...s.p, score: Math.round(s.score * 1000) / 1000, at: first?.t0 ?? s.p.t0, matched: s.matched, snippet: highlight(s.p.text, new Set(s.matched)), ...(keyframe !== undefined && { keyframe }) });
+    const word = first?.words?.find((w) => terms(w[2]).some((x) => matched.has(x)));
+    const at = word ? Math.max(first!.t0, Math.round((word[0] - AT_LEAD) * 100) / 100) : (first?.t0 ?? s.p.t0);
+    hits.push({ ...s.p, score: Math.round(s.score * 1000) / 1000, at, matched: s.matched, snippet: highlight(s.p.text, new Set(s.matched)), ...(keyframe !== undefined && { keyframe }) });
   }
   return hits;
 }

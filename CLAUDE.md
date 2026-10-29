@@ -4,7 +4,9 @@ Browser-only video understanding runtime; the library is **videodoc** (analyze o
 `<video>.videodoc.json`, query many times). Start with **HANDOFF.md** (current state, next
 step, traps), then NOTES.md (measurements, checklist) and DESIGN.md (design, roadmap).
 
-- Test: `npm test` · types: `npm run typecheck` · CLI: `npm run videodoc -- check|analyze|info|layers`
+- Test: `npm test` (pure TS, seconds) · `npm run test:browser` (headless Edge on fixtures, ~4 min;
+  `npm run fixtures` first; `UPDATE_BASELINE=1` to accept intended changes) · types: `npm run typecheck`
+  · CLI: `npm run videodoc -- check|analyze|info|layers`
 - Python only via `uv run ...`.
 - Node runs `.ts` directly: Node-loaded code (`src/doc`, `src/track`, `cli`, `scripts/*.ts`,
   `tests`) imports with `.ts` extensions and uses only erasable TS syntax.
