@@ -220,8 +220,12 @@ loaded. Reading and searching work without WebGPU.
 4. **Search across a collection**, transcript-first: ~~a folder of videos and their docs, keyword
    (BM25) ranking over transcripts, hits resolved to time ranges and keyframes; CLI command and
    MCP tool; `analyze <folder>`; `markdown --from/--to` to read around a hit~~ (built
-   2026-10-27: `src/doc/search.ts`). Next: fuzzy matching for ASR errors, then embeddings
-   (text, then image) and hybrid ranking.
+   2026-10-27: `src/doc/search.ts`). Next (after step 9): fuzzy matching for ASR errors with
+   Double Metaphone sound keys, indexed as a second, lower-weighted BM25 field so exact
+   spellings rank first, and offered for names and rare words only (short words collide);
+   then embeddings (text, then image) and hybrid ranking, fusing BM25 and vector ranks
+   (reciprocal rank fusion) rather than scores. Keyword stays the backbone: in the user's
+   experiments keyword beat vector alone, and only hybrid beat keyword.
 5. **Demo web app: read and search**, statically hosted: ~~drop in videos, watch layers fill in,
    read the Markdown view, search across them. Nothing leaves the machine.~~ Built 2026-10-27
    (`app.html`, `src/app/`, `videodoc ui`). Not yet: hosted build with a model registry (models
@@ -251,14 +255,26 @@ loaded. Reading and searching work without WebGPU.
    plates, and misspelled names, so a person must check the result.
 
    Not yet: matching names by sound (Whisper wrote "Okafor" as "Ackover"; today a person picks
-   the transcript's spelling), drawing audio spans by hand in the app (`addedAudio` is in the
+   the transcript's spelling; Double Metaphone keys shared with search, step 4, with every
+   sound-alike match listed for review; a phoneme recognizer such as wav2vec2-espeak only if
+   real footage shows names garbled beyond what sound keys catch), drawing audio spans by hand in the app (`addedAudio` is in the
    plan and the CLI honors it), highlighting matches in the reading view, audio-only review in
    the app (the review needs faces), audio-only input files.
 7. Captions with a small VLM, pulled in where they visibly improve search or the Markdown view.
    Together with **on-screen text (OCR)**: slides, screen recordings, whiteboards, documents
    held up to a camera. Plan in NOTES.md ("On-screen text: plan", 2026-10-28): a text detector
-   on every keyframe screens, recognition runs only where it found text.
+   on every keyframe screens, recognition runs only where it found text. Captions matter most
+   for scenes without speech (bodycam stretches, b-roll, silent tutorials), where the
+   transcript says nothing; caption those first.
 8. Worker-by-default runtime, single shared GPU device (detector + Whisper), packaging/publishing.
+   **Test suite first** (user direction, 2026-10-28: catch breakage as features land and
+   dependencies change). Today `npm test` covers the pure TS (doc, planner, tracking, matching)
+   and the CLI/MCP plumbing; nothing checks the browser half (decode, WebGPU models, encode,
+   the app) or accuracy. Needed: browser tests in headless Edge on small fixtures (every layer
+   computes, outputs are plausible, redaction round-trips, the app's main flows), and a
+   regression suite with pinned metrics and tolerances on the measured footage (face recall
+   against the hand labels, transcript accuracy, word-time error, cut accuracy, speed), so an
+   onnxruntime-web, transformers.js or mediabunny upgrade that shifts results shows up.
 9. **Pluggable models and pipelines** (user direction, 2026-10-28). Library: let people plug in
    their own models without forking. A frame layer is already a `ModelSpec` (input geometry,
    normalization, a `decode` to boxes) plus tracking settings, and `multiStream` runs any
@@ -272,22 +288,73 @@ loaded. Reading and searching work without WebGPU.
    passes they share, the time estimate, save it as a preset, run it on many videos), built on
    the planner (`plan()` already resolves dependencies and passes) rather than a free-form
    graph editor. Presets double as CLI/MCP input (`--pipeline preset.json`).
+10. **Speakers** (diarization): segmentation (pyannote segmentation-3.0, ONNX) + speaker
+    embeddings (WeSpeaker / ECAPA class) + clustering, speakers assigned per word from the word
+    times. Diarization errs (overlap, short turns, noisy bodycam audio, the wearer's voice
+    sounding unlike everyone else's; one person split in two is the common failure), so design
+    for correction: speakers are cluster ids, names a separate user-edited map that survives
+    re-analysis; merge, split from a point, reassign a turn, saved like the review plan. Each
+    speaker keeps a voice embedding, so naming someone once suggests that name for matching
+    voices in other videos (suggest, never apply silently). Uses: speaker labels in the
+    transcript, Markdown and caption exports, search filtered by speaker, redaction of
+    everything one person says (bleep or voice disguise). A good first test of step 9's
+    registry: two models and a new layer.
+11. **Sound events and tone**: an audio tagger (YAMNet / AST / CLAP class) for gunshots, sirens,
+    shouting, breaking glass, dogs, alarms, music, applause, as a time-indexed layer that search
+    and Markdown show; CLAP-style audio-text embeddings also allow describing a sound in a
+    query. Speech emotion only if cheap and honest: small models exist (wav2vec2 / emotion2vec
+    class), but categorical emotions trained on acted speech generalize poorly; arousal
+    (raised voices, agitation) is more robust and is what bodycam viewers want. Measure on
+    real footage before showing a label.
+12. **Visual search**: CLIP-class image-text embeddings (MobileCLIP / SigLIP-class, fast in
+    the browser) on keyframes and sampled frames, joining step 4's hybrid ranking ("red truck",
+    "handcuffs", "whiteboard diagram"). Storage in the embeddings sidecar.
+13. **Translation**: Whisper's translate task (to English) or a small MT model for other
+    targets, stored beside the original transcript with the same times; search either.
+14. **Editing in the app**, so people do not bounce to another editor: trim, cut, split and
+    join clips, export a clip around a search hit (redacted or not). Transcript-driven editing:
+    delete words or sentences in the transcript and the video is cut there (word times exist),
+    with fillers ("um", "uh", false starts) and long pauses highlighted to remove (needs a
+    pass that keeps disfluencies; Whisper drops most "um"s). Cuts are an edit list over the
+    source (non-destructive), exported as EDL/FCPXML or rendered: stream copy between
+    keyframes, re-encoding only the GOPs at each cut (mediabunny), so a render stays fast.
+    Auto-clipping for social media: candidate clips from long videos (a topic in the
+    transcript, a sound event, a search hit, step 16's narration), cropped to vertical with the
+    speaker kept in frame (face tracks exist), burned-in captions from the word times.
+15. **Incidents with several cameras**: group the bodycam and dashcam videos of one event, align
+    them by audio cross-correlation (they share sirens, voices, radio), play and search them on
+    one timeline, redact and export together.
+16. **Narration**: a small LLM (sub-2B, WebGPU via transformers.js or WebLLM) reads a region's
+    transcript, captions, sound events and speakers and writes a summary, a title and labels
+    (classification against a user's list) for clips, scenes or the whole video: chapters for
+    YouTube descriptions, "what happens here" for long silent stretches. Measure faithfulness
+    against hand summaries; agents over MCP already do this with bigger models, so it is for
+    people without one.
+
+Use cases beyond creators worth designing for (2026-10-28): journalists and open-source
+investigators (verify footage, who said what across many clips), researchers coding
+interviews and focus groups (speakers + search + labels), teachers clipping lectures, family
+archives (visual search), meeting and community-stream recordings, accessibility captions with
+speakers and sound events.
 
 Ideas for later applications (2026-10-27, not scheduled):
 
 - **Audio files** (lectures, podcasts, voice memos): the audio pass (VAD, Whisper), transcript,
   Markdown and search already work without frames; needs audio-only input in `analyze()`
   (no frames pass, no keyframes) and a player without video in the app.
-- **Transcript-driven editing** for podcasts and YouTube videos: highlight fillers ("um", "uh",
-  false starts) and long pauses in the reading view, follow along, mark cuts, export an edit
-  list (EDL/FCPXML) or render the cut. Needs word-level timestamps (Whisper can give them) and
-  a prompt or post-pass that keeps disfluencies (Whisper drops most "um"s by default).
 
 **Lead application (decided 2026-10-27): search and read your videos privately.** It is more
 generally useful than redaction and shows every core claim: browser-only and private, analyze
 once / query many, agent-first, transcript-first. Redaction follows as the privacy showcase.
 Test footage should match the targets (meetings, interviews, bodycam-like first-person video:
 several speakers, long silent stretches), not only the briefing / music video / street walk.
+
+**Audience (user direction, 2026-10-28): creators, not institutions.** Prosecutors and
+agencies have storage and compliance requirements that rule out a homebrew tool. The likely
+users are YouTube, Instagram and TikTok creators who do not want another subscription:
+bodycam and dashcam channels (several videos per incident, faces, plates and names to redact,
+gunshots and sirens to find), video podcasts and tutorial channels (has this been covered
+before, and how; clips for shorts), and anyone who edits from the transcript.
 
 ## Open questions
 
