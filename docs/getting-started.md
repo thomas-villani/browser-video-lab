@@ -27,6 +27,8 @@ npm install            # also copies ONNX Runtime's wasm files into public/ort
 |---|---|---|---|
 | `public/models/silero_vad.onnx` | speech detection | github.com/snakers4/silero-vad (`src/silero_vad/data/silero_vad.onnx`) | MIT |
 | `public/models/onnx-community/whisper-base_timestamped/` | transcript, with word times | `node scripts/fetch-model.mjs onnx-community/whisper-base_timestamped encoder_model decoder_model_merged_q4` | Apache-2.0 (OpenAI Whisper: MIT) |
+| `public/models/onnx-community/pyannote-segmentation-3.0/` | speakers (who speaks when) | `node scripts/fetch-model.mjs onnx-community/pyannote-segmentation-3.0 model` | MIT (pyannote) |
+| `public/models/onnx-community/wespeaker-voxceleb-resnet34-LM/` | speakers (voices) | `node scripts/fetch-model.mjs onnx-community/wespeaker-voxceleb-resnet34-LM model` | CC BY 4.0 (WeSpeaker, trained on VoxCeleb) |
 | `public/models/yunet_face_dyn.onnx` | faces | huggingface.co/opencv/face_detection_yunet (`face_detection_yunet_2023mar.onnx`), then the step below | MIT |
 | `public/models/yolo_plate_t640.onnx` | license plates (redaction) | `curl -L -o public/models/yolo_plate_t640.onnx https://github.com/ankandrew/open-image-models/releases/download/assets/yolo-v9-t-640-license-plates-end2end.onnx` | MIT (open-image-models; trained with the GPL-3.0 YOLOv9 code, training data not documented) |
 

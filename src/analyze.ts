@@ -5,10 +5,12 @@
 import { CanvasSink } from 'mediabunny';
 import {
   deriveLayers, fingerprint, mergeOverrides, newDoc, pipelineContext, plan, VERSION, withLayers, linkTracks, DEFAULT_TRACKS,
-  type Box, type DocLayers, type Layer, type Layers, type Overrides, type Pipeline, type PlannedLayer, type PlannedModel, type SpeechItem, type TranscriptItem, type VideoDoc, type Word,
+  type Box, type DocLayers, type Layer, type Layers, type Overrides, type Pipeline, type PlannedLayer, type PlannedModel, type SpeakerItem, type SpeechItem, type TranscriptItem, type VideoDoc, type Word,
 } from './doc/index.ts';
 import { modelSpec, specFor, type ModelSpec } from './models';
 import { decodeAudio } from './runtime/audio';
+import { diarize } from './audio/diarize.ts';
+import { Diarizer } from './runtime/diarize';
 import { Detector } from './runtime/detector';
 import { sceneStream } from './runtime/scenes';
 import { openInput, probe, VideoSource, type MediaInput, type Probe } from './runtime/source';
@@ -50,6 +52,8 @@ function specOf(m: PlannedModel): ModelSpec {
   }
 }
 
+const SPEAKER_MODELS = 'pyannote segmentation-3.0 + wespeaker-voxceleb-resnet34-LM';
+
 /** Compute every layer of `planned` with status 'compute'. Cached ones only supply configs. */
 export async function computeLayers(input: MediaInput, planned: PlannedLayer[], opts: ComputeOptions = {}): Promise<Computed> {
   const { onProgress, signal } = opts;
@@ -72,12 +76,14 @@ export async function computeLayers(input: MediaInput, planned: PlannedLayer[], 
     };
   };
 
-  if ((want.has('speech') || want.has('transcript')) && !info.audio) {
+  const audioLayers = ['speech', 'transcript', 'speakers'].filter((n) => want.has(n));
+  if (audioLayers.length && !info.audio) {
     // No audio track (screen recordings, muted exports): nothing is said, so both layers are empty.
     const all: [number, number][] = [[0, info.duration]];
     if (want.has('speech')) layers.speech = layer('speech', [], 0, 'wasm', all, 'silero_vad v5');
     if (want.has('transcript')) layers.transcript = layer('transcript', [], 0, want.get('transcript')!.config.device as 'webgpu' | 'wasm', all, want.get('transcript')!.config.model as string);
-  } else if (want.has('speech') || want.has('transcript')) {
+    if (want.has('speakers')) layers.speakers = layer('speakers', [], 0, want.get('speakers')!.config.device as 'webgpu' | 'wasm', all, SPEAKER_MODELS);
+  } else if (audioLayers.length) {
     const t0 = performance.now();
     const step = (stage: string, done = 0, total = 1) => onProgress?.({ pass: 'audio', stage, done, total });
     step('decoding audio');
@@ -113,6 +119,26 @@ export async function computeLayers(input: MediaInput, planned: PlannedLayer[], 
       }
       const items: TranscriptItem[] = segs.map((s) => ({ t0: s.start, t1: s.end, text: s.text, ...(s.words && { words: s.words.map((w): Word => [w.start, w.end, w.text]) }) }));
       layers.transcript = layer('transcript', items, performance.now() - ta, c.device, [span], c.model);
+    }
+    signal?.throwIfAborted();
+    if (want.has('speakers')) {
+      if (!speech) throw new Error('speakers needs the speech layer');
+      const ts = performance.now();
+      const c = want.get('speakers')!.config as { segmentation: string; embedding: string; step: number; threshold: number; minClusterSize: number; maxSpeakers: number; device: 'webgpu' | 'wasm' };
+      let items: SpeakerItem[] = [];
+      if (speech.length) {
+        step('loading speaker models');
+        const d = await Diarizer.create(c);
+        const run = await d.run(pcm, speech, c.step, (i, n) => step('finding speakers', i, n), signal);
+        console.log(`speakers: ${JSON.stringify({ ...run.stats, segMs: Math.round(run.stats.segMs), embMs: Math.round(run.stats.embMs) })}`);
+        const r3 = (v: number) => Math.round((v + pcm.t0) * 1000) / 1000;
+        items = diarize(run.windows, run.embeddings, c).map((s) => ({
+          id: s.id,
+          turns: s.turns.map(([a, b]): [number, number] => [r3(a), r3(b)]),
+          voice: [...s.voice].map((v) => Math.round(v * 10000) / 10000),
+        }));
+      }
+      layers.speakers = layer('speakers', items, performance.now() - ts, c.device, [span], SPEAKER_MODELS);
     }
   }
 

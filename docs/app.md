@@ -25,7 +25,7 @@ queued video off the queue, or stops the running job within a few seconds; nothi
 kept (a cancelled blurred copy is not saved, and a file created for it is removed).
 
 **What to analyze** (top right) chooses the layers for new analyses: speech, shots and keyframes
-always; the transcript (on by default; needed for search); faces (off by default; about doubles
+always; the transcript (on by default; needed for search); who speaks (speakers, off by default; about a tenth of the video's length more; paragraphs and search hits then say who speaks); faces (off by default; about doubles
 the time); license plates (off by default; found anyway when you review or blur). **Add layers**
 on an analyzed video computes the ones ticked and missing. Under them, a line says what runs (one
 pass over the sound, one over the frames for shots and every detector, then key pictures) and

@@ -12,7 +12,7 @@ reads them. The TypeScript types are in `src/doc/schema.ts`; this page describes
 interface VideoDoc {
   schema: 'videodoc/0';
   source: SourceInfo;
-  layers: Partial<{ speech; transcript; scenes; keyframes; faces; plates }>;
+  layers: Partial<{ speech; transcript; speakers; scenes; keyframes; faces; plates }>;
 }
 
 interface SourceInfo {
@@ -61,18 +61,41 @@ interface Layer<T> {
 |---|---|---|---|---|
 | `speech` | `{ t0, t1 }` | — | audio | Silero VAD v5 (wasm) |
 | `transcript` | `{ t0, t1, text, words? }` (`words`: `[t0, t1, text][]`) | speech | audio | Whisper via transformers.js (WebGPU), speech spans only; word times from cross-attention |
+| `speakers` | `{ id, turns, voice }` (below) | speech | audio | pyannote segmentation-3.0 and WeSpeaker ResNet34 voices, clustered as pyannote 3.1 does |
 | `scenes` | `{ t0, t1, f0, f1, score }` (a shot; frames inclusive) | — | frames | GPU thumbnails, ffmpeg-style scene score |
 | `keyframes` | `{ t, frame, scene, why: 'scene' \| 'silence' \| 'coverage' }` | scenes, speech | pure | derived in Node or the browser, no decode |
 | `faces` | `Track` (below) | scenes | frames | YuNet with adaptive sampling and native-resolution tiles |
 | `plates` | `Track` (below) | scenes | frames | YOLOv9-t license plates (open-image-models), adaptive sampling, motion-linked |
 | any name a [pipeline](pipelines.md) gives (`vehicles`) | `Track` | scenes | frames | the pipeline's detector, tracked like plates; `producer.kind` is `"track"` |
 
-**Passes.** Audio is decoded once for speech and transcript. Every frame layer shares one video
+**Passes.** Audio is decoded once for speech, transcript and speakers. Every frame layer shares one video
 decode. Pure layers are computed from other layers without touching the video.
 
 **Keyframes** are the frames worth looking at: one 0.5 s into every shot, one in the middle of
 every silent gap of 4 s or more (nobody is saying what is on screen there), and fill-ins so no
 stretch of a shot goes 30 s without one. `scene` indexes the scenes layer.
+
+**Speakers.** Who speaks when, for interviews, podcasts and meetings:
+
+```ts
+interface SpeakerItem { id: number; turns: [t0: number, t1: number][]; voice: number[] }
+```
+
+Ids are numbered in order of first appearance (`Speaker 1` speaks first). `turns` are when that
+speaker talks, in seconds; turns of different speakers overlap where people talk at once.
+`voice` is the speaker's voice embedding (256 numbers, unit length), for recognizing the same
+voice in other videos. The doc holds no names: speakers are named separately, so a name
+survives analyzing again. Words are assigned to the speaker talking over most of them
+(`whoSaid`, `speakerAt` in `src/doc/speakers.ts`).
+
+How it works (`src/audio/diarize.ts`, the same pipeline as pyannote 3.1): a segmentation model
+finds up to three local speakers in 10 s windows that slide every `speakers.step` seconds; each
+local speaker gets a voice embedding from the audio where it speaks alone; the embeddings are
+clustered (agglomerative, centroid linkage, `speakers.threshold`); each window's speakers are
+matched to distinct clusters; and each moment keeps as many speakers as the windows say are
+talking there. Windows without detected speech are skipped. Diarization errs: short
+interjections, overlapping speech, one person split in two or two similar voices merged
+(measured in NOTES.md).
 
 **Tracks.** A face (or plate) track covers frames `[f0, f1]` with sampled boxes; ids are per
 layer:
@@ -106,6 +129,12 @@ or `settings` (library). `videodoc layers` prints this table as JSON.
 | `transcript.encoder` / `.decoder` | `fp32` / `q4` | ONNX dtypes |
 | `transcript.language` | `en` | spoken language code |
 | `transcript.device` | `webgpu` | `webgpu` or `wasm` |
+| `speakers.step` | 2 | seconds between the starts of the 10 s windows (1 is pyannote's; larger is faster) |
+| `speakers.threshold` | 0.7046 | voices closer than this are one speaker; lower splits more |
+| `speakers.minClusterSize` | 12 | voices found in fewer windows join the most similar speaker |
+| `speakers.maxSpeakers` | 0 | at most this many speakers; 0 = as many as found (set it when you know) |
+| `speakers.segmentation` / `.embedding` | `onnx-community/pyannote-segmentation-3.0` / `onnx-community/wespeaker-voxceleb-resnet34-LM` | model repos under `public/models` |
+| `speakers.device` | `webgpu` | `webgpu` or `wasm` (voice embeddings; wasm is about 5x slower) |
 | `scenes.threshold` | 0.15 | scene score at or above which a frame starts a new shot |
 | `keyframes.offset` | 0.5 | seconds into a shot for its frame (skips fades at the cut) |
 | `keyframes.silence` | 4 | silent gaps at least this long get a frame, seconds |
@@ -172,7 +201,8 @@ they are files in `<video>.keyframes/` named by frame number.
 - one `## Shot n · start–end` section per shot (with `· up to n faces` when faces were found;
   no heading numbers when the video is one shot);
 - `**[mm:ss]**` paragraphs of speech, broken at pauses of 2 s or more and after a keyframe
-  once the sentence ends;
+  once the sentence ends; with a speakers layer, `**[mm:ss] Speaker 2:**`, broken where the
+  speaker changes (by word, when the transcript has word times);
 - `*(no speech a–b)*` for silent gaps of 4 s or more;
 - `![mm:ss](path)` for keyframes when images are supplied.
 

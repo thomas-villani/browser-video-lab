@@ -38,7 +38,7 @@ export function notReady(ctx: Context): Promise<string | undefined> {
 
 /** The committed synthetic fixture, or a local cut (scripts/fixtures.mjs); undefined if missing. */
 export function fixture(name: string): string | undefined {
-  const p = name === 'tts-words' ? join(ROOT, 'tests/fixtures/tts-words.mp4') : join(ROOT, fixturePath(name));
+  const p = name.startsWith('tts-') ? join(ROOT, `tests/fixtures/${name}.mp4`) : join(ROOT, fixturePath(name));
   return existsSync(p) ? p : undefined;
 }
 

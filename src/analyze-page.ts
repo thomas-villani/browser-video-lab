@@ -4,6 +4,8 @@
 import type { PlannedLayer, Layers, RedactOptions, Track, VideoDoc } from './doc/index.ts';
 import { computeLayers, frameImages, type Progress } from './analyze';
 import { redact } from './redact';
+import { decodeAudio } from './runtime/audio';
+import { Diarizer } from './runtime/diarize';
 
 declare global {
   interface Window {
@@ -33,6 +35,27 @@ const api = {
         window.__videodocProgress?.(p);
       },
     });
+  },
+
+  /** What the speaker models say (windows, voices), before clustering: scripts/eval-speakers.ts
+   *  clusters and scores them in Node, so the settings that only affect clustering are tuned
+   *  without running the models again. Activity is base64 (0/1 bytes). */
+  async speakerInputs(url: string, speech: { t0: number; t1: number }[], c: { segmentation: string; embedding: string; step: number; device: 'webgpu' | 'wasm' }) {
+    const pcm = await decodeAudio(url);
+    const t0 = performance.now();
+    const d = await Diarizer.create(c);
+    const r = await d.run(pcm, speech, c.step, (done, total) => window.__videodocProgress?.({ pass: 'audio', stage: 'finding speakers', done, total }));
+    const b64 = (a: Uint8Array) => {
+      let s = '';
+      for (let i = 0; i < a.length; i += 0x8000) s += String.fromCharCode(...a.subarray(i, i + 0x8000));
+      return btoa(s);
+    };
+    return {
+      t0: pcm.t0,
+      windows: r.windows.map((w) => ({ start: w.start, act: b64(w.act) })),
+      embeddings: r.embeddings.map((e) => e.map((v) => (v ? [...v] : null))),
+      stats: { ...r.stats, ms: performance.now() - t0 },
+    };
   },
 
   /** JPEGs of the frames at `times`, base64 (page.evaluate results must be JSON). */

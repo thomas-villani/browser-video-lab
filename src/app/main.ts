@@ -3,7 +3,7 @@
 // is uploaded: analysis runs here on WebGPU, docs are saved next to the videos or kept in memory.
 // Faces and license plates can be reviewed over the player (review.ts) and blurred into a copy.
 // A pipeline preset (presets.ts) adds its track layers and settings to what is analyzed.
-import { coversAudio, formatLog, highlight, PIPELINE_SCHEMA, pipelineContext, REDACT_DEFAULTS, redactionLog, resolve, search, toMarkdown, type Pipeline } from '../doc/index.ts';
+import { coversAudio, formatLog, highlight, PIPELINE_SCHEMA, pipelineContext, REDACT_DEFAULTS, redactionLog, resolve, search, speakerName, toMarkdown, type Pipeline } from '../doc/index.ts';
 import { analyze, frameImages } from '../analyze';
 import { redact } from '../redact';
 import {
@@ -84,6 +84,7 @@ function layersWanted(e?: Entry): string[] {
   // Redaction needs faces and plates, and the transcript (with word times) for words to bleep;
   // a video analyzed before keeps the layers it has.
   const redacting = e?.redactTo || e?.reviewAfter;
+  if (checked('speakers') || e?.doc?.layers.speakers) layers.push('speakers');
   if (checked('transcript') || e?.wantWords || (e?.redactTo && e.plan && coversAudio(e.plan.options))) layers.push('transcript');
   for (const k of trackNames())
     if (state.tracksOn.has(k) || ((k === 'faces' || k === 'plates') && checked(k)) || (redacting && coverWanted(e).includes(k)) || e?.doc?.layers[k]) layers.push(k);
@@ -93,7 +94,8 @@ function layersWanted(e?: Entry): string[] {
 /** Seconds per second of video the ticked preset layers add. */
 const presetCost = () => [...state.tracksOn].reduce((s, k) => s + trackCost(decoderOf(state.preset!.pipeline, k)), 0);
 
-const timeFor = (seconds: number) => estimate(seconds, { transcript: checked('transcript'), faces: checked('faces'), plates: checked('plates'), extra: presetCost() });
+const timeFor = (seconds: number) =>
+  estimate(seconds, { transcript: checked('transcript'), speakers: checked('speakers'), faces: checked('faces'), plates: checked('plates'), extra: presetCost() });
 
 /** Queue every video not analyzed yet (or failed), saying what happens next. */
 function analyzeAll() {
@@ -534,7 +536,7 @@ function renderResults() {
         const ts = (t: number) => (long ? `${Math.floor(t / 3600)}:${fmt(t % 3600).padStart(5, '0')}` : fmt(t));
         return `<li class="hit" data-id="${e.id}" data-t="${h.at}" data-terms="${esc(h.matched.join(' '))}">
           ${img ? `<img src="${img}" alt="">` : '<div class="thumb"></div>'}
-          <div><div class="where"><b>${esc(e.path)}</b> · ${ts(h.t0)}–${ts(h.t1)}</div><div class="snip">${marks(h.snippet)}</div></div></li>`;
+          <div><div class="where"><b>${esc(e.path)}</b> · ${ts(h.t0)}–${ts(h.t1)}${h.speaker !== undefined ? ` · ${esc(speakerName(h.speaker))}` : ""}</div><div class="snip">${marks(h.snippet)}</div></div></li>`;
       })
       .join('');
 }
@@ -613,7 +615,7 @@ async function pickFolder() {
 // ---- what to analyze: the layers ticked, the preset, the plan ----
 
 /** What a person calls each layer in the plan line. */
-const SAYS: Record<string, string> = { speech: 'when people speak', transcript: "what's said", scenes: 'shots', faces: 'faces', plates: 'plates' };
+const SAYS: Record<string, string> = { speech: 'when people speak', transcript: "what's said", speakers: 'who speaks', scenes: 'shots', faces: 'faces', plates: 'plates' };
 
 /** The preset part of "What to analyze": its track layers to tick, and the plan line. */
 function renderPreset() {
@@ -632,7 +634,7 @@ function renderPreset() {
     : '';
   const wanted = resolve(layersWanted(), pipelineContext(state.preset?.run).producers);
   const frames = wanted.filter((n) => n === 'scenes' || trackNames().includes(n)).map((n) => SAYS[n] ?? n);
-  const sound = wanted.filter((n) => n === 'speech' || n === 'transcript').map((n) => SAYS[n]);
+  const sound = wanted.filter((n) => n === 'speech' || n === 'transcript' || n === 'speakers').map((n) => SAYS[n]);
   $('#plan-line').textContent = `One pass over the sound (${list(sound)}), one over the frames (${list(frames)}), then key pictures: ${timeFor(3600)} per hour of video.`;
 }
 
@@ -641,7 +643,7 @@ function usePreset(p: Preset | undefined) {
   if (state.preset) dropPreset(state.preset);
   state.preset = p;
   state.tracksOn = new Set(p ? presetTracks().filter((k) => p.pipeline.layers.includes(k)) : []);
-  if (p) for (const id of ['transcript', 'faces', 'plates']) $<HTMLInputElement>(`#opt-${id}`).checked = p.pipeline.layers.includes(id);
+  if (p) for (const id of ['transcript', 'speakers', 'faces', 'plates']) $<HTMLInputElement>(`#opt-${id}`).checked = p.pipeline.layers.includes(id);
   optionsChanged();
 }
 
@@ -663,7 +665,7 @@ async function takePreset(files: File[]): Promise<File[]> {
 /** A preset of what is ticked now, with the loaded one's models, track layers and settings. */
 function currentPipeline(): Pipeline {
   const p = state.preset?.pipeline;
-  const layers = ['keyframes', ...['transcript', 'faces', 'plates'].filter(checked), ...presetTracks().filter((k) => state.tracksOn.has(k))];
+  const layers = ['keyframes', ...['transcript', 'speakers', 'faces', 'plates'].filter(checked), ...presetTracks().filter((k) => state.tracksOn.has(k))];
   return {
     schema: PIPELINE_SCHEMA,
     name: p?.name ?? (state.folder || 'videodoc'),
@@ -714,7 +716,7 @@ function wire() {
     input.value = '';
     if (files.length) await addEntries(await fromFiles(files));
   });
-  for (const id of ['#opt-transcript', '#opt-faces', '#opt-plates']) $(id).addEventListener('change', optionsChanged);
+  for (const id of ['#opt-transcript', '#opt-speakers', '#opt-faces', '#opt-plates']) $(id).addEventListener('change', optionsChanged);
   $('#preset').addEventListener('change', (ev) => {
     const k = (ev.target as HTMLInputElement).dataset.track;
     if (!k) return;

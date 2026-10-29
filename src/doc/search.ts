@@ -6,6 +6,7 @@
 // segment, up to `window` seconds), so a phrase never falls across a boundary; overlapping or
 // touching hits in the same video are collapsed to the best one.
 import type { KeyframeItem, TranscriptItem, VideoDoc } from './schema.ts';
+import { speakerAt } from './speakers.ts';
 
 const STOP = new Set(
   ('a an and are as at be been but by can did do does for from had has have he her his i if in into is it its me my no not of on or our ' +
@@ -78,6 +79,8 @@ export interface SearchHit extends Passage {
   snippet: string;
   /** Keyframe nearest the hit (index into the doc's keyframes layer), if the doc has keyframes. */
   keyframe?: number;
+  /** Who says the first matched word (speakers layer id), if the doc has speakers. */
+  speaker?: number;
 }
 
 /** Wrap words whose stem is in `stems` in **bold**. */
@@ -135,7 +138,9 @@ export function search(docs: VideoDoc[], query: string, o: SearchOptions = {}): 
     const first = items[s.p.doc].slice(s.p.i0, s.p.i1 + 1).find((x) => terms(x.text).some((w) => matched.has(w)));
     const word = first?.words?.find((w) => terms(w[2]).some((x) => matched.has(x)));
     const at = word ? Math.max(first!.t0, Math.round((word[0] - AT_LEAD) * 100) / 100) : (first?.t0 ?? s.p.t0);
-    hits.push({ ...s.p, score: Math.round(s.score * 1000) / 1000, at, matched: s.matched, snippet: highlight(s.p.text, new Set(s.matched)), ...(keyframe !== undefined && { keyframe }) });
+    const spk = docs[s.p.doc].layers.speakers?.items;
+    const speaker = spk && (word ? speakerAt(spk, word[0], Math.max(word[1], word[0] + 0.01)) : first && speakerAt(spk, first.t0, first.t1));
+    hits.push({ ...s.p, score: Math.round(s.score * 1000) / 1000, at, matched: s.matched, snippet: highlight(s.p.text, new Set(s.matched)), ...(keyframe !== undefined && { keyframe }), ...(speaker !== undefined && { speaker }) });
   }
   return hits;
 }

@@ -143,7 +143,7 @@ video file ──► WebCodecs decode ──► WebGPU ────────�
   be computed; the video is served to it from disk over localhost.
 
 Typical times on an integrated GPU: default analysis (speech, transcript, shots, keyframes)
-3–4.5x faster than real time; faces about real time (slower in crowds); redaction 40–80 fps;
+3–4.5x faster than real time; speakers 8–10x; faces about real time (slower in crowds); redaction 40–80 fps;
 search ~25 ms; Markdown of an analyzed video ~0.5 s. Details are in [NOTES.md](NOTES.md).
 
 ## Documentation

@@ -59,7 +59,19 @@ Types: `VideoDoc`, `SourceInfo`, `Layer<T>`, `Producer`, `SpeechItem`, `Transcri
 | `pause` | Start a new paragraph after a pause this long (default 2 s). |
 | `silence` | Mark silent gaps at least this long (default: the keyframes layer's, else 4 s). |
 
-Also `fmtTime(t, long?)` (`83.4` → `"01:23"`) and `maxFaces(tracks, f0, f1)`.
+Also `fmtTime(t, long?)` (`83.4` → `"01:23"`) and `maxFaces(tracks, f0, f1)`. With a speakers layer, paragraphs
+say who speaks; `names` (`{ 2: "Dana" }`) replaces "Speaker 2".
+
+### Speakers
+
+| Function | |
+|---|---|
+| `whoSaid(transcript, speakers)` | Transcript segments split where the speaker changes (by word, with word times): `{ t0, t1, text, speaker }`. |
+| `speakerAt(speakers, t0, t1)` | The speaker talking over most of `[t0, t1]`, or undefined. |
+| `speakerName(id, names?)` | "Speaker 2", or its name. |
+
+The clustering is pure too (`src/audio/diarize.ts`: `diarize(windows, embeddings, opts)`), as is the
+DER used to measure it (`src/audio/der.ts`).
 
 ### Search
 
@@ -76,7 +88,7 @@ stemmed words, stopwords dropped; passages with the query's words in order score
 
 A `SearchHit` has `doc` (index into `docs`), `t0`/`t1` (the passage), `at` (where to seek to hear the
 first matched word: half a second before it, or its segment's start without word times), `score`, `matched` (stems), `snippet` (matches in `**bold**`),
-`keyframe` (index of the nearest keyframe) and `i0`/`i1` (transcript items spanned). Helpers:
+`keyframe` (index of the nearest keyframe), `speaker` (who says the first matched word, with a speakers layer) and `i0`/`i1` (transcript items spanned). Helpers:
 `terms(text)`, `stem(word)`, `highlight(text, stems)`.
 
 ### Tracks

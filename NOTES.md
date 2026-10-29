@@ -799,3 +799,50 @@ Iris Xe, Edge headless, AC, "Best performance" overlay. `npm run test:browser`: 
   parsing failed"): the browser reused the cached partial response. Found by the app review
   test (the CLI fingerprints in Node, so its tests passed). Range reads now use
   `cache: 'no-store'`.
+
+## videodoc step 10, part 1: the speakers layer (2026-10-29)
+
+Diarization in the browser: pyannote segmentation-3.0 (MIT, 6 MB, wasm) over 10 s windows, a
+WeSpeaker ResNet34 voice embedding (CC BY 4.0, 26 MB, WebGPU) per window and local speaker
+from the fbank frames where it speaks alone, then pyannote 3.1's clustering in TS
+(`src/audio/diarize.ts`: centroid-linkage AHC at 0.7046, min cluster size 12, constrained
+assignment, top-count reconstruction). Windows with no VAD speech are skipped.
+
+**Benchmark: AMI test meetings** (`scripts/fetch-ami.mjs`: Mix-Headset audio, pyannote's
+AMI-diarization-setup "only_words" RTTM and UEM; 4 meetings, 92 min, 4 speakers each).
+`scripts/eval-speakers.ts`, DER weighted by reference speech, no collar, overlap scored
+(pyannote's setting; pyannote 3.1 reports 18.8% on all 16 AMI test meetings). AC power,
+Best performance, Iris Xe (gen-12lp):
+
+| step | DER | missed | false alarm | confusion | speed (x real time) |
+|---|---|---|---|---|---|
+| 1 s (IS1009a only) | 20.6 (IS1009a) | | | | 4.3 |
+| **2 s (default)** | **21.5** | 11.9 | 3.3 | 6.3 | 7.5-9.7 |
+| 3 s | 22.3 | 11.6 | 3.8 | 6.9 | 10.6-12.1 |
+| 5 s | 23.3 | 10.0 | 5.2 | 8.1 | 16.8-20.5 |
+
+Per meeting at step 2: ES2004a 19.9 (5 speakers found / 4), IS1009a 21.9 (5/4), TS3003a 18.8
+(3/4), EN2002a 24.1 (5/4). Most of the error is missed overlapped speech (EN2002a talks over
+itself a lot); confusion is ~6%.
+
+- **pyannote's tuned clustering values hold.** Thresholds 0.5-0.75 with min cluster size 6 or
+  12: 0.6-0.75 at 12 are all 21.4-21.5 at step 2. Lower thresholds or size 6 leave many small
+  clusters, which split or swallow speakers (TS3003a fell to 1-2 speakers at 0.5).
+- **Where the time goes** (step 2, per 14 min meeting): segmentation 25 s (wasm, ~65 ms per
+  window, batches of 16), fbank 10 s (transformers.js `WeSpeakerFeatureExtractor`), voice
+  model 50 s (~70 ms per embedding on WebGPU). The voice model is compute-bound on the
+  integrated GPU: wasm is 5x slower (420 ms); batching equal-length inputs (frames repeated up
+  to multiples of 100 or 200) and padding to few distinct shapes gave no speedup; capping an
+  embedding at 3 s of audio saved 20% and cost 4 points of DER. The fp16 export
+  (`model_fp16.onnx`) does not load in ORT 1.30 (a Cast output typed float16 where float is
+  expected).
+- **Clustering cost**: a distance matrix updated by Lance-Williams (exact for centroid
+  linkage; the same DER as recomputing centroids) clusters EN2002a's 2361 voices in 2.4 s in
+  Node. At most 4000 voices are clustered (an even sample; 64 MB of distances), the rest
+  assigned to the clusters, as pyannote's `max_num_embeddings` does.
+- **Synthetic check** (`tests/fixtures/tts-dialog.mp4`: three Windows TTS voices, David, Zira
+  and Mark (two male), 8 turns, 57 s; `tests/fixtures/tts-dialog.ps1` and
+  `scripts/tts-dialog.mjs`): 3 speakers, every turn and every Markdown paragraph attributed to
+  the right voice, DER 7.7% (no confusion, nothing missed; turns run ~0.15 s long at their
+  edges). The first version of its reference counted TTS's padding and sentence pauses as
+  speech (22% "missed"); the reference is now the audible stretches of each turn.

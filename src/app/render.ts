@@ -30,8 +30,9 @@ export function markdownToHtml(md: string, image: (frame: number) => string | un
       // A shot with nothing in it (no speech, no keyframe) gets a compact heading.
       const bare = i + 1 === blocks.length || blocks[i + 1].startsWith('## ');
       out.push(`<h2${bare ? ' class="bare"' : ''}${t ? ` data-t="${secs(t[1])}"` : ''}>${esc(m[1])}</h2>`);
-    } else if ((m = /^\*\*\[([\d:]+)\]\*\* ([\s\S]+)$/.exec(b))) {
-      out.push(`<p class="said" data-t="${secs(m[1])}"><button class="ts" data-t="${secs(m[1])}">${m[1]}</button> ${marks(mark(m[2]))}</p>`);
+    } else if ((m = /^\*\*\[([\d:]+)\](?: ([^*]+):)?\*\* ([\s\S]+)$/.exec(b))) {
+      const who = m[2] ? ` <b class="who">${esc(m[2])}:</b>` : '';
+      out.push(`<p class="said" data-t="${secs(m[1])}"><button class="ts" data-t="${secs(m[1])}">${m[1]}</button>${who} ${marks(mark(m[3]))}</p>`);
     } else if ((m = /^!\[([\d:]+)\]\(kf:(\d+)\)$/.exec(b))) {
       const src = image(Number(m[2]));
       out.push(`<figure class="kf" data-t="${secs(m[1])}" data-frame="${m[2]}">${src ? `<img src="${src}" alt="frame at ${m[1]}">` : '<div class="pending"></div>'}<figcaption>${m[1]}</figcaption></figure>`);
@@ -62,9 +63,12 @@ const DETR_COST = 9;
 /** Seconds per second of video a pipeline's track layer adds, by its model's decoder. */
 export const trackCost = (decoder?: string) => (decoder === 'detr' ? DETR_COST : PLATES_COST);
 
+/** Speakers, seconds per second of speech-filled audio (step 2 s, NOTES.md). */
+const SPEAKERS_COST = 0.11;
+
 /** `extra`: seconds per second of video for a pipeline's track layers (trackCost). */
-export function estimate(seconds: number, o: { transcript: boolean; faces: boolean; plates?: boolean; extra?: number }): string {
-  const s = seconds * ((o.transcript ? 0.22 : 0.02) + (o.faces ? 0.2 : 0.05) + (o.plates ? PLATES_COST : 0) + (o.extra ?? 0));
+export function estimate(seconds: number, o: { transcript: boolean; speakers?: boolean; faces: boolean; plates?: boolean; extra?: number }): string {
+  const s = seconds * ((o.transcript ? 0.22 : 0.02) + (o.speakers ? SPEAKERS_COST : 0) + (o.faces ? 0.2 : 0.05) + (o.plates ? PLATES_COST : 0) + (o.extra ?? 0));
   if (s < 60) return 'under a minute';
   const m = Math.round(s / 60);
   return m < 90 ? `about ${m} min` : `about ${(s / 3600).toFixed(1)} h`;
@@ -80,6 +84,7 @@ export function analysisSteps(want: string[], has: Set<string>, tracks: string[]
   const steps: string[] = [];
   if (missing('speech')) steps.push('Listening');
   if (missing('transcript')) steps.push('Transcribing');
+  if (missing('speakers')) steps.push('Finding speakers');
   const found = want.filter((n) => tracks.includes(n) && missing(n));
   if (found.length) steps.push(`Finding ${list(found)}`);
   else if (missing('scenes')) steps.push('Finding shots');
@@ -90,7 +95,7 @@ export function analysisSteps(want: string[], has: Set<string>, tracks: string[]
 export function stepOf(p: { pass: string; stage: string }, steps: string[]): number {
   const name =
     p.pass === 'frames' ? (steps.find((s) => s.startsWith('Finding ')) ?? '')
-    : p.pass === 'audio' ? (/^(loading|transcrib)/.test(p.stage) ? 'Transcribing' : 'Listening')
+    : p.pass === 'audio' ? (/speaker/.test(p.stage) ? 'Finding speakers' : /^(loading|transcrib)/.test(p.stage) ? 'Transcribing' : 'Listening')
     : '';
   return steps.indexOf(name);
 }

@@ -12,3 +12,4 @@ export * from './redact.ts';
 export * from './words.ts';
 export * from './models.ts';
 export * from './pipeline.ts';
+export * from './speakers.ts';

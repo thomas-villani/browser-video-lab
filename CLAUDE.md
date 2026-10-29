@@ -8,7 +8,7 @@ step, traps), then NOTES.md (measurements, checklist) and DESIGN.md (design, roa
   `npm run fixtures` first; `UPDATE_BASELINE=1` to accept intended changes) · types: `npm run typecheck`
   · CLI: `npm run videodoc -- check|analyze|info|layers`
 - Python only via `uv run ...`.
-- Node runs `.ts` directly: Node-loaded code (`src/doc`, `src/track`, `cli`, `scripts/*.ts`,
+- Node runs `.ts` directly: Node-loaded code (`src/doc`, `src/track`, `src/audio`, `cli`, `scripts/*.ts`,
   `tests`) imports with `.ts` extensions and uses only erasable TS syntax.
 - Tools print JSON on stdout, progress and summaries on stderr.
 - In Git Bash, prefix commands that pass `/media/...` URL paths with `MSYS_NO_PATHCONV=1`.

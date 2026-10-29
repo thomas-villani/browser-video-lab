@@ -1,8 +1,10 @@
 // The "read the video" view: a doc rendered as Markdown for agents and people. Shots become
 // sections; the transcript runs through them in timed paragraphs; keyframe images (when the
 // caller has them) and silent gaps sit where they happen. Needs no captions and no LLM, and
-// works with whatever layers the doc has. Pure TS.
+// works with whatever layers the doc has. With a speakers layer, paragraphs say who speaks
+// (`**[01:23] Speaker 2:**`) and break where the speaker changes. Pure TS.
 import { silentGaps } from './keyframes.ts';
+import { speakerName, whoSaid } from './speakers.ts';
 import type { KeyframeItem, SceneItem, Track, VideoDoc } from './schema.ts';
 
 export interface MarkdownOptions {
@@ -14,6 +16,8 @@ export interface MarkdownOptions {
   silence?: number;
   /** Start a new paragraph when speech pauses this long, seconds. */
   pause?: number;
+  /** Names for speakers by id (default "Speaker 2"). */
+  names?: Record<string, string>;
   /** Render only [from, to) seconds (e.g. around a search hit); shots and passages overlapping it. */
   from?: number;
   to?: number;
@@ -45,12 +49,12 @@ export function maxFaces(tracks: Track[], f0: number, f1: number): number {
 type Event =
   | { t: number; kind: 'silence'; t1: number }
   | { t: number; kind: 'image'; k: KeyframeItem; i: number }
-  | { t: number; kind: 'text'; t1: number; text: string };
+  | { t: number; kind: 'text'; t1: number; text: string; speaker?: number };
 const ORDER = { silence: 0, image: 1, text: 2 };
 
 export function toMarkdown(doc: VideoDoc, opts: MarkdownOptions = {}): string {
   const { source, layers } = doc;
-  const { speech, transcript, keyframes, faces } = layers;
+  const { speech, transcript, keyframes, faces, speakers } = layers;
   const long = source.duration >= 3600;
   const ts = (t: number) => fmtTime(t, long);
   const pause = opts.pause ?? 2;
@@ -60,7 +64,8 @@ export function toMarkdown(doc: VideoDoc, opts: MarkdownOptions = {}): string {
     : [{ t0: 0, t1: source.duration, f0: 0, f1: source.frames - 1, score: 0 }];
 
   const events: Event[] = [];
-  for (const s of transcript?.items ?? []) events.push({ t: s.t0, kind: 'text', t1: s.t1, text: s.text.trim() });
+  const said = speakers ? whoSaid(transcript?.items ?? [], speakers.items) : (transcript?.items ?? []).map((s) => ({ t0: s.t0, t1: s.t1, text: s.text.trim(), speaker: undefined }));
+  for (const s of said) events.push({ t: s.t0, kind: 'text', t1: s.t1, text: s.text, speaker: s.speaker });
   keyframes?.items.forEach((k, i) => events.push({ t: k.t, kind: 'image', k, i }));
   if (speech?.items.length) for (const [t, t1] of silentGaps(speech.items, source.duration, silence)) events.push({ t, kind: 'silence', t1 });
   events.sort((a, b) => a.t - b.t || ORDER[a.kind] - ORDER[b.kind]);
@@ -79,6 +84,7 @@ export function toMarkdown(doc: VideoDoc, opts: MarkdownOptions = {}): string {
     layers.scenes && `${scenes.length} ${scenes.length === 1 ? 'shot' : 'shots'}`,
     speechS !== undefined && (speechS ? `${Math.round((100 * speechS) / source.duration)}% speech` : 'no speech detected'),
     !!words && `${words.toLocaleString('en-US')} words`,
+    speakers && `${speakers.items.length} ${speakers.items.length === 1 ? 'speaker' : 'speakers'}`,
     faces && `${faces.items.length} face tracks`,
   ].filter(Boolean);
   const made = Object.entries(layers).flatMap(([n, l]) => (l ? [`${n}${l.producer.model ? ` (${l.producer.model})` : ''}`] : []));
@@ -96,10 +102,10 @@ export function toMarkdown(doc: VideoDoc, opts: MarkdownOptions = {}): string {
     out.push('', `## ${scenes.length > 1 ? `Shot ${si + 1} · ` : ''}${ts(s.t0)}–${ts(s.t1)}${tail}`);
 
     // A keyframe inside running speech waits for the sentence to end, then breaks the paragraph.
-    let para: { t: number; t1: number; text: string[] } | undefined;
+    let para: { t: number; t1: number; text: string[]; speaker?: number } | undefined;
     let waiting: Extract<Event, { kind: 'image' }>[] = [];
     const flush = () => {
-      if (para) out.push('', `**[${ts(para.t)}]** ${para.text.join(' ')}`);
+      if (para) out.push('', `**[${ts(para.t)}]${para.speaker !== undefined ? ` ${speakerName(para.speaker, opts.names)}:` : ''}** ${para.text.join(' ')}`);
       para = undefined;
       for (const w of waiting) {
         const src = opts.image?.(w.k, w.i);
@@ -109,8 +115,8 @@ export function toMarkdown(doc: VideoDoc, opts: MarkdownOptions = {}): string {
     };
     for (const ev of mine) {
       if (ev.kind === 'text') {
-        if (para && ev.t - para.t1 > pause) flush();
-        para ??= { t: ev.t, t1: ev.t1, text: [] };
+        if (para && (ev.t - para.t1 > pause || ev.speaker !== para.speaker)) flush();
+        para ??= { t: ev.t, t1: ev.t1, text: [], speaker: ev.speaker };
         para.text.push(ev.text);
         para.t1 = ev.t1;
         if (waiting.length && /[.?!…]["')\]]*$/.test(ev.text)) flush();

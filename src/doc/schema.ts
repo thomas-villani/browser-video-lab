@@ -56,6 +56,14 @@ export interface SpeechItem { t0: number; t1: number }
 export type Word = [t0: number, t1: number, text: string];
 /** A transcript segment; `words` when the model gave word timestamps (transcript.words). */
 export interface TranscriptItem { t0: number; t1: number; text: string; words?: Word[] }
+/**
+ * A speaker (diarization: who speaks when). Ids are per video, numbered in order of first
+ * appearance; names are not stored here (a person names speakers, and the name survives
+ * re-analysis). `turns` are when the speaker talks, in seconds (they may overlap other
+ * speakers'); `voice` is the speaker's voice embedding (WeSpeaker ResNet34, unit length), for
+ * recognizing the same voice in other videos.
+ */
+export interface SpeakerItem { id: number; turns: [t0: number, t1: number][]; voice: number[] }
 /** A shot: frames [f0, f1] inclusive; `score` is the cut score that started it (0 for the first). */
 export interface SceneItem { t0: number; t1: number; f0: number; f1: number; score: number }
 /** A frame worth looking at: the start of a shot, the middle of a silent gap, or a fill-in
@@ -71,6 +79,7 @@ export interface Track { id: number; f0: number; f1: number; samples: number[][]
 export interface Layers {
   speech: Layer<SpeechItem>;
   transcript: Layer<TranscriptItem>;
+  speakers: Layer<SpeakerItem>;
   scenes: Layer<SceneItem>;
   keyframes: Layer<KeyframeItem>;
   faces: Layer<Track>;
@@ -81,7 +90,7 @@ export interface Layers {
 /** The built-in layers. */
 export type LayerName = keyof Layers;
 /** In dependency order. */
-export const LAYER_NAMES: LayerName[] = ['speech', 'transcript', 'scenes', 'keyframes', 'faces', 'plates'];
+export const LAYER_NAMES: LayerName[] = ['speech', 'transcript', 'speakers', 'scenes', 'keyframes', 'faces', 'plates'];
 /** The built-in track layers (a pipeline can add more: their producer.kind is 'track'). */
 export const TRACK_LAYERS: LayerName[] = ['faces', 'plates'];
 /** Names a pipeline may give its layers. */

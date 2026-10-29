@@ -5,7 +5,8 @@ import { copyFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { analyze, ROOT } from '../../cli/lib.ts';
-import { normWord, redactionLog, REDACT_DEFAULTS, summarize, type Layer, type Track } from '../../src/doc/index.ts';
+import { normWord, redactionLog, REDACT_DEFAULTS, summarize, toMarkdown, type Layer, type Track } from '../../src/doc/index.ts';
+import { der, parseRttm } from '../../src/audio/der.ts';
 import { context, fixture, fresh, identical, loadDoc, LOCAL_FIXTURES, near, notReady, saveBaseline, speed } from './lib.ts';
 
 const ctx = context();
@@ -57,6 +58,30 @@ test('tts-words: speech, and a transcript whose words and word times match the T
   near(t, 'tts-words.transcript.coveredWhole', covered, { abs: 3 });
   identical(t, 'tts-words.transcript', doc.layers.transcript!.items);
   speed(t, 'tts-words.transcript.realtime', +(doc.source.duration / (doc.layers.transcript!.ms / 1000)).toFixed(2));
+});
+
+test('tts-dialog: three voices taking turns are three speakers, and the Markdown says who speaks', async (t) => {
+  const why = await notReady(ctx);
+  if (why) return t.skip(why);
+  const video = fresh(fixture('tts-dialog')!);
+  await analyze(ctx, video, { layers: ['transcript', 'speakers'] });
+  const doc = loadDoc(video);
+  const speakers = doc.layers.speakers!.items;
+  const ref = parseRttm(readFileSync(join(ROOT, 'tests/fixtures/tts-dialog.rttm'), 'utf8'));
+  const hyp = speakers.flatMap((s) => s.turns.map(([t0, t1]) => ({ t0, t1, speaker: String(s.id) })));
+  const r = der(ref, hyp, [0, doc.source.duration]);
+  t.diagnostic(`${speakers.length} speakers, DER ${(100 * r.der).toFixed(1)}% (missed ${r.missed.toFixed(1)} s, false ${r.falseAlarm.toFixed(1)} s, confused ${r.confusion.toFixed(1)} s), mapping ${JSON.stringify(r.mapping)}`);
+  assert.equal(speakers.length, 3);
+  assert.equal(new Set(Object.values(r.mapping)).size, 3, 'each voice is its own speaker');
+  assert.ok(r.der < 0.15, 'turns match the script');
+  assert.equal(speakers[0].voice.length, 256);
+  const md = toMarkdown(doc);
+  assert.match(md, /\*\*\[00:0\d\] Speaker 1:\*\* Welcome back/);
+  assert.match(md, /Speaker 3:\*\* I agree completely/);
+  assert.match(md, /Speaker 2:\*\* It really is\./);
+  near(t, 'tts-dialog.speakers.der', +(100 * r.der).toFixed(1), { abs: 2 });
+  identical(t, 'tts-dialog.speakers', speakers.map((s) => s.turns));
+  speed(t, 'tts-dialog.speakers.realtime', +(doc.source.duration / (doc.layers.speakers!.ms / 1000)).toFixed(2));
 });
 
 for (const name of LOCAL_FIXTURES) {

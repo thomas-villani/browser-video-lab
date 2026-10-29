@@ -320,6 +320,16 @@ loaded. Reading and searching work without WebGPU.
     transcript, Markdown and caption exports, search filtered by speaker, redaction of
     everything one person says (bleep or voice disguise). A good first test of step 9's
     registry: two models and a new layer.
+    **Built, part 1 (2026-10-29):** the `speakers` layer (`SpeakerItem { id, turns, voice }`,
+    audio pass, needs speech): pyannote segmentation-3.0 (wasm) and WeSpeaker ResNet34 voices
+    (WebGPU) in `src/runtime/diarize.ts`, pyannote 3.1's clustering in pure TS
+    (`src/audio/diarize.ts`). AMI test meetings: 21.5% DER at the default 2 s window step, 8-10x
+    real time (NOTES.md; pyannote 3.1 reports 18.8%). Words go to speakers (`whoSaid`); the
+    Markdown says who speaks; search hits carry `speaker`; the app has "Who speaks". Measured
+    with `scripts/eval-speakers.ts` (models once, clustering grids in Node). Not yet: names (a
+    user-edited map keyed by voice, so it survives re-analysis), merge / split / reassign,
+    suggesting names from voices named in other videos, the app's speaker panel, search
+    filtered by speaker, redacting one speaker, caption exports with speakers.
 11. **Sound events and tone**: an audio tagger (YAMNet / AST / CLAP class) for gunshots, sirens,
     shouting, breaking glass, dogs, alarms, music, applause, as a time-indexed layer that search
     and Markdown show; CLAP-style audio-text embeddings also allow describing a sound in a

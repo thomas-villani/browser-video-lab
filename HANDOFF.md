@@ -24,13 +24,15 @@ difference, denser visual analysis where nobody speaks.
 - Branch `main`. Commit and push only when the user asks.
 - Built: roadmap steps 1-6 (doc + planner, keyframes + markdown, MCP server, search, the app,
   redaction of faces, plates and spoken words with the review UI), the browser test suite
-  (step 8's first part) and step 9 (models as data, pipeline presets, track layers on any
-  detector; presets in the app). Captions (step 7) not started.
+  (step 8's first part), step 9 (models as data, pipeline presets, track layers on any
+  detector; presets in the app) and step 10's first part (the speakers layer). Captions
+  (step 7) not started.
 - Layers: `speech` (Silero VAD), `transcript` (whisper-base_timestamped, word times),
+  `speakers` (pyannote segmentation-3.0 + WeSpeaker ResNet34, pyannote 3.1 clustering),
   `scenes`, `keyframes` (pure), `faces` (YuNet + adaptive sampling + tile refinement), `plates`
   (YOLOv9-t, same decode as faces), and any track layer a pipeline defines (`vehicles`).
   Defaults in `PRODUCERS` (`src/doc/plan.ts`); a pipeline's in `pipelineContext`.
-- Tests: `npm test` 67 pure-TS tests (seconds); `npm run test:browser` 11 tests in headless Edge
+- Tests: `npm test` 72 pure-TS tests (seconds); `npm run test:browser` 12 tests in headless Edge
   (~4 min; `npm run fixtures` first; docs/lab.md "Tests").
 - Audience (user, 2026-10-28): creators (bodycam/dashcam channels, podcasts, tutorials), not
   institutions; DESIGN.md "Audience" and roadmap steps 10-16.
@@ -57,6 +59,30 @@ difference, denser visual analysis where nobody speaks.
   when its pipeline is not passed.
 - The config hash of a track layer includes its model description and file fingerprint (size +
   first/last MiB; range requests in the browser), so saved docs recompute faces and plates once.
+
+## Done: step 10, part 1: the speakers layer (2026-10-29)
+
+- `src/audio/diarize.ts` (pure: powerset decode, count, centroid AHC with Lance-Williams,
+  constrained assignment, reconstruction), `src/audio/der.ts` (DER, Hungarian, RTTM),
+  `src/runtime/diarize.ts` (models; fbank from transformers.js), `src/doc/speakers.ts`
+  (`speakerAt`, `whoSaid`, `speakerName`). Markdown: `**[mm:ss] Speaker 2:**`, `names` option.
+  Search hits: `speaker`. App: "Who speaks" in What to analyze, speaker on search hits.
+- Measuring: `node scripts/fetch-ami.mjs` (4 AMI test meetings into public/media/ami/), then
+  `node scripts/eval-speakers.ts [--step 2] [--threshold ...]`: the models run once per meeting
+  and step (cached in results/speakers/), clustering grids run in Node in seconds. The compute
+  page has `speakerInputs()` for it.
+- Fixture: `tests/fixtures/tts-dialog.mp4` (+ `.rttm`), three TTS voices; regenerate with
+  `pwsh -File tests/fixtures/tts-dialog.ps1 <dir>` then `node scripts/tts-dialog.mjs <dir>`
+  (PowerShell 7: Windows PowerShell 5 cannot select the Mark voice).
+
+## Next: step 10, part 2: names and corrections
+
+- Names in a user-edited file next to the video (like `.redact.json`), keyed by speaker id
+  and voice, so after re-analysis names move to the new speaker with the closest voice; merge
+  two speakers; later split from a point / reassign a turn. Suggest names for unnamed speakers
+  from voices named in other videos of the folder (suggest, never apply). CLI/MCP to list,
+  name and merge; Markdown and search use the names; the app gets a speakers panel (listen to
+  a speaker's turns, name, merge). Then: search by speaker, redact one speaker.
 
 ## Done: step 9, the app's presets (2026-10-29)
 
@@ -217,7 +243,7 @@ benchmarks and evaluation tools that used to fill the README). Keep it current w
 
 ## Next
 
-Step 10 (speakers) or step 7 (captions/OCR), the user's pick; open step 9 items above.
+Step 10 part 2 (speaker names and corrections, above); open step 9 items above.
 Test suite follow-ups (DESIGN.md step 8): an accuracy tier on the full labeled footage, the MCP
 server over a real browser. Audio follow-ups (DESIGN.md step 6): sound-alike name matching, drawing audio
 spans in the app, highlights in the reading view, audio-only review. Lead application (decided 2026-10-27) stays search

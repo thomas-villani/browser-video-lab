@@ -27,7 +27,8 @@ Computes layers into `<video>.videodoc.json`. Given a folder, analyzes every vid
 subfolders (`.mp4 .m4v .mov .mkv .webm`) one after another.
 
 - `--layers`: default `speech,transcript,scenes,keyframes`; available `speech, transcript,
-  scenes, keyframes, faces, plates` (faces and plates share one decode). Dependencies are added (`keyframes` brings `scenes` and `speech`).
+  speakers, scenes, keyframes, faces, plates` (faces and plates share one decode; speakers is
+  who speaks when, for interviews and podcasts). Dependencies are added (`keyframes` brings `scenes` and `speech`).
 - `--set`: override a setting, repeatable: `--set faces.every=4 --set transcript.language=de`.
   `videodoc layers` lists every setting with its default; unknown keys and wrong types are
   rejected with the list of valid ones.
@@ -80,7 +81,8 @@ video collapse to the best one; passages with the words in order rank higher.
  "notAnalyzed": [], "searched": 7, "ms": 22}
 ```
 
-`at` is where to seek to hear the first matched word (half a second before it is said); `notAnalyzed` lists videos without a
+`at` is where to seek to hear the first matched word (half a second before it is said);
+`speaker` ("Speaker 2") says who says it, for videos with a speakers layer; `notAnalyzed` lists videos without a
 transcript, so a caller can analyze them and search again.
 
 ## redact

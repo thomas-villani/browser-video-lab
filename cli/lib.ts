@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, c
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  deriveLayers, docPathFor, fingerprint, fmtTime, formatDoc, formatLog, isTrackLayer, LAYER_NAME_RE, LAYER_NAMES, mergeOverrides, newDoc, parseDoc, parseKeep, parsePipeline, parseSettings,
+  deriveLayers, docPathFor, speakerName, fingerprint, fmtTime, formatDoc, formatLog, isTrackLayer, LAYER_NAME_RE, LAYER_NAMES, mergeOverrides, newDoc, parseDoc, parseKeep, parsePipeline, parseSettings,
   pipelineContext, plan, parsePlan, planPathFor, REDACT_DEFAULTS, REDACT_KINDS, REDACT_SOUNDS, REDACT_STYLES, coversAudio, redactionLog, search as searchDocs, summarize,
   toMarkdown, withLayers,
   type DocLayers, type KeyframeItem, type Pipeline, type Plan, type RedactKind, type RedactOptions as RedactSettings, type RedactSound, type RedactStyle, type Track, type VideoDoc,
@@ -289,6 +289,10 @@ function missingModels(p: Plan): string[] {
     if (l.name === 'speech') need.push(['public/models/silero_vad.onnx', 'see README (Silero VAD v5)']);
     const file = l.model && modelFile(l.model.url);
     if (file) need.push([file, MODEL_FIX[l.model!.id] ?? `${l.name}.model is '${l.model!.id}'; check its url`]);
+    if (l.name === 'speakers') {
+      const { segmentation, embedding } = l.config as Record<string, string>;
+      for (const m of [segmentation, embedding]) need.push([`public/models/${m}/onnx/model.onnx`, `node scripts/fetch-model.mjs ${m} model`]);
+    }
     if (l.name === 'transcript') {
       const { model, encoder, decoder } = l.config as Record<string, string>;
       const suffix = (d: string) => (d === 'fp32' ? '' : d === 'q8' ? '_quantized' : `_${d}`);
@@ -755,6 +759,7 @@ export function search(ctx: Context, query: string, paths: string[], o: SearchOp
       at: h.at,
       score: h.score,
       snippet: h.snippet,
+      ...(h.speaker !== undefined && { speaker: speakerName(h.speaker) }),
       ref: `transcript/${h.i0}`,
       ...(k && { keyframe: { ref: `keyframes/${h.keyframe}`, t: k.t, ...(image && existsSync(image) && { image }) } }),
     };
