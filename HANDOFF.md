@@ -1,4 +1,4 @@
-# Hand-off (2026-10-27)
+# Hand-off (2026-10-28)
 
 Where things stand, for picking the work up in a fresh session. The long-lived records are
 **NOTES.md** (every measurement, lessons, checklist at the end), **DESIGN.md** (library design
@@ -19,24 +19,36 @@ heuristics are design inputs: transcript first (≈80% of the value), divide-and
 sampling, cheap models screen and expensive models confirm, scene changes from a cheap frame
 difference, denser visual analysis where nobody speaks.
 
-## State
+## State (2026-10-28)
 
-- Branch `main`; see `git log` / `git status` for what is pushed. Push only when the user asks.
-- Roadmap steps 1-3 are done except captions (status below): `src/doc/` (schema `videodoc/0`,
-  planner, tracks, keyframes, markdown, hashing, serialization), `src/analyze.ts`
-  (`computeLayers`, browser `analyze()`, `frameImages`), `cli/lib.ts` (the commands),
-  `cli/videodoc.ts` (CLI: `check`, `analyze`, `markdown`, `info`, `layers`), `cli/mcp.ts` (MCP
-  server, same commands), `analyze.html` + `src/analyze-page.ts` (the compute page they drive).
-  50 tests pass (4 of them drive the MCP server over stdio); `tsc --noEmit` clean. The app:
-  `app.html` + `src/app/`, served by `videodoc ui`. Redaction: `src/doc/redact.ts`,
-  `src/redact.ts`, `videodoc redact`.
-- Layers today: `speech` (Silero VAD), `transcript` (Whisper base via transformers.js; needs
-  speech), `scenes` (GPU thumbnail scene score), `faces` (YuNet 640 + adaptive bisection +
-  native-resolution tile refinement; needs scenes). Defaults live in `PRODUCERS`
-  (`src/doc/plan.ts`) and are the best measured settings.
-- Human face labels: 100 of 309 frames done (`results/labels/faces.jsonl`, committed). The
-  user may label more (rickroll, briefing, walk dense stretches) in `label.html` via
-  `npm run dev`.
+- Branch `main`, everything committed and pushed (last: `e61e8ac`, browser test suite). Commit
+  and push only when the user asks.
+- Built: roadmap steps 1-6 (doc + planner, keyframes + markdown, MCP server, search, the app,
+  redaction of faces, plates and spoken words with the review UI) and the browser test suite
+  (step 8's first part). Captions (step 7) not started.
+- Layers: `speech` (Silero VAD), `transcript` (whisper-base_timestamped, word times),
+  `scenes`, `keyframes` (pure), `faces` (YuNet + adaptive sampling + tile refinement), `plates`
+  (YOLOv9-t, same decode as faces). Defaults in `PRODUCERS` (`src/doc/plan.ts`).
+- Tests: `npm test` 59 pure-TS tests (seconds); `npm run test:browser` 9 tests in headless Edge
+  (~4 min; `npm run fixtures` first; docs/lab.md "Tests"). Run both before and after step 9.
+- Audience (user, 2026-10-28): creators (bodycam/dashcam channels, podcasts, tutorials), not
+  institutions; DESIGN.md "Audience" and roadmap steps 10-16.
+- Power overlay still "Best performance" (restore: `powercfg /overlaysetactive
+  00000000-0000-0000-0000-000000000000` when the user says).
+
+## Step 9 starting points (pluggable models and a pipeline builder)
+
+- Detector models: `ModelSpec` (`src/models.ts`: url, input geometry, normalization, `decode` to
+  boxes), the `MODELS` table (`yunetFace`, `yoloPlate`, ...), looked up by name in
+  `src/runtime/detector.ts`. Several heads share one decode via `multiStream`
+  (`src/runtime/stream.ts`), used by `computeLayers` in `src/analyze.ts`.
+- Layers: `PRODUCERS` (`src/doc/plan.ts`: defaults, help, `pass`, `needs`); `plan()` resolves
+  dependencies and passes and hashes configs (the hash includes the model name, not the file).
+- Transcript model: `transcript.model` (any `_timestamped` Whisper repo under `public/models`).
+- Redaction covers `REDACT_KINDS` (faces, plates) in `src/doc/redact.ts`; custom track layers
+  should join that.
+- DESIGN.md step 9 has the design sketch (registry, decoder presets, custom track layers,
+  presets as `--pipeline preset.json`, app builder on the planner, not a graph editor).
 
 ## Key numbers (details in NOTES.md)
 
