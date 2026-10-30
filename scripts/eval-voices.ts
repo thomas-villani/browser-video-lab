@@ -35,7 +35,7 @@ for (const parts of a.parts.split(',').map(Number)) {
     for (let p = 0; p < parts; p++) {
       const [p0, p1] = [u0 + p * len, u0 + (p + 1) * len];
       // Windows wholly inside the part, as if the video were cut there.
-      const keep = inputs.windows.map((w, i) => i).filter((i) => inputs.windows[i].start + inputs.t0 >= p0 && inputs.windows[i].start + inputs.t0 + 10 <= p1);
+      const keep = inputs.windows.map((_, i) => i).filter((i) => inputs.windows[i].start + inputs.t0 >= p0 && inputs.windows[i].start + inputs.t0 + 10 <= p1);
       const windows: WindowSeg[] = keep.map((i) => ({ start: inputs.windows[i].start, act: Uint8Array.from(atob(inputs.windows[i].act), (c) => c.charCodeAt(0)) }));
       const embeddings = keep.map((i) => inputs.embeddings[i].map((v) => (v ? Float32Array.from(v) : undefined)));
       const speakers = diarize(windows, embeddings);

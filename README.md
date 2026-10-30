@@ -1,5 +1,7 @@
 # videodoc
 
+[![CI](https://github.com/thomas-villani/browser-video-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/thomas-villani/browser-video-lab/actions/workflows/ci.yml)
+
 **Read, search and redact your videos without uploading them.** videodoc analyzes a video once,
 on your own machine's GPU inside a web browser, into a small document of what happens in it:
 when people speak and what they say, where the shots change, which frames are worth looking
@@ -13,6 +15,10 @@ that prints JSON, and an MCP server so an agent like Claude can "watch" a video 
 > Status: early and working. The format is `videodoc/0`; the code runs from this repository
 > (not yet published to npm). Measurements below are from a laptop with an integrated Intel
 > Iris Xe GPU.
+
+**Try the app:** [thomas-villani.github.io/browser-video-lab](https://thomas-villani.github.io/browser-video-lab/)
+in Chrome or Edge. It downloads its models (about 250 MB, once) from the same site; your videos
+never leave your machine.
 
 ## Why
 
@@ -98,7 +104,7 @@ ChromeOS; Linux may need a flag), and about 200 MB of models.
 
 ```bash
 npm install
-# models: see docs/getting-started.md (YuNet, Silero VAD, Whisper; all fetched into public/models)
+npm run models                   # the default models into public/models (docs/getting-started.md; YuNet needs uv)
 npm run videodoc -- check        # browser, WebGPU adapter, decoders, models: what is missing and how to fix it
 npm run ui                       # the app: open a folder of videos, analyze, read, search, redact
 ```
@@ -158,7 +164,9 @@ search ~25 ms; Markdown of an analyzed video ~0.5 s. Details are in [NOTES.md](N
 - [The lab](docs/lab.md): benchmarks, evaluation scripts and labeling tools behind the numbers
 
 Design and history: [DESIGN.md](DESIGN.md) (design and roadmap), [NOTES.md](NOTES.md) (every
-measurement and what it taught), [HANDOFF.md](HANDOFF.md) (current state for contributors).
+measurement and what it taught), [HANDOFF.md](HANDOFF.md) (current state for contributors),
+[CONTRIBUTING.md](CONTRIBUTING.md) (checks, commit messages, releases),
+[CHANGELOG.md](CHANGELOG.md) (from the first release on).
 
 ## Limits worth knowing
 
@@ -174,5 +182,5 @@ measurement and what it taught), [HANDOFF.md](HANDOFF.md) (current state for con
 
 ## License
 
-[MIT](LICENSE). Models and test media are not distributed with this repository; they keep their
-own licenses (see [Getting started](docs/getting-started.md)).
+[MIT](LICENSE). Models and test media are not in this repository; models keep their own licenses
+(see [Getting started](docs/getting-started.md)), including the copies the hosted app serves.

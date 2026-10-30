@@ -4,6 +4,7 @@ Browser-only video understanding runtime; the library is **videodoc** (analyze o
 `<video>.videodoc.json`, query many times). Start with **HANDOFF.md** (current state, next
 step, traps), then NOTES.md (measurements, checklist) and DESIGN.md (design, roadmap).
 
+- Lint/format: `npm run lint` (Biome; formats TS/JS only, CSS and Markdown are hand-laid-out) · `npm run format` fixes.
 - Test: `npm test` (pure TS, seconds) · `npm run test:browser` (headless Edge on fixtures, ~4 min;
   `npm run fixtures` first; `UPDATE_BASELINE=1` to accept intended changes) · types: `npm run typecheck`
   · CLI: `npm run videodoc -- check|analyze|info|layers`
@@ -13,5 +14,7 @@ step, traps), then NOTES.md (measurements, checklist) and DESIGN.md (design, roa
 - Tools print JSON on stdout, progress and summaries on stderr.
 - In Git Bash, prefix commands that pass `/media/...` URL paths with `MSYS_NO_PATHCONV=1`.
 - Benchmark on AC power with the "Best performance" power overlay only.
+- Commit messages follow Conventional Commits (`feat:`, `fix:`, `docs:`, `ci:`, ...): release-please
+  derives versions and CHANGELOG.md from them (CONTRIBUTING.md).
 - Record new measurements in NOTES.md; keep DESIGN.md's roadmap current, and docs/ (user
   documentation: CLI, MCP, format, library API, redaction) in step with what the code does.

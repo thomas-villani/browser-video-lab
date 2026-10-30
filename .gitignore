@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-pages/
 results/*
 # Human face labels are expensive to redo; keep them (and the bootstrap they were reviewed against).
 !results/labels/

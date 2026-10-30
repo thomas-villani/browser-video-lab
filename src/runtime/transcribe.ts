@@ -3,13 +3,14 @@
 import { env, pipeline, type AutomaticSpeechRecognitionPipeline } from '@huggingface/transformers';
 import { dropRepeats, type Span } from '../transcript';
 import type { Pcm } from './audio';
+import { asset } from './asset';
 
 env.allowRemoteModels = false;
 env.allowLocalModels = true; // off by default in browsers
-env.localModelPath = '/models/';
+env.localModelPath = asset('/models/');
 env.backends.onnx.wasm!.wasmPaths = {
-  mjs: '/ort-hf/ort-wasm-simd-threaded.asyncify.mjs',
-  wasm: '/ort-hf/ort-wasm-simd-threaded.asyncify.wasm',
+  mjs: asset('/ort-hf/ort-wasm-simd-threaded.asyncify.mjs'),
+  wasm: asset('/ort-hf/ort-wasm-simd-threaded.asyncify.wasm'),
 };
 
 export interface Segment {

@@ -8,6 +8,17 @@ This serves the app on localhost and opens it in your default browser. Use Chrom
 analysis needs WebGPU. Reading and searching docs that already exist work in any browser.
 Everything runs in the page; nothing is uploaded.
 
+### The hosted app
+
+The same app is published at
+[thomas-villani.github.io/browser-video-lab](https://thomas-villani.github.io/browser-video-lab/)
+with each release, with the default models (Silero VAD, Whisper base, pyannote and WeSpeaker,
+YuNet, the plate detector) served from the site itself: the first analysis downloads about
+250 MB and the browser caches it. Videos are read from your disk and never uploaded. The page
+reloads once on the first visit: a service worker adds the cross-origin isolation that threaded
+WebAssembly needs, which GitHub Pages cannot send. Whisper small needs a local install; a
+detector of your own comes with a pipeline preset and its model files (**Load a preset…**).
+
 ## Adding videos
 
 - **Open folder** (Chrome and Edge): pick a folder; every video in it and its subfolders is

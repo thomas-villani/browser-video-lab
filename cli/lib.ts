@@ -10,7 +10,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { fileURLToPath } from 'node:url';
 import {
   deriveLayers, docPathFor, speakerName, fingerprint, fmtTime, formatDoc, formatLog, isTrackLayer, LAYER_NAME_RE, LAYER_NAMES, mergeOverrides, newDoc, parseDoc, parseKeep, parsePipeline, parseSettings,
-  pipelineContext, plan, parsePlan, planPathFor, REDACT_DEFAULTS, REDACT_KINDS, REDACT_SOUNDS, REDACT_STYLES, coversAudio, redactionLog, search as searchDocs, summarize,
+  pipelineContext, plan, parsePlan, planPathFor, REDACT_DEFAULTS, REDACT_KINDS, REDACT_SOUNDS, REDACT_STYLES, redactionLog, search as searchDocs, summarize,
   toMarkdown, withLayers, addSpeaker, checkEdits, findSpeaker, formatEdits, mergeSpeakers, moveSpeech, nameSpeaker, namedVoices, newEdits, speakersPathFor, suggestSpeakerNames,
   talkTime, unmergeSpeaker, unmove, withSpeakers,
   type NamedVoice, type SpeakerEdits, type SpeakerItem, type DocLayers, type KeyframeItem, type Pipeline, type Plan, type RedactKind, type RedactOptions as RedactSettings, type RedactSound, type RedactStyle, type Track, type VideoDoc,

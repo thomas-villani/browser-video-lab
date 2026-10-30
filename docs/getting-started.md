@@ -8,10 +8,14 @@
   by default, `--browser chrome` for Chrome); the app runs in it. WebGPU is on by default on
   Windows, macOS and ChromeOS; on Linux it may need `--enable-unsafe-webgpu`. Reading and
   searching docs that already exist works in any browser and needs no GPU.
-- **Models**, about 200 MB, fetched once into `public/models/` (below). They are never
+- **Models**, about 250 MB, fetched once into `public/models/` (below). They are never
   downloaded at run time and nothing is sent anywhere.
 - Python is only needed once, to prepare the face detector (through `uv`, which fetches what it
   needs).
+
+Only want to try it? The app is hosted at
+[thomas-villani.github.io/browser-video-lab](https://thomas-villani.github.io/browser-video-lab/)
+with the default models; see [the app](app.md#the-hosted-app).
 
 ## Install
 
@@ -22,6 +26,14 @@ npm install            # also copies ONNX Runtime's wasm files into public/ort
 ```
 
 ## Models
+
+```bash
+npm run models         # all of the below (or some: npm run models -- vad whisper)
+```
+
+It fetches each model from its source, checks its SHA-256 against the file the measurements were
+made with, keeps files already present, and relaxes YuNet (below) with `uv`. Names: `vad`,
+`whisper`, `segmentation`, `voices`, `faces`, `plates`. By hand:
 
 | File | What it does | Source | License |
 |---|---|---|---|

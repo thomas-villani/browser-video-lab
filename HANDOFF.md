@@ -39,6 +39,23 @@ difference, denser visual analysis where nobody speaks.
 - Power overlay still "Best performance" (restore: `powercfg /overlaysetactive
   00000000-0000-0000-0000-000000000000` when the user says).
 
+## Done: repository setup (2026-10-29)
+
+- Biome (`biome.json`, `npm run lint` / `format`): lint rules recommended minus a few that fight
+  the codebase's idioms (non-null assertions, assignments in expressions, `any` for Playwright);
+  formats TS/JS only.
+- CI (`.github/workflows/ci.yml`): Biome, typecheck, `npm test`, both builds on PRs and main.
+  The browser tests stay local (GPU, models, footage).
+- Releases: release-please (`release.yml`, `release-please-config.json`, manifest at 0.0.1,
+  history before c699eac ignored); Conventional Commits from now on. Merging the release PR
+  tags, releases and runs `pages.yml`.
+- Pages (`pages.yml`, `npm run build:pages` → `dist-pages/`): the app as index.html under
+  `/browser-video-lab/`, the default models copied from public/models (`npm run models`:
+  `scripts/fetch-models.mjs`, SHA-256 pinned), coi-serviceworker for isolation. Browser code
+  resolves public files through `asset()` (`src/runtime/asset.ts`, vite's BASE_URL); docs
+  keep recording `/models/...`.
+- Dependabot: npm and actions, weekly, grouped.
+
 ## Done: step 9, library half (2026-10-28)
 
 - Models are data: `ModelConfig` (`src/doc/models.ts`: url, decoder preset `yolo`,
@@ -278,7 +295,7 @@ Open issues found in step 1 (also in DESIGN.md open questions / NOTES.md):
 
 ## Conventions
 
-- Commands: `npm test`, `npm run typecheck`, `npm run videodoc -- <cmd>`, `npm run pipeline`,
+- Commands: `npm run lint`, `npm test`, `npm run typecheck`, `npm run videodoc -- <cmd>`, `npm run pipeline`,
   `npm run transcribe`, `npm run eval:labels`, `npm run eval:refine`. Python only through
   `uv run ...` (not installed globally).
 - Node 24 runs `.ts` directly (type stripping): Node-loaded TS (`src/doc`, `src/track`,
@@ -291,7 +308,8 @@ Open issues found in step 1 (also in DESIGN.md open questions / NOTES.md):
 - Benchmark only on AC power with the "Best performance" power overlay (battery skewed results
   2–3x). The overlay was switched on 2026-10-25; restore with
   `powercfg /overlaysetactive 00000000-0000-0000-0000-000000000000` when done.
-- Commit messages end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- Commit messages: Conventional Commits (release-please), ending with
+  `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Traps already hit
 
@@ -302,6 +320,9 @@ Open issues found in step 1 (also in DESIGN.md open questions / NOTES.md):
 - `.gitignore`: a `!` negation must come after the rule it overrides (`*.jsonl` is ignored
   globally; `!results/labels/*.jsonl` is at the end).
 - `npm run` changes cwd to the repo root; the CLI resolves user paths against `INIT_CWD`.
+- Browser code must load public/ files through `asset('/models/...')`, never a bare
+  `'/models/...'`: on Pages the site lives under `/browser-video-lab/` (and in pages mode
+  vite's publicDir is off, so only what `pagesSite` copies exists).
 - The harness builds into `dist/` and copies `public/` (≈1 GB of models) on every build; the
   CLI rebuilds only when sources are newer than `dist/analyze.html`.
 - Media and models are gitignored (`public/media/*.mp4`, `public/models/*.onnx`, Whisper dirs);

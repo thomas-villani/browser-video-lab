@@ -74,7 +74,7 @@ for (const [clip, count] of Object.entries(PLAN)) {
     const batch = list.slice(i, i + 50);
     execFileSync('ffmpeg', [
       '-v', 'error', '-y', '-i', `public/media/${clip}.mp4`,
-      '-vf', `select='${batch.map(([f]) => `eq(n\,${f})`).join('+')}'`, '-fps_mode', 'passthrough', '-q:v', '2',
+      '-vf', `select='${batch.map(([f]) => `eq(n,${f})`).join('+')}'`, '-fps_mode', 'passthrough', '-q:v', '2',
       `public/label/${clip}/_%05d.jpg`,
     ]);
     // ffmpeg numbers outputs sequentially; rename to frame indices.
@@ -86,5 +86,6 @@ for (const [clip, count] of Object.entries(PLAN)) {
   console.error(`${clip}: ${list.length} frames`);
 }
 writeFileSync('public/label/frames.json', JSON.stringify(frames));
-const byKind = frames.reduce((m, f) => ({ ...m, [f.kind]: (m[f.kind] ?? 0) + 1 }), {});
+const byKind = {};
+for (const f of frames) byKind[f.kind] = (byKind[f.kind] ?? 0) + 1;
 console.log(JSON.stringify({ frames: frames.length, byKind, out: 'public/label/frames.json' }));

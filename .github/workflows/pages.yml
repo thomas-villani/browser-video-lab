@@ -1,0 +1,52 @@
+# Publish the app to GitHub Pages: on each release (called from release.yml) or by hand. The
+# default models are fetched from their upstream sources (checked by SHA-256, cached) and served
+# with the site, so the app never contacts a third party while it runs.
+name: Pages
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - uses: astral-sh/setup-uv@v10.3.3
+      - run: npm ci
+      - uses: actions/cache@v6
+        with:
+          path: public/models
+          key: models-${{ hashFiles('scripts/fetch-models.mjs', 'scripts/fetch-model.mjs', 'tools/dynamic_yunet.py') }}
+      - run: npm run models
+      - id: pages
+        uses: actions/configure-pages@v6
+      - run: npm run build:pages
+        env:
+          PAGES_BASE: ${{ steps.pages.outputs.base_path }}/
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist-pages
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

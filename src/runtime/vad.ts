@@ -3,8 +3,9 @@
 import * as ort from 'onnxruntime-web/webgpu';
 import { DEFAULT_VAD, speechSpans, type Span, type VadOptions } from '../transcript';
 import type { Pcm } from './audio';
+import { asset } from './asset';
 
-ort.env.wasm.wasmPaths = '/ort/';
+ort.env.wasm.wasmPaths = asset('/ort/');
 
 const WINDOW = 512;
 const CONTEXT = 64;
@@ -13,7 +14,7 @@ export class Vad {
   private constructor(private session: ort.InferenceSession) {}
 
   static async create(url = '/models/silero_vad.onnx'): Promise<Vad> {
-    return new Vad(await ort.InferenceSession.create(url, { executionProviders: ['wasm'] }));
+    return new Vad(await ort.InferenceSession.create(asset(url), { executionProviders: ['wasm'] }));
   }
 
   /** Speech probability per 32 ms window. */

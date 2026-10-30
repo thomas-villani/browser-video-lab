@@ -10,7 +10,7 @@
 //     "models": { "coco": { "url": "/models/rfdetr_nano.onnx", "decoder": "detr", "labels": [...] } },
 //     "tracks": { "vehicles": { "model": "rfdetr", "labels": "car,truck,bus,motorcycle" } }
 //   }
-import { ModelError, MODELS, resolveModel, type ModelConfig } from './models.ts';
+import { type ModelError, MODELS, resolveModel, type ModelConfig } from './models.ts';
 import { parseSettings, PlanError, PRODUCERS, type ConfigValue, type Overrides, type PlanContext, type ProducerSpec, type Producers } from './plan.ts';
 import { LAYER_NAME_RE, LAYER_NAMES } from './schema.ts';
 

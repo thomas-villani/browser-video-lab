@@ -7,8 +7,9 @@ import * as ort from 'onnxruntime-web/webgpu';
 import { WeSpeakerFeatureExtractor } from '@huggingface/transformers';
 import { decodePowerset, embeddingMask, SEG, windowStarts, type WindowSeg } from '../audio/diarize.ts';
 import type { Pcm } from './audio';
+import { asset } from './asset';
 
-ort.env.wasm.wasmPaths = '/ort/';
+ort.env.wasm.wasmPaths = asset('/ort/');
 
 export interface DiarizerOptions {
   /** Hugging Face repo ids under public/models. */
@@ -48,8 +49,8 @@ export class Diarizer {
   ) {}
 
   static async create(o: DiarizerOptions): Promise<Diarizer> {
-    const seg = await ort.InferenceSession.create(`/models/${o.segmentation}/onnx/model.onnx`, { executionProviders: ['wasm'] });
-    const emb = await ort.InferenceSession.create(`/models/${o.embedding}/onnx/model.onnx`, { executionProviders: [o.device], graphOptimizationLevel: 'all' });
+    const seg = await ort.InferenceSession.create(asset(`/models/${o.segmentation}/onnx/model.onnx`), { executionProviders: ['wasm'] });
+    const emb = await ort.InferenceSession.create(asset(`/models/${o.embedding}/onnx/model.onnx`), { executionProviders: [o.device], graphOptimizationLevel: 'all' });
     return new Diarizer(seg, emb, new WeSpeakerFeatureExtractor(FBANK as never));
   }
 

@@ -1,5 +1,5 @@
 // Creating, merging, validating and summarizing VideoDocs. Pure TS.
-import { LAYER_NAME_RE, LAYER_NAMES, SCHEMA, TRACK_LAYERS, type DocLayers, type Layer, type Layers, type SourceInfo, type Track, type VideoDoc } from './schema.ts';
+import { LAYER_NAME_RE, LAYER_NAMES, SCHEMA, TRACK_LAYERS, type DocLayers, type Layer, type SourceInfo, type Track, type VideoDoc } from './schema.ts';
 
 export class DocError extends Error {}
 

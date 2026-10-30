@@ -1,4 +1,5 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
+import { join } from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
 
 // Cross-origin isolation enables SharedArrayBuffer, which ORT's threaded wasm backend needs.
@@ -60,17 +61,48 @@ function ortRuntime(): Plugin {
   };
 }
 
-export default defineConfig({
-  plugins: [ortRuntime(), labelStore()],
-  server: { headers: isolation },
-  preview: { headers: isolation },
-  optimizeDeps: { exclude: ['onnxruntime-web'] },
-  build: {
-    target: 'esnext',
-    // ORT and transformers.js are large by nature; the warning is noise here.
-    chunkSizeWarningLimit: 4096,
-    rollupOptions: {
-      input: { bench: 'index.html', pipeline: 'pipeline.html', transcribe: 'transcribe.html', label: 'label.html', analyze: 'analyze.html', app: 'app.html' },
+// The GitHub Pages build (`npm run build:pages`, i.e. --mode pages; .github/workflows/pages.yml):
+// the app alone, as the site's index.html under PAGES_BASE (default '/browser-video-lab/'). Pages
+// cannot send the isolation headers, so coi-serviceworker adds them (the page reloads once, the
+// first time). Of public/ it ships the runtimes and the default models (scripts/fetch-models.mjs).
+function pagesSite(pages: string): Plugin {
+  const sw = 'coi-serviceworker.min.js';
+  let outDir = 'dist-pages';
+  return {
+    name: 'pages-site',
+    apply: 'build',
+    configResolved: (c) => void (outDir = c.build.outDir),
+    transformIndexHtml: () => [{ tag: 'script', attrs: { src: `${pages}${sw}` }, injectTo: 'head-prepend' }],
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: sw, source: readFileSync(`node_modules/coi-serviceworker/${sw}`) });
     },
-  },
+    async writeBundle() {
+      renameSync(join(outDir, 'app.html'), join(outDir, 'index.html'));
+      const { modelFiles } = await import('./scripts/fetch-models.mjs');
+      for (const p of ['favicon.ico', 'ort', 'ort-hf', 'models/LICENSE-yunet', ...modelFiles().map((f: string) => `models/${f}`)])
+        cpSync(join('public', p), join(outDir, p), { recursive: true });
+    },
+  };
+}
+
+export default defineConfig(({ mode }) => {
+  const pages = mode === 'pages' ? (process.env.PAGES_BASE ?? '/browser-video-lab/') : undefined;
+  const input: Record<string, string> = pages
+    ? { app: 'app.html' }
+    : { bench: 'index.html', pipeline: 'pipeline.html', transcribe: 'transcribe.html', label: 'label.html', analyze: 'analyze.html', app: 'app.html' };
+  return {
+    base: pages ?? '/',
+    publicDir: pages ? false : 'public',
+    plugins: [ortRuntime(), labelStore(), ...(pages ? [pagesSite(pages)] : [])],
+    server: { headers: isolation },
+    preview: { headers: isolation },
+    optimizeDeps: { exclude: ['onnxruntime-web'] },
+    build: {
+      outDir: pages ? 'dist-pages' : 'dist',
+      target: 'esnext',
+      // ORT and transformers.js are large by nature; the warning is noise here.
+      chunkSizeWarningLimit: 4096,
+      rollupOptions: { input },
+    },
+  };
 });

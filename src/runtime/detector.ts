@@ -10,8 +10,9 @@ import * as ort from 'onnxruntime-web/webgpu';
 import { geometryFor, modelSpec, type Detection, type GeometryOptions, type ModelSpec } from '../models';
 import { GpuPreprocessor, type FrameSource } from '../preprocess';
 import { BatchedReadback } from '../readback';
+import { asset } from './asset';
 
-ort.env.wasm.wasmPaths = '/ort/';
+ort.env.wasm.wasmPaths = asset('/ort/');
 ort.env.logLevel = 'error';
 
 /** Every detector's session.run, one after another (see the header). */
@@ -56,7 +57,7 @@ export class Detector {
 
   static async create(opts: DetectorOptions): Promise<Detector> {
     const spec = typeof opts.model === 'string' ? modelSpec(opts.model) : opts.model;
-    const session = await ort.InferenceSession.create(spec.url, {
+    const session = await ort.InferenceSession.create(asset(spec.url), {
       executionProviders: ['webgpu'],
       graphOptimizationLevel: 'all',
       preferredOutputLocation: 'gpu-buffer',

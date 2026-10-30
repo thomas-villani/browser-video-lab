@@ -7,9 +7,13 @@
   "type": "module",
   "scripts": {
     "postinstall": "node scripts/copy-ort.mjs",
+    "models": "node scripts/fetch-models.mjs",
     "dev": "vite",
     "build": "vite build",
+    "build:pages": "vite build --mode pages",
     "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome check --write .",
     "videodoc": "node cli/videodoc.ts",
     "mcp": "node cli/mcp.ts",
     "ui": "node cli/videodoc.ts ui",
@@ -34,7 +38,9 @@
     "onnxruntime-web": "^1.30.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.6.4",
     "@webgpu/types": "^0.1.74",
+    "coi-serviceworker": "0.1.7",
     "playwright-core": "^1.64.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.5"
@@ -42,5 +48,8 @@
   "bin": {
     "videodoc": "cli/videodoc.ts",
     "videodoc-mcp": "cli/mcp.ts"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }
