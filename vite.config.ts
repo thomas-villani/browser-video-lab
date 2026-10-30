@@ -79,8 +79,13 @@ function pagesSite(pages: string): Plugin {
     async writeBundle() {
       renameSync(join(outDir, 'app.html'), join(outDir, 'index.html'));
       const { modelFiles } = await import('./scripts/fetch-models.mjs');
-      for (const p of ['favicon.ico', 'ort', 'ort-hf', 'models/LICENSE-yunet', ...modelFiles().map((f: string) => `models/${f}`)])
-        cpSync(join('public', p), join(outDir, p), { recursive: true });
+      // Models not fetched (CI builds without them) are left out; pages.yml runs `npm run models` first.
+      const missing: string[] = [];
+      for (const p of ['favicon.ico', 'ort', 'ort-hf', 'models/LICENSE-yunet', ...modelFiles().map((f: string) => `models/${f}`)]) {
+        if (existsSync(join('public', p))) cpSync(join('public', p), join(outDir, p), { recursive: true });
+        else missing.push(p);
+      }
+      if (missing.length) this.warn(`not in public/ (npm run models), left out: ${missing.join(', ')}`);
     },
   };
 }

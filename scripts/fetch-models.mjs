@@ -82,7 +82,7 @@ export function modelFiles() {
   return Object.values(MODELS).flatMap((m) => [
     ...m.files.map(([p]) => p),
     ...(m.made ? [m.made] : []),
-    ...(m.hf
+    ...(m.hf && existsSync(`public/models/${m.hf[0]}`)
       ? readdirSync(`public/models/${m.hf[0]}`)
           .filter((f) => f.endsWith('.json'))
           .map((f) => `${m.hf[0]}/${f}`)
