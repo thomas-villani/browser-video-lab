@@ -19,7 +19,7 @@ re-encodes.
 
 - **App:** **Review faces and plates** to check what will be covered and adjust it, list words
   to bleep, then **Blur and bleep…** ([the app](app.md)).
-- **CLI:** `videodoc redact video.mp4 [--style ...] [--keep 3,7] [--keep-plates 2] [--words "Okafor,Daniel Reyes"] [--profanity]` ([CLI](cli.md#redact)).
+- **CLI:** `videodoc redact video.mp4 [--style ...] [--keep 3,7] [--keep-plates 2] [--words "Okafor,Daniel Reyes"] [--profanity] [--speakers Sam]` ([CLI](cli.md#redact)).
 - **Agents:** the MCP `redact` tool ([MCP](mcp.md)).
 
 All three use the same code and the same review file, so a review made in the app is honored
@@ -96,6 +96,14 @@ clips more of the word before. The edges fade over 8 ms so they do not click.
 **Sound.** `bleep` (default) replaces the stretch with a 1 kHz tone at -10 dBFS; `mute` with
 silence. Both crossfade at the edges.
 
+**Speakers.** `speakers` bleeps everything a speaker says: each of their turns from the speakers
+layer, 0.25 s either side (names from `<video>.speakers.json`, or "Speaker 2"). For a guest who
+asked not to be heard, or a bystander. Turns come from automatic diarization, which misses some
+speech (most of it where people talk over each other) and gives some to the wrong speaker;
+where the speaker overlaps others, they are bleeped too. Name and correct the speakers first
+([CLI](cli.md#speakers), the app's speakers panel), then listen to the copy. In the app's
+review, **Everything one person says** lists the speakers to tick.
+
 **Keep.** `keepWords` leaves matches audible by the key of their first word (`<transcript
 item>.<word>`, as in the log). If the transcript is made again, the keys change, so a review's
 `keepWords` is dropped with a warning (and those words are bleeped again).
@@ -141,7 +149,7 @@ previewed live with the same drawing code as the output, and lets a person corre
  "plates": "6f0e41c2d9b8a173",
  "transcript": "34d4be4619086f8f",
  "options": {"style": "blur", "margin": 0.15, "hold": 0.3, "keep": [12], "keepPlates": [4], "cover": ["faces", "plates"],
-  "words": ["Ackover", "Daniel Reyes"], "profanity": true, "sound": "bleep", "lead": 0.4, "tail": 0.2, "keepWords": ["41.3"]},
+  "words": ["Ackover", "Daniel Reyes"], "profanity": true, "sound": "bleep", "lead": 0.4, "tail": 0.2, "keepWords": ["41.3"], "speakers": []},
  "addedAudio": [[612.5, 613.4]],
  "added": [
   {"id":-1,"f0":300,"f1":360,"samples":[[300,100,80,60,70],[330,160,82,60,70],[360,160,82,60,70]]}
@@ -197,7 +205,8 @@ track with its layer, times and whether it was kept or added by hand. One track 
 stays readable for a crowd's tens of thousands. With words bleeped, `detectors.transcript` names
 the transcript, and `audio` lists every match (times include lead and tail; `term` is the list
 entry, or `profanity`) and every stretch added by hand; `seconds` is the audio rewritten,
-overlaps counted once.
+overlaps counted once. A bleeped speaker's turns are spans with `speaker` (its name), counted in
+`totals.turns`, and `detectors.speakers` names the speakers layer.
 
 ## Speed
 
@@ -215,6 +224,6 @@ the app's review, playback with the live preview holds full frame rate on the cr
 
 ## Not covered yet
 
-Text on screens and documents, voices (bleeping a word leaves the speaker's voice), names the
+Text on screens and documents, voices (bleeping a word or a speaker hides what is said, not how the voice sounds), names the
 transcript misspells or misses, and identification of the same person across shots. Audio-only
 files (no video track) cannot be redacted yet.

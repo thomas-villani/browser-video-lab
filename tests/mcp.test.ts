@@ -18,7 +18,7 @@ after(() => client.close());
 
 test('mcp: tools are listed with schemas generated from the layer registry', async () => {
   const { tools } = await client.listTools();
-  assert.deepEqual(tools.map((t) => t.name), ['markdown', 'search', 'analyze', 'redact', 'info', 'layers', 'check']);
+  assert.deepEqual(tools.map((t) => t.name), ['markdown', 'search', 'speakers', 'analyze', 'redact', 'info', 'layers', 'check']);
   const analyze = tools.find((t) => t.name === 'analyze')!;
   const layersDoc = (analyze.inputSchema.properties!.layers as { description: string }).description;
   for (const n of LAYER_NAMES) assert.ok(layersDoc.includes(`\n${n}: `), `${n} described`);
@@ -67,4 +67,41 @@ test('mcp: search finds passages across a folder and lists videos not analyzed y
   assert.equal(r.hits[0].time, '01:01–01:05');
   assert.match(r.hits[0].snippet, /\*\*zoning\*\* \*\*board\*\*/);
   assert.deepEqual(r.notAnalyzed, [join(dir, 'b.mp4')]);
+});
+
+test('mcp: speakers are named and merged into <video>.speakers.json; other videos get suggestions; search and info use the names', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'videodoc-'));
+  const voice = (k: number) => Array.from({ length: 8 }, (_, i) => (i === k ? 1 : 0));
+  for (const [name, fp, ids] of [['a.mp4', 'v0:1:a', [0, 2, 0.5]], ['b.mp4', 'v0:1:b', [2, 4]]] as const) {
+    writeFileSync(join(dir, name), '');
+    const doc = withLayers(newDoc({ name, fingerprint: fp, size: 1, duration: 30, width: 640, height: 360, fps: 25, frames: 750, video: { codec: 'avc1' } }), {
+      transcript: { producer: { configHash: 'h', config: {} }, items: [{ t0: 0, t1: 9, text: 'The zoning board met.' }, { t0: 10, t1: 19, text: 'The zoning board voted.' }] } as unknown as Layer<never>,
+      speakers: {
+        producer: { configHash: 's', config: {} },
+        items: ids.map((k, i) => ({ id: i + 1, turns: [[i * 10, i * 10 + 9.5]], voice: Number.isInteger(k) ? voice(k) : [0.8, 0.6, 0, 0, 0, 0, 0, 0] })),
+      } as unknown as Layer<never>,
+    });
+    writeFileSync(join(dir, `${name}.videodoc.json`), formatDoc(doc));
+  }
+  const call = async (args: Record<string, unknown>) => JSON.parse(text(await client.callTool({ name: 'speakers', arguments: { video: join(dir, 'a.mp4'), ...args } })));
+  let r = await call({ name: { 1: 'Ann', 2: 'Dana' }, merge: { 3: 'Ann' } });
+  assert.equal(r.changed, true);
+  assert.equal(r.edits, join(dir, 'a.mp4.speakers.json'));
+  assert.deepEqual(r.speakers.map((s: { name: string; merged?: number[] }) => [s.name, s.merged]), [['Ann', [3]], ['Dana', undefined]]);
+  r = await call({ move: [{ t0: 12, t1: 14, to: 'Ann', from: 'Dana' }] });
+  assert.deepEqual(r.moves, [{ index: 0, t0: 12, t1: 14, from: 'Dana', to: 'Ann' }]);
+  r = await call({ name: { 1: 'Dana' } });
+  assert.equal(r.kind, 'usage');
+  assert.match(r.error, /merge them instead/);
+  // b.mp4's first voice is Dana's: suggested, not applied.
+  const b = JSON.parse(text(await client.callTool({ name: 'speakers', arguments: { video: join(dir, 'b.mp4') } })));
+  assert.deepEqual(b.speakers.map((s: { name: string; suggestion?: { name: string } }) => [s.name, s.suggestion?.name]), [['Speaker 1', 'Dana'], ['Speaker 2', undefined]]);
+  assert.equal(b.changed, false);
+  const hits = JSON.parse(text(await client.callTool({ name: 'search', arguments: { query: 'zoning board', paths: [dir], speaker: 'Dana' } })));
+  assert.deepEqual(hits.hits.map((h: { time: string; speaker: string }) => [h.time, h.speaker]), [['00:10–00:19', 'Dana']]);
+  assert.deepEqual(hits.noSpeaker, [join(dir, 'b.mp4')]);
+  const info = JSON.parse(text(await client.callTool({ name: 'info', arguments: { video: join(dir, 'a.mp4') } })));
+  assert.equal(info.layers.speakers.named, 2);
+  r = await call({ reset: true });
+  assert.equal(r.edits, undefined);
 });

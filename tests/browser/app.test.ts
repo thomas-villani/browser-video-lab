@@ -136,3 +136,56 @@ test('app: a preset picked with its model file adds its track layer, which the r
   assert.deepEqual(errors, []);
   await page.close();
 });
+
+test('app: who speaks: name, merge and separate speakers, give a paragraph to another, search what one says', async (t) => {
+  if (skip) return t.skip(skip);
+  const { page, errors } = await open();
+  // In the folded "What to analyze" options.
+  await page.$eval('#opt-speakers', (e: HTMLInputElement) => {
+    e.checked = true;
+    e.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await page.setInputFiles('#add-files', [fresh(fixture('tts-dialog')!)]);
+  await page.waitForSelector('#list li');
+  await page.click('#list li');
+  await page.click('#read .analyze-this');
+  await page.waitForSelector('#read .speakers .spk-list li', { timeout: 300_000 });
+  const rows = () => page.$$eval('#read .spk-list li', (e: Element[]) => e.length);
+  assert.equal(await rows(), 3);
+  const said = () => page.$$eval('#read p.said .who', (e: Element[]) => e.map((x) => x.textContent));
+
+  await page.fill('#read .spk-name[data-id="1"]', 'Host');
+  await page.press('#read .spk-name[data-id="1"]', 'Tab');
+  await page.waitForFunction(() => document.querySelector('#read p.said .who')?.textContent === 'Host:');
+  await page.selectOption('#read .spk-merge[data-id="3"]', '2');
+  await page.waitForFunction(() => document.querySelectorAll('#read .spk-list li').length === 2);
+  assert.ok(!(await said()).includes('Speaker 3:'), 'merged: Speaker 3 says nothing now');
+  await page.click('#read .spk-unmerge[data-id="3"]');
+  await page.waitForFunction(() => document.querySelectorAll('#read .spk-list li').length === 3);
+
+  // The second paragraph (Speaker 2's) given to the host.
+  assert.equal((await said())[1], 'Speaker 2:');
+  const words = clean(await page.textContent('#read p.said >> nth=1')).split(' ').slice(-4).join(' ');
+  await page.click('#read p.said >> nth=1 >> .who');
+  await page.selectOption('#read .who-pick', '1');
+  await page.waitForSelector('#read .spk-moves li');
+  // It joins the host's paragraph before it.
+  const now = await page.$$eval('#read p.said', (ps: Element[]) => ps.map((p) => [p.querySelector('.who')?.textContent, p.textContent!.replace(/\s+/g, ' ')]));
+  assert.equal(now.find(([, text]: string[]) => text.includes(words))?.[0], 'Host:', `"${words}" is the host's now`);
+  await page.click('#read .spk-unmove');
+  await page.waitForFunction(() => !document.querySelector('#read .spk-moves'));
+
+  // Search what one person says.
+  await page.fill('#read .spk-name[data-id="3"]', 'Cal');
+  await page.press('#read .spk-name[data-id="3"]', 'Tab');
+  await page.waitForFunction(() => [...document.querySelectorAll('#read .who')].some((e) => e.textContent === 'Cal:'));
+  await page.fill('#q', 'agree completely');
+  await page.waitForSelector('#results li.hit');
+  assert.match(clean(await page.textContent('#results li.hit .where')), /Cal/);
+  await page.selectOption('#said-by', 'Host');
+  await page.waitForFunction(() => !document.querySelector('#results li.hit'));
+  await page.selectOption('#said-by', 'Cal');
+  await page.waitForSelector('#results li.hit');
+  assert.deepEqual(errors, []);
+  await page.close();
+});

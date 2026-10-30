@@ -326,10 +326,19 @@ loaded. Reading and searching work without WebGPU.
     (`src/audio/diarize.ts`). AMI test meetings: 21.5% DER at the default 2 s window step, 8-10x
     real time (NOTES.md; pyannote 3.1 reports 18.8%). Words go to speakers (`whoSaid`); the
     Markdown says who speaks; search hits carry `speaker`; the app has "Who speaks". Measured
-    with `scripts/eval-speakers.ts` (models once, clustering grids in Node). Not yet: names (a
-    user-edited map keyed by voice, so it survives re-analysis), merge / split / reassign,
-    suggesting names from voices named in other videos, the app's speaker panel, search
-    filtered by speaker, redacting one speaker, caption exports with speakers.
+    with `scripts/eval-speakers.ts` (models once, clustering grids in Node).
+    **Built, part 2 (2026-10-29):** a person's edits in `<video>.speakers.json`
+    (`videodoc-speakers/0`): names, merges (`same`), moves of speech to another or a new
+    speaker; each edit keeps its speaker's voice and follows it to the closest speaker (cosine
+    distance < 0.4, measured with `scripts/eval-voices.ts`) when the speakers are found again.
+    `withSpeakers(doc, edits)` is the doc as edited, read by the Markdown, search (`speaker`
+    filter, names on hits), `info` and redaction (`speakers`: bleep everything one person says).
+    Names suggested from voices named in other videos (same folder or `--voices`), never
+    applied. CLI `videodoc speakers`, MCP `speakers`; the app has a speakers panel (name,
+    listen, merge, suggestions), reassigns a paragraph by clicking its speaker, a "Said by"
+    search filter and speakers to bleep in the review. Not yet: splitting a speaker from a
+    point on (a move covers a span), voice disguise, caption exports with speakers, a library
+    of known voices beyond the folder.
 11. **Sound events and tone**: an audio tagger (YAMNet / AST / CLAP class) for gunshots, sirens,
     shouting, breaking glass, dogs, alarms, music, applause, as a time-indexed layer that search
     and Markdown show; CLAP-style audio-text embeddings also allow describing a sound in a

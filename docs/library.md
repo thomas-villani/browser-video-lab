@@ -60,15 +60,31 @@ Types: `VideoDoc`, `SourceInfo`, `Layer<T>`, `Producer`, `SpeechItem`, `Transcri
 | `silence` | Mark silent gaps at least this long (default: the keyframes layer's, else 4 s). |
 
 Also `fmtTime(t, long?)` (`83.4` → `"01:23"`) and `maxFaces(tracks, f0, f1)`. With a speakers layer, paragraphs
-say who speaks; `names` (`{ 2: "Dana" }`) replaces "Speaker 2".
+say who speaks: "Speaker 2", or its name in a doc as edited (`withSpeakers`, below). `paragraph(p)`
+is called with each paragraph's exact times and speaker, in order.
 
 ### Speakers
 
 | Function | |
 |---|---|
-| `whoSaid(transcript, speakers)` | Transcript segments split where the speaker changes (by word, with word times): `{ t0, t1, text, speaker }`. |
+| `whoSaid(transcript, speakers)` | Transcript segments split where the speaker changes (by word, with word times): `{ t0, t1, text, speaker, item, words? }`. |
 | `speakerAt(speakers, t0, t1)` | The speaker talking over most of `[t0, t1]`, or undefined. |
-| `speakerName(id, names?)` | "Speaker 2", or its name. |
+| `speakerName(speaker)` | Its name, or "Speaker 2". |
+| `findSpeaker(speakers, ref)` | The speaker a name, "Speaker 2" or "2" refers to (also one merged into it). |
+| `talkTime(speaker)` | Seconds it speaks. |
+
+Edits (names, merges, moves; the file format is in [format](format.md#speaker-names-videospeakersjson)).
+Each edit function returns new edits; `items` is the speakers layer as analyzed:
+
+| Function | |
+|---|---|
+| `newEdits(doc)`, `checkEdits(json, doc)` / `parseEdits(text, doc)`, `formatEdits(edits)` | Make, read (moved to the speakers found now, by voice; `{ edits, warnings }`) and write. |
+| `withSpeakers(doc, edits)` | The doc with the speakers as edited (`name`, `merged` set); the doc is not changed. `applyEdits(items, edits)` for the speakers alone. |
+| `nameSpeaker(edits, items, id, name)` | Name a speaker ("" removes it); a name in use is an error (merge instead). |
+| `mergeSpeakers(edits, items, id, into)`, `unmergeSpeaker(edits, id)` | One person found as two, and undoing it. |
+| `addSpeaker(edits, items, name?)` | A speaker the analysis missed: `{ edits, id }`. |
+| `moveSpeech(edits, items, t0, t1, to, from?)`, `unmove(edits, index)` | Speech in a span is `to`'s (only `from`'s, when given). |
+| `namedVoices(edits, video)`, `suggestSpeakerNames(speakers, known, threshold?)` | Named voices of a file; names for unnamed speakers from them (closest within `SAME_VOICE`, 0.4). |
 
 The clustering is pure too (`src/audio/diarize.ts`: `diarize(windows, embeddings, opts)`), as is the
 DER used to measure it (`src/audio/der.ts`).
@@ -85,10 +101,11 @@ stemmed words, stopwords dropped; passages with the query's words in order score
 | `window` | 20 | passage length, seconds |
 | `gap` | 2 | hits in one video closer than this (seconds) count as overlapping; the best is kept |
 | `k1`, `b` | 1.2, 0.75 | BM25 parameters |
+| `speaker` | | only what this speaker says (a name, "Speaker 2" or "2"); docs without it add nothing |
 
 A `SearchHit` has `doc` (index into `docs`), `t0`/`t1` (the passage), `at` (where to seek to hear the
 first matched word: half a second before it, or its segment's start without word times), `score`, `matched` (stems), `snippet` (matches in `**bold**`),
-`keyframe` (index of the nearest keyframe), `speaker` (who says the first matched word, with a speakers layer) and `i0`/`i1` (transcript items spanned). Helpers:
+`keyframe` (index of the nearest keyframe), `speaker` and `speakerId` (who says the first matched word, with a speakers layer: its name or "Speaker 2") and `i0`/`i1` (transcript items spanned). Helpers:
 `terms(text)`, `stem(word)`, `highlight(text, stems)`.
 
 ### Tracks

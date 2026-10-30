@@ -84,9 +84,9 @@ interface SpeakerItem { id: number; turns: [t0: number, t1: number][]; voice: nu
 Ids are numbered in order of first appearance (`Speaker 1` speaks first). `turns` are when that
 speaker talks, in seconds; turns of different speakers overlap where people talk at once.
 `voice` is the speaker's voice embedding (256 numbers, unit length), for recognizing the same
-voice in other videos. The doc holds no names: speakers are named separately, so a name
-survives analyzing again. Words are assigned to the speaker talking over most of them
-(`whoSaid`, `speakerAt` in `src/doc/speakers.ts`).
+voice in other videos. The doc holds no names: names and corrections are a person's, kept in
+`<video>.speakers.json` (below), so they survive analyzing again. Words are assigned to the
+speaker talking over most of them (`whoSaid`, `speakerAt` in `src/doc/speakers.ts`).
 
 How it works (`src/audio/diarize.ts`, the same pipeline as pyannote 3.1): a segmentation model
 finds up to three local speakers in 10 s windows that slide every `speakers.step` seconds; each
@@ -201,8 +201,8 @@ they are files in `<video>.keyframes/` named by frame number.
 - one `## Shot n · start–end` section per shot (with `· up to n faces` when faces were found;
   no heading numbers when the video is one shot);
 - `**[mm:ss]**` paragraphs of speech, broken at pauses of 2 s or more and after a keyframe
-  once the sentence ends; with a speakers layer, `**[mm:ss] Speaker 2:**`, broken where the
-  speaker changes (by word, when the transcript has word times);
+  once the sentence ends; with a speakers layer, `**[mm:ss] Speaker 2:**` (or the name given),
+  broken where the speaker changes (by word, when the transcript has word times);
 - `*(no speech a–b)*` for silent gaps of 4 s or more;
 - `![mm:ss](path)` for keyframes when images are supplied.
 
@@ -213,3 +213,40 @@ paragraphs overlapping the window are rendered, under a note saying it is an exc
 
 The review (`<video>.redact.json`, `videodoc-redact/0`) and the redaction log
 (`<out>.redactions.json`, `videodoc-redactions/0`) are described in [redaction](redaction.md).
+
+### Speaker names: `<video>.speakers.json`
+
+Names and corrections a person made to the speakers layer (with `videodoc speakers`, the MCP
+`speakers` tool or the app's speakers panel), next to the video:
+
+```json
+{
+ "schema": "videodoc-speakers/0",
+ "source": {"name": "interview.mp4", "fingerprint": "v0:…"},
+ "speakers": [
+  {"id": 1, "name": "Dana", "voice": [0.0123, …]},
+  {"id": 3, "same": 1, "voice": […]},
+  {"id": 5, "name": "Guest", "added": true}
+ ],
+ "moves": [
+  {"t0": 61.2, "t1": 63.5, "from": 2, "to": 1}
+ ]
+}
+```
+
+- `name`: what the Markdown, search hits, `info` and redaction call the speaker (instead of
+  "Speaker 1"). Names are per video and unique within it.
+- `same`: this speaker is that one (one person found as two): its turns go to it, and it keeps
+  its name. Its id still finds it ("Speaker 3" names Dana).
+- `added`: a speaker the analysis missed, given speech by a move; it has no voice.
+- `moves`: speech in `[t0, t1]` is `to`'s: only `from`'s turns there (when given), or all of
+  `[t0, t1]` (everyone else's speech there is removed). Applied in order, after merges.
+- `voice`: the speaker's voice when the edit was made. When the speakers are found again (other
+  settings, a new model), ids change; each edit then goes to the speaker whose voice is closest,
+  within a cosine distance of 0.4 (`SAME_VOICE`), and edits whose voice is not found are dropped
+  with a warning. The same voices suggest names in other videos: an unnamed speaker whose voice
+  is within 0.4 of one named in another video's file (in the same folder, or `--voices`) gets
+  that name as a suggestion, never applied by itself.
+
+The doc itself is never changed: `withSpeakers(doc, edits)` gives the doc as edited, for reading.
+The file is safe to edit by hand (names especially); a file for another video is refused.

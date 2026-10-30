@@ -2,8 +2,9 @@
 // files. A folder is the same collection the CLI uses: docs are read from and saved to
 // <video>.videodoc.json next to each video, keyframe JPEGs to <video>.keyframes/<frame>.jpg.
 // Dropped files keep their docs in memory (downloadable); a dropped .videodoc.json is matched
-// to its video by name. A face review is <video>.redact.json, next to the video likewise.
-import { checkPlan, formatDoc, formatPlan, parseDoc, type KeyframeItem, type RedactPlan, type VideoDoc } from '../doc/index.ts';
+// to its video by name. A face review is <video>.redact.json, next to the video likewise, and
+// speaker names and corrections <video>.speakers.json.
+import { checkEdits, checkPlan, formatDoc, formatPlan, formatEdits, parseDoc, type KeyframeItem, type RedactPlan, type SpeakerEdits, type VideoDoc } from '../doc/index.ts';
 
 type DirHandle = FileSystemDirectoryHandle & { values(): AsyncIterable<FileSystemDirectoryHandle | FileSystemFileHandle> };
 
@@ -45,9 +46,24 @@ export interface Entry {
   wantWords?: boolean;
   /** Keyframe images by frame: object URLs. */
   images: Map<number, string>;
+  /** Speaker edits as read or last made (<video>.speakers.json), checked against the doc when
+   *  used (speakerEdits): after re-analysis they follow the voices. */
+  speakersRaw?: unknown;
+  /** speakersRaw checked against `speakersFor` (the doc it was checked against). */
+  speakers?: SpeakerEdits;
+  speakersFor?: VideoDoc;
 }
 
 let nextId = 1;
+
+async function readJson(dir: DirHandle, file: string): Promise<unknown> {
+  try {
+    return JSON.parse(await (await (await dir.getFileHandle(file)).getFile()).text());
+  } catch (e) {
+    if ((e as DOMException).name !== 'NotFoundError') console.warn(file, e);
+    return undefined;
+  }
+}
 
 async function readDoc(dir: DirHandle, name: string): Promise<VideoDoc | undefined> {
   try {
@@ -75,7 +91,8 @@ export async function openFolder(): Promise<{ folder: string; root: FileSystemDi
       else if (h.kind === 'file' && VIDEO_EXT.test(h.name)) {
         const fh = h as FileSystemFileHandle;
         const doc = await readDoc(dir, h.name);
-        entries.push({ id: nextId++, path: prefix + h.name, name: h.name, file: () => fh.getFile(), dir, doc, status: doc ? 'ready' : 'new', images: new Map() });
+        const speakersRaw = doc ? await readJson(dir, `${h.name}.speakers.json`) : undefined;
+        entries.push({ id: nextId++, path: prefix + h.name, name: h.name, file: () => fh.getFile(), dir, doc, status: doc ? 'ready' : 'new', images: new Map(), speakersRaw });
       }
     }
   };
@@ -86,6 +103,14 @@ export async function openFolder(): Promise<{ folder: string; root: FileSystemDi
 /** Entries for dropped or picked files; .videodoc.json files among them attach to their video. */
 export async function fromFiles(files: File[]): Promise<Entry[]> {
   const plans = new Map(files.filter((f) => f.name.endsWith('.redact.json')).map((f) => [f.name.slice(0, -'.redact.json'.length), f]));
+  const speakers = new Map<string, unknown>();
+  for (const f of files.filter((f) => f.name.endsWith('.speakers.json'))) {
+    try {
+      speakers.set(f.name.slice(0, -'.speakers.json'.length), JSON.parse(await f.text()));
+    } catch (e) {
+      console.warn(e);
+    }
+  }
   const docs = new Map<string, VideoDoc>();
   for (const f of files.filter((f) => f.name.endsWith('.videodoc.json'))) {
     try {
@@ -98,7 +123,7 @@ export async function fromFiles(files: File[]): Promise<Entry[]> {
     .filter((f) => VIDEO_EXT.test(f.name))
     .map((f) => {
       const doc = docs.get(f.name);
-      return { id: nextId++, path: f.name, name: f.name, file: async () => f, doc, planFile: plans.get(f.name), status: doc ? 'ready' : 'new', images: new Map() } as Entry;
+      return { id: nextId++, path: f.name, name: f.name, file: async () => f, doc, planFile: plans.get(f.name), speakersRaw: speakers.get(f.name), status: doc ? 'ready' : 'new', images: new Map() } as Entry;
     });
 }
 
@@ -138,6 +163,43 @@ export async function savePlan(e: Entry): Promise<boolean> {
   if (!e.dir || !e.plan) return false;
   const w = await (await e.dir.getFileHandle(`${e.name}.redact.json`, { create: true })).createWritable();
   await w.write(formatPlan(e.plan));
+  await w.close();
+  return true;
+}
+
+/** The speaker edits of e, checked against its doc (again when the doc changed); warnings go to
+ *  `warn`. Undefined when there are none or the doc has no speakers layer. */
+export function speakerEdits(e: Entry, warn: (w: string) => void = console.warn): SpeakerEdits | undefined {
+  if (!e.doc?.layers.speakers || e.speakersRaw === undefined) return undefined;
+  if (e.speakersFor !== e.doc) {
+    e.speakersFor = e.doc;
+    try {
+      const r = checkEdits(e.speakersRaw, e.doc);
+      e.speakers = r.edits;
+      for (const w of r.warnings) warn(w);
+    } catch (err) {
+      e.speakers = undefined;
+      warn(`the speaker names (${e.name}.speakers.json) were not used: ${(err as Error).message}`);
+    }
+  }
+  return e.speakers;
+}
+
+/** Set e's speaker edits and save them next to the video (folder entries; with no edits left, the
+ *  file is removed); false when there is nowhere to save. */
+export async function saveSpeakerEdits(e: Entry, edits: SpeakerEdits): Promise<boolean> {
+  const empty = !edits.speakers.length && !edits.moves.length;
+  e.speakersRaw = empty ? undefined : JSON.parse(formatEdits(edits));
+  e.speakers = empty ? undefined : edits;
+  e.speakersFor = e.doc;
+  if (!e.dir) return false;
+  const file = `${e.name}.speakers.json`;
+  if (empty) {
+    await e.dir.removeEntry(file).catch(() => {});
+    return true;
+  }
+  const w = await (await e.dir.getFileHandle(file, { create: true })).createWritable();
+  await w.write(formatEdits(edits));
   await w.close();
   return true;
 }

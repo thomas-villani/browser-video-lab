@@ -94,7 +94,8 @@ export function summarize(doc: VideoDoc): Record<string, LayerSummary> {
   const { speakers } = doc.layers;
   if (speakers) {
     const talk = speakers.items.map((s) => s.turns.reduce((n, [a, b]) => n + b - a, 0));
-    out.speakers = { ...base(speakers), speakers: speakers.items.length, ...(talk.length && { mostSpeaking: r1((100 * Math.max(...talk)) / Math.max(1e-9, talk.reduce((a, b) => a + b, 0))) }) };
+    const named = speakers.items.filter((s) => s.name).length;
+    out.speakers = { ...base(speakers), speakers: speakers.items.length, ...(named && { named }), ...(talk.length && { mostSpeaking: r1((100 * Math.max(...talk)) / Math.max(1e-9, talk.reduce((a, b) => a + b, 0))) }) };
   }
   if (scenes) out.scenes = base(scenes);
   if (keyframes) {

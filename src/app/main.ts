@@ -3,11 +3,14 @@
 // is uploaded: analysis runs here on WebGPU, docs are saved next to the videos or kept in memory.
 // Faces and license plates can be reviewed over the player (review.ts) and blurred into a copy.
 // A pipeline preset (presets.ts) adds its track layers and settings to what is analyzed.
-import { coversAudio, formatLog, highlight, PIPELINE_SCHEMA, pipelineContext, REDACT_DEFAULTS, redactionLog, resolve, search, speakerName, toMarkdown, type Pipeline } from '../doc/index.ts';
+import {
+  addSpeaker, coversAudio, formatLog, highlight, mergeSpeakers, moveSpeech, nameSpeaker, namedVoices, newEdits, PIPELINE_SCHEMA, pipelineContext, REDACT_DEFAULTS, redactionLog, resolve, search,
+  speakerName, suggestSpeakerNames, talkTime, toMarkdown, unmergeSpeaker, unmove, withSpeakers, type Pipeline, type SpeakerEdits, type SpeakerItem,
+} from '../doc/index.ts';
 import { analyze, frameImages } from '../analyze';
 import { redact } from '../redact';
 import {
-  canOpenFolders, download, downloadDoc, fromFiles, loadPlan, loadSavedImages, openFolder, probeDuration, redactTarget, saveDoc, savePlan, storeImages, type Entry,
+  canOpenFolders, download, downloadDoc, fromFiles, loadPlan, loadSavedImages, openFolder, probeDuration, redactTarget, saveDoc, savePlan, saveSpeakerEdits, speakerEdits, storeImages, type Entry,
 } from './library';
 import { decoderOf, dropPreset, folderPreset, pickedPreset, PRESET_FILE, type Preset } from './presets';
 import { analysisSteps, esc, estimate, list, markdownToHtml, marks, stepOf, suggestions, trackCost } from './render';
@@ -33,6 +36,8 @@ const state = {
   marked: new Set<string>(),
   /** Example queries from the loaded transcripts. */
   suggest: [] as string[],
+  /** Search only what this speaker says (a name), or everyone. */
+  saidBy: '',
 };
 
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
@@ -216,13 +221,13 @@ async function startRedact(e: Entry) {
   const kept = (e.plan?.options.keep.length ?? 0) + (e.plan?.options.keepPlates.length ?? 0);
   const what = kept ? `faces and plates covered except the ${plural(kept, 'one')} you left visible` : 'every face and plate covered';
   const o = e.plan?.options ?? REDACT_DEFAULTS;
-  const sound = coversAudio(o, e.plan?.addedAudio) ? `the words you listed ${o.sound === 'bleep' ? 'bleeped' : 'silenced'}` : 'sound kept';
+  const sound = coversAudio(o, e.plan?.addedAudio) ? `the ${o.speakers.length ? 'speakers and words' : 'words'} you listed ${o.sound === 'bleep' ? 'bleeped' : 'silenced'}` : 'sound kept';
   toast(`Making <b>${esc(to.name)}</b>: ${what}, ${sound}.${faces} Progress shows in the list.`);
 }
 
 async function redactEntry(e: Entry, onProgress: (p: { pass: string; stage: string; done: number; total: number }) => void, signal: AbortSignal) {
   const to = e.redactTo!;
-  const doc = e.doc!;
+  const doc = view(e);
   await loadPlan(e);
   const opts = e.plan?.options ?? REDACT_DEFAULTS;
   const added = e.plan?.added ?? [];
@@ -466,10 +471,109 @@ const tipSeen = () => {
 };
 
 function renderRead(e: Entry) {
-  const md = toMarkdown(e.doc!, { image: (k) => `kf:${k.frame}` });
+  const paras: typeof paragraphs = [];
+  const md = toMarkdown(view(e), { image: (k) => `kf:${k.frame}`, paragraph: (p) => paras.push(p) });
+  paragraphs = paras;
   const mark = state.marked.size ? (t: string) => highlight(t, state.marked) : undefined;
-  $('#read').innerHTML = markdownToHtml(md, (f) => e.images.get(f), mark);
+  // The speakers panel goes under the title and facts.
+  const html = markdownToHtml(md, (f) => e.images.get(f), mark);
+  const made = html.indexOf('class="made"');
+  const at = made < 0 ? 0 : html.indexOf('</p>', made) + 4;
+  $('#read').innerHTML = html.slice(0, at) + speakersPanel(e) + html.slice(at);
 }
+
+// ---- speakers: names, merges and moves (<video>.speakers.json) ----
+
+/** e's doc with the speakers as named and corrected. */
+const view = (e: Entry) => withSpeakers(e.doc!, speakerEdits(e, (w) => toast(esc(w), { ms: 0 })));
+
+/** Paragraphs of the reading view, in order (toMarkdown's): their times and speaker. */
+let paragraphs: { t0: number; t1: number; speaker?: number }[] = [];
+let speakersTold = false;
+
+/** The speakers panel above the text: name each, listen to them, merge one person found as two,
+ *  take a suggested name, undo moves. */
+function speakersPanel(e: Entry): string {
+  if (!e.doc?.layers.speakers) return '';
+  const list = view(e).layers.speakers!.items;
+  if (!list.length) return '<section class="speakers"><p class="muted">No one was found speaking.</p></section>';
+  const edits = speakerEdits(e);
+  const total = list.reduce((n, s) => n + talkTime(s), 0);
+  const known = state.entries.filter((x) => x !== e).flatMap((x) => {
+    const ed = speakerEdits(x);
+    return ed ? namedVoices(ed, x.path) : [];
+  });
+  const suggested = suggestSpeakerNames(list, known);
+  const rows = list.map((s) => {
+    const others = list.filter((o) => o.id !== s.id).map((o) => `<option value="${o.id}">${esc(speakerName(o))}</option>`).join('');
+    const sug = suggested.find((x) => x.id === s.id);
+    return `<li data-id="${s.id}">
+      <input class="spk-name" data-id="${s.id}" value="${esc(s.name ?? '')}" placeholder="Speaker ${s.id}" aria-label="Name of speaker ${s.id}" spellcheck="false">
+      <span class="muted">${fmt(talkTime(s))} · ${Math.round((100 * talkTime(s)) / Math.max(1e-9, total))}%</span>
+      <button class="spk-listen" data-id="${s.id}" title="Play this speaker's next turn">Listen</button>
+      ${others ? `<select class="spk-merge" data-id="${s.id}" title="One person found as two: merge them"><option value="">Same person as…</option>${others}</select>` : ''}
+      ${(s.merged ?? []).map((m) => `<button class="spk-unmerge" data-id="${m}" title="Merged into this speaker: separate again">+ Speaker ${m} ×</button>`).join('')}
+      ${sug ? `<span class="spk-sug">Sounds like <b>${esc(sug.name)}</b> in ${esc(sug.video)}. <button class="spk-use" data-id="${s.id}" data-name="${esc(sug.name)}">It's ${esc(sug.name)}</button></span>` : ''}
+    </li>`;
+  });
+  const name = (id: number) => esc(speakerName(list.find((s) => s.id === id || s.merged?.includes(id)) ?? { id }));
+  const moves = (edits?.moves ?? []).map((m, i) => `<li>${fmt(m.t0)}–${fmt(m.t1)} ${m.from !== undefined ? `of ${name(m.from)} ` : ''}given to ${name(m.to)} <button class="spk-unmove" data-i="${i}">Undo</button></li>`).join('');
+  return `<section class="speakers"><div class="spk-head"><b>Speakers</b> <span class="muted">found automatically: names follow the voices when the video is analyzed again. Click a speaker's name in the text to give that paragraph to someone else.</span></div>
+    <ul class="spk-list">${rows.join('')}</ul>${moves ? `<ul class="spk-moves">${moves}</ul>` : ''}</section>`;
+}
+
+/** Change e's speaker edits with `f` (on the layer's speakers), save and redraw. */
+async function editSpeakers(e: Entry, f: (edits: SpeakerEdits, items: SpeakerItem[]) => SpeakerEdits) {
+  let next: SpeakerEdits;
+  try {
+    next = f(speakerEdits(e) ?? newEdits(e.doc!), e.doc!.layers.speakers!.items);
+  } catch (err) {
+    toast(esc((err as Error).message));
+    return renderRead(e);
+  }
+  const saved = await saveSpeakerEdits(e, next).catch((err) => (console.warn(err), false));
+  if (!saved && !speakersTold) {
+    speakersTold = true;
+    toast(e.dir ? 'The speaker names could not be saved next to the video.' : 'Speaker names are kept in this tab until you close it. Open the folder (rather than dropping files) to save them next to the video.');
+  }
+  renderRead(e);
+}
+
+/** Give paragraph `i` of the reading view to another speaker (or a new one). */
+function pickSpeaker(e: Entry, who: HTMLElement, i: number) {
+  const list = view(e).layers.speakers?.items ?? [];
+  const p = paragraphs[i];
+  if (!p) return;
+  const sel = document.createElement('select');
+  sel.className = 'who-pick';
+  sel.innerHTML = `<option value="">Who says this?</option>${list.map((s) => `<option value="${s.id}"${s.id === p.speaker ? ' disabled' : ''}>${esc(speakerName(s))}</option>`).join('')}<option value="new">Someone else…</option>`;
+  who.replaceWith(sel);
+  sel.focus();
+  sel.addEventListener('blur', () => renderRead(e));
+  sel.addEventListener('change', () => {
+    if (!sel.value) return;
+    let to = Number(sel.value);
+    void editSpeakers(e, (ed, items) => {
+      if (sel.value === 'new') {
+        const n = prompt('Name of the speaker');
+        if (n === null) return ed;
+        ({ edits: ed, id: to } = addSpeaker(ed, items, n));
+      }
+      return moveSpeech(ed, items, p.t0, p.t1, to);
+    });
+  });
+}
+
+/** Play speaker `id`'s next turn after the current time (from the first after the last). */
+function listen(e: Entry, id: number) {
+  const s = view(e).layers.speakers?.items.find((x) => x.id === id);
+  if (!s?.turns.length) return;
+  const now = video().currentTime;
+  const next = s.turns.find(([a]) => a > now + 0.5) ?? s.turns[0];
+  seek(next[0], true);
+  void video().play().catch(() => {});
+}
+
 
 /** Put newly available keyframe images into the reading view without re-rendering it. */
 function fillImages(e: Entry) {
@@ -510,7 +614,12 @@ function follow(t: number, scroll: boolean) {
 function renderResults() {
   closeReview();
   const searchable = state.entries.filter((e) => e.doc?.layers.transcript);
-  const hits = search(searchable.map((e) => e.doc!), state.query, { top: 30 });
+  const docs = searchable.map(view);
+  // Named speakers across the library: search what one of them says.
+  const names = [...new Set(docs.flatMap((d) => (d.layers.speakers?.items ?? []).flatMap((s) => (s.name ? [s.name] : []))))].sort((a, b) => a.localeCompare(b));
+  if (!names.includes(state.saidBy)) state.saidBy = '';
+  const hits = search(docs, state.query, { top: 30, ...(state.saidBy && { speaker: state.saidBy }) });
+  const saidBy = names.length ? `<label class="said-by">Said by <select id="said-by"><option value="">anyone</option>${names.map((n) => `<option${n === state.saidBy ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select></label>` : '';
   const box = $('#results');
   box.hidden = false;
   $('#viewer').hidden = true;
@@ -525,6 +634,7 @@ function renderResults() {
     ? `<p>No matches in ${plural(searchable.length, 'video')}.${tryThese.length ? ` Try: ${tryThese.map((s) => `<button class="suggest">${esc(s)}</button>`).join(' ')}` : ''}</p>`
     : '';
   box.innerHTML =
+    saidBy +
     head +
     none +
     hits
@@ -536,7 +646,7 @@ function renderResults() {
         const ts = (t: number) => (long ? `${Math.floor(t / 3600)}:${fmt(t % 3600).padStart(5, '0')}` : fmt(t));
         return `<li class="hit" data-id="${e.id}" data-t="${h.at}" data-terms="${esc(h.matched.join(' '))}">
           ${img ? `<img src="${img}" alt="">` : '<div class="thumb"></div>'}
-          <div><div class="where"><b>${esc(e.path)}</b> · ${ts(h.t0)}–${ts(h.t1)}${h.speaker !== undefined ? ` · ${esc(speakerName(h.speaker))}` : ""}</div><div class="snip">${marks(h.snippet)}</div></div></li>`;
+          <div><div class="where"><b>${esc(e.path)}</b> · ${ts(h.t0)}–${ts(h.t1)}${h.speaker !== undefined ? ` · ${esc(h.speaker)}` : ""}</div><div class="snip">${marks(h.snippet)}</div></div></li>`;
       })
       .join('');
 }
@@ -771,18 +881,41 @@ function wire() {
     const e = li && state.entries.find((x) => x.id === Number(li.dataset.id));
     if (e) void showEntry(e, Number(li.dataset.t), li.dataset.terms?.split(' ').filter(Boolean));
   });
+  $('#results').addEventListener('change', (ev) => {
+    if ((ev.target as HTMLElement).id !== 'said-by') return;
+    state.saidBy = (ev.target as HTMLSelectElement).value;
+    renderResults();
+  });
   $('#read').addEventListener('click', (ev) => {
-    const el = (ev.target as HTMLElement).closest<HTMLElement>('[data-t]');
-    if ((ev.target as HTMLElement).classList.contains('analyze-this') && state.selected) return enqueue(state.selected);
-    if ((ev.target as HTMLElement).classList.contains('cancel-this') && state.selected) return cancelJob(state.selected);
+    const t = ev.target as HTMLElement;
+    const e = state.selected;
+    const el = t.closest<HTMLElement>('[data-t]');
+    if (t.classList.contains('analyze-this') && e) return enqueue(e);
+    if (t.classList.contains('cancel-this') && e) return cancelJob(e);
+    if (e?.doc?.layers.speakers) {
+      const id = Number(t.dataset.id);
+      if (t.classList.contains('who')) return pickSpeaker(e, t, [...document.querySelectorAll('#read p.said')].indexOf(t.closest('p.said')!));
+      if (t.classList.contains('spk-listen')) return listen(e, id);
+      if (t.classList.contains('spk-use')) return void editSpeakers(e, (ed, items) => nameSpeaker(ed, items, id, t.dataset.name!));
+      if (t.classList.contains('spk-unmerge')) return void editSpeakers(e, (ed) => unmergeSpeaker(ed, id));
+      if (t.classList.contains('spk-unmove')) return void editSpeakers(e, (ed) => unmove(ed, Number(t.dataset.i)));
+    }
     if (el) seek(Number(el.dataset.t));
+  });
+  $('#read').addEventListener('change', (ev) => {
+    const t = ev.target as HTMLInputElement;
+    const e = state.selected;
+    if (!e?.doc?.layers.speakers) return;
+    const id = Number(t.dataset.id);
+    if (t.classList.contains('spk-name')) void editSpeakers(e, (ed, items) => nameSpeaker(ed, items, id, t.value));
+    else if (t.classList.contains('spk-merge') && t.value) void editSpeakers(e, (ed, items) => mergeSpeakers(ed, items, id, Number(t.value)));
   });
   $('#doc-actions').addEventListener('click', async (ev) => {
     const e = state.selected;
     const id = (ev.target as HTMLElement).id;
     if (!e?.doc) return;
     if (id === 'copy-md') {
-      await navigator.clipboard.writeText(toMarkdown(e.doc));
+      await navigator.clipboard.writeText(toMarkdown(view(e)));
       (ev.target as HTMLElement).textContent = 'Copied';
       setTimeout(() => ((ev.target as HTMLElement).textContent = 'Copy Markdown'), 1500);
     } else if (id === 'dl-doc') downloadDoc(e);
@@ -797,7 +930,7 @@ function wire() {
     if (!review.entry) follow(video().currentTime, false);
   });
 
-  // Drop videos (and their .videodoc.json and .redact.json files) anywhere.
+  // Drop videos (and their .videodoc.json, .redact.json and .speakers.json files) anywhere.
   const body = document.body;
   body.addEventListener('dragover', (ev) => {
     ev.preventDefault();
@@ -813,7 +946,7 @@ function wire() {
     const rest = await takePreset(files);
     const entries = await fromFiles(rest);
     if (entries.length) await addEntries(entries);
-    else if (rest.length === files.length) toast('Only video files (mp4, mov, mkv, webm) and their .videodoc.json and .redact.json files can be added.');
+    else if (rest.length === files.length) toast('Only video files (mp4, mov, mkv, webm) and their .videodoc.json, .redact.json and .speakers.json files can be added.');
   });
 }
 

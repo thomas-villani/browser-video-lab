@@ -4,8 +4,10 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { analyze, markdown, redact } from '../../cli/lib.ts';
+import { analyze, markdown, redact, ROOT, speakers } from '../../cli/lib.ts';
+import { parseRttm } from '../../src/audio/der.ts';
 import { summarize } from '../../src/doc/index.ts';
 import { context, fixture, fresh, loadDoc, near, notReady, saveBaseline, speed } from './lib.ts';
 
@@ -119,6 +121,34 @@ test('tts-words: bleeped words carry the tone over the logged spans and nowhere 
   // The video stream is byte-for-byte the source's.
   const md5 = (p: string) => execFileSync('ffmpeg', ['-v', 'error', '-i', p, '-map', '0:v', '-c', 'copy', '-f', 'md5', '-'], { encoding: 'utf8' }).trim();
   assert.equal(md5(r.out), md5(video));
+});
+
+test('tts-dialog: a speaker named in the speakers file is bleeped over their turns and nowhere else', async (t) => {
+  const why = (await notReady(ctx)) ?? (hasFfmpeg ? undefined : 'ffmpeg not found (needed to inspect the output)');
+  if (why) return t.skip(why);
+  const video = fresh(fixture('tts-dialog')!);
+  await analyze(ctx, video, { layers: ['speakers'] });
+  speakers(ctx, video, { name: { 3: 'Cal' } });
+  const r = (await redact(ctx, video, { cover: 'none', speakers: 'Cal' })) as { out: string; log: string; audio: { turns: number; seconds: number } };
+  const log = JSON.parse(readFileSync(r.log, 'utf8')) as { audio: { spans: { t0: number; t1: number; speaker?: string }[] }; caveat: string };
+  const spans = log.audio.spans;
+  assert.ok(spans.length > 0 && spans.every((s) => s.speaker === 'Cal'));
+  assert.match(log.caveat, /diarization/);
+  near(t, 'tts-dialog.bleepSpeaker.seconds', r.audio.seconds, { abs: 1 });
+  const tone = toned(audio(r.out));
+  const at = (s: number) => Math.round(s * 100);
+  const near0 = (f: number) => spans.some((s) => f >= at(s.t0) - 3 && f <= at(s.t1) + 3);
+  assert.equal(tone.filter((v, f) => v && !near0(f)).length, 0, 'no tone outside the spans');
+  // The voice that is Cal (the reference speaker overlapping Cal's spans most) is covered.
+  const ref = parseRttm(readFileSync(join(ROOT, 'tests/fixtures/tts-dialog.rttm'), 'utf8'));
+  const overlap = (a: number, b: number) => spans.reduce((n, s) => n + Math.max(0, Math.min(b, s.t1) - Math.max(a, s.t0)), 0);
+  const voices = [...new Set(ref.map((x) => x.speaker))];
+  const cal = voices.sort((x, y) => ref.filter((z) => z.speaker === y).reduce((n, z) => n + overlap(z.t0, z.t1), 0) - ref.filter((z) => z.speaker === x).reduce((n, z) => n + overlap(z.t0, z.t1), 0))[0];
+  const turns = ref.filter((x) => x.speaker === cal);
+  const said = turns.reduce((n, x) => n + x.t1 - x.t0, 0);
+  const toneIn = turns.reduce((n, x) => n + tone.slice(at(x.t0), at(x.t1)).filter(Boolean).length / 100, 0);
+  t.diagnostic(`Cal is ${cal}: ${toneIn.toFixed(1)} of ${said.toFixed(1)} s bleeped`);
+  assert.ok(toneIn / said > 0.95, 'all that voice says is bleeped');
 });
 
 test('rickroll-cuts: keyframe images are written and linked from the Markdown', async (t) => {

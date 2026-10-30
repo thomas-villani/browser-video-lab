@@ -5,6 +5,7 @@
 // encodes. Node computes the log without decoding anything.
 import { tracksOf } from './doc.ts';
 import { TRACK_LAYERS, type Box, type Track, type VideoDoc } from './schema.ts';
+import { findSpeaker, speakerName } from './speakers.ts';
 import { trackBox } from './tracks.ts';
 import { findWords, mergeTimes, PROFANITY, type WordMatch } from './words.ts';
 
@@ -47,11 +48,17 @@ export interface RedactOptions {
   tail: number;
   /** Matches to leave audible, by the key of their first word ("<transcript item>.<word>"). */
   keepWords: string[];
+  /** Speakers whose every turn is bleeped (names, "Speaker 2" or "2", in the doc as edited:
+   *  withSpeakers). Needs the speakers layer. */
+  speakers: string[];
 }
+
+/** Seconds covered before and after each turn of a bleeped speaker. */
+export const SPEAKER_PAD = 0.25;
 
 export const REDACT_DEFAULTS: RedactOptions = {
   style: 'blur', margin: 0.15, hold: 0.3, keep: [], keepPlates: [], keepTracks: {}, cover: ['faces', 'plates'],
-  words: [], profanity: false, sound: 'bleep', lead: 0.4, tail: 0.2, keepWords: [],
+  words: [], profanity: false, sound: 'bleep', lead: 0.4, tail: 0.2, keepWords: [], speakers: [],
 };
 
 /** A track to cover and the layer it comes from (hand-drawn tracks count as faces). */
@@ -163,10 +170,11 @@ export const keptIds = (o: Pick<RedactOptions, 'keep' | 'keepPlates' | 'keepTrac
   kind === 'faces' ? o.keep : kind === 'plates' ? o.keepPlates : (o.keepTracks?.[kind] ?? []);
 
 /** Whether `o` (and spans `added` by hand) redact any audio. */
-export const coversAudio = (o: Pick<RedactOptions, 'words' | 'profanity'>, added: [number, number][] = []) =>
-  o.words.some((w) => w.trim()) || o.profanity || added.length > 0;
+export const coversAudio = (o: Pick<RedactOptions, 'words' | 'profanity'> & { speakers?: string[] }, added: [number, number][] = []) =>
+  o.words.some((w) => w.trim()) || o.profanity || added.length > 0 || !!o.speakers?.some((s) => s.trim());
 
-/** A stretch of audio to bleep: a list match (with its words) or a span added by hand. */
+/** A stretch of audio to bleep: a list match (with its words), a bleeped speaker's turn
+ *  (`speaker`) or a span added by hand. */
 export interface AudioSpan {
   /** Seconds, with lead and tail. */
   t0: number;
@@ -177,6 +185,8 @@ export interface AudioSpan {
   term?: string;
   kept: boolean;
   added?: true;
+  /** The bleeped speaker whose turn this is. */
+  speaker?: string;
 }
 
 /**
@@ -196,6 +206,16 @@ export function audioSpans(doc: VideoDoc, o: RedactOptions, added: [number, numb
     const keep = new Set(o.keepWords);
     const pad = (m: WordMatch) => clip(m.t0 - o.lead, m.t1 + o.tail);
     for (const m of findWords(doc, terms)) out.push({ ...pad(m), key: m.key, text: m.text, term: m.term, kept: keep.has(m.key) });
+  }
+  const refs = (o.speakers ?? []).filter((s) => s.trim());
+  if (refs.length) {
+    const l = doc.layers.speakers;
+    if (!l) throw new Error('the doc has no speakers layer (bleeping a speaker needs one)');
+    for (const ref of refs) {
+      const s = findSpeaker(l.items, ref);
+      if (!s) throw new Error(`no speaker '${ref}' (the speakers are ${l.items.map((x) => speakerName(x)).join(', ')})`);
+      for (const [a, b] of s.turns) out.push({ ...clip(a - SPEAKER_PAD, b + SPEAKER_PAD), kept: false, speaker: speakerName(s) });
+    }
   }
   for (const [a, b] of added) out.push({ ...clip(a, b), kept: false, added: true });
   return out.sort((a, b) => a.t0 - b.t0);
@@ -241,7 +261,7 @@ export interface RedactionLog {
   tracks: { id: number; layer: RedactKind; t0: number; t1: number; frames: number; kept: boolean; added?: true }[];
   /** Audio redaction, when any: every match (kept ones left audible) and span added by hand,
    *  with lead and tail; `seconds` is the audio rewritten (overlaps counted once). */
-  audio?: { sound: RedactSound; totals: { matches: number; kept: number; added: number; seconds: number }; spans: AudioSpan[] };
+  audio?: { sound: RedactSound; totals: { matches: number; kept: number; added: number; turns?: number; seconds: number }; spans: AudioSpan[] };
 }
 
 export const REDACTION_CAVEAT =
@@ -249,6 +269,11 @@ export const REDACTION_CAVEAT =
   'hand-labeled faces, mostly small ones in the background) and some plates (angled, blurred or ' +
   'distant ones), and does not cover other identifying details (screens, tattoos, voices). ' +
   'Review the output before release.';
+
+export const SPEAKER_CAVEAT =
+  "A bleeped speaker's turns come from automatic diarization, which misses some speech (most of " +
+  'it where people talk over each other) and gives some to the wrong speaker; where they overlap ' +
+  'others, those are bleeped too. Listen to the output before release.';
 
 export const AUDIO_CAVEAT =
   'Bleeped words come from automatic transcription, which misspells some words (names most of ' +
@@ -287,10 +312,13 @@ export function redactionLog(doc: VideoDoc, o: RedactOptions, output?: Redaction
   if (coversAudio(o, addedAudio)) {
     const spans = audioSpans(doc, o, addedAudio);
     const t = doc.layers.transcript;
-    if (t && spans.some((x) => !x.added)) detectors.transcript = { model: t.producer.model, configHash: t.producer.configHash, device: t.device, createdAt: t.createdAt };
+    if (t && spans.some((x) => x.key)) detectors.transcript = { model: t.producer.model, configHash: t.producer.configHash, device: t.device, createdAt: t.createdAt };
+    const sp = doc.layers.speakers;
+    if (sp && spans.some((x) => x.speaker)) detectors.speakers = { model: sp.producer.model, configHash: sp.producer.configHash, device: sp.device, createdAt: sp.createdAt };
     const seconds = audioCover(spans).reduce((n, [a, b]) => n + b - a, 0);
-    const matches = spans.filter((x) => !x.added);
-    audio = { sound: o.sound, totals: { matches: matches.length, kept: matches.filter((x) => x.kept).length, added: addedAudio.length, seconds: Math.round(seconds * 100) / 100 }, spans };
+    const matches = spans.filter((x) => x.key);
+    const turns = spans.filter((x) => x.speaker).length;
+    audio = { sound: o.sound, totals: { matches: matches.length, kept: matches.filter((x) => x.kept).length, added: addedAudio.length, ...(turns && { turns }), seconds: Math.round(seconds * 100) / 100 }, spans };
   }
   const s = doc.source;
   return {
@@ -300,7 +328,7 @@ export function redactionLog(doc: VideoDoc, o: RedactOptions, output?: Redaction
     detectors,
     options: o,
     totals: { tracks: tracks.length, redacted: tracks.length - kept, kept, added: added.length, plates, framesWithRegions, regions, maxPerFrame },
-    caveat: [...(kinds.length || added.length || !audio ? [REDACTION_CAVEAT] : []), ...(audio ? [AUDIO_CAVEAT] : [])].join(' '),
+    caveat: [...(kinds.length || added.length || !audio ? [REDACTION_CAVEAT] : []), ...(audio?.spans.some((x) => !x.speaker) ? [AUDIO_CAVEAT] : []), ...(audio?.totals.turns ? [SPEAKER_CAVEAT] : [])].join(' '),
     tracks,
     ...(audio && { audio }),
   };
@@ -361,7 +389,7 @@ export function newPlan(doc: VideoDoc, options: RedactOptions = REDACT_DEFAULTS)
   return {
     schema: 'videodoc-redact/0', source: { name: doc.source.name, fingerprint: doc.source.fingerprint }, ...(faces && { faces }), ...(plates && { plates }), ...(transcript && { transcript }),
     ...(custom.length && { tracks }),
-    options: { ...options, keep: [...options.keep], keepPlates: [...options.keepPlates], keepTracks, cover: [...options.cover], words: [...options.words], keepWords: [...options.keepWords] },
+    options: { ...options, keep: [...options.keep], keepPlates: [...options.keepPlates], keepTracks, cover: [...options.cover], words: [...options.words], keepWords: [...options.keepWords], speakers: [...(options.speakers ?? [])] },
     added: [], addedAudio: [],
   };
 }
@@ -408,6 +436,7 @@ export function checkPlan(v: unknown, doc: VideoDoc): { plan: RedactPlan; warnin
   }
   plan.options.cover = plan.options.cover.filter((k) => typeof k === 'string');
   plan.options.words = plan.options.words.filter((w) => typeof w === 'string' && w.trim());
+  plan.options.speakers = Array.isArray(plan.options.speakers) ? plan.options.speakers.filter((w) => typeof w === 'string' && w.trim()) : [];
   return { plan, warnings };
 }
 

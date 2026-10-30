@@ -8,7 +8,7 @@
 import { parseArgs } from 'node:util';
 import { DocError, LAYER_NAMES, PlanError, REDACT_DEFAULTS, REDACT_SOUNDS, REDACT_STYLES } from '../src/doc/index.ts';
 import {
-  analyze, check, DEFAULT_IMAGE_SIZE, DEFAULT_LAYERS, info, layers, MARKDOWN_LAYERS, markdown, oneShotBrowser, openUrl, redact, search, serveApp, UsageError,
+  analyze, check, DEFAULT_IMAGE_SIZE, DEFAULT_LAYERS, info, layers, MARKDOWN_LAYERS, markdown, oneShotBrowser, openUrl, redact, search, serveApp, speakers, UsageError,
   type Context, type Progress,
 } from './lib.ts';
 
@@ -29,8 +29,13 @@ Commands:
   search <query> <paths...>
                          Find where something is said: ranked transcript passages across videos
                          and folders, with times and the nearest keyframe (no browser; analyze first).
+  speakers <video>       Who speaks, and your edits: name speakers, merge one person found as
+                         two, move speech given to the wrong speaker. Saved as
+                         <video>.speakers.json; the Markdown, search, info and redact use the
+                         names. Suggests names from voices named in other videos (no browser;
+                         analyze with --layers speakers first).
   redact <video>         Blur every face and license plate, and bleep listed words (--words,
-                         --profanity): writes <name>.redacted.mp4 and a redaction log
+                         --profanity) or speakers (--speakers): writes <name>.redacted.mp4 and a redaction log
                          (<out>.redactions.json: every track and bleeped word, which were kept).
                          Analyzes what it needs first. Uses <video>.redact.json when there (a
                          review made in the app: kept tracks, regions added by hand).
@@ -79,12 +84,26 @@ redact options:
   --lead, --tail <s>     Seconds covered before and after each word (default ${REDACT_DEFAULTS.lead}, ${REDACT_DEFAULTS.tail}:
                          word times from Whisper run late).
   --keep-words <keys>    Matches to leave audible, by word key from the log (e.g. 12.3).
+  --speakers <list>      Bleep everything these speakers say: names or ids, e.g. "Dana,3".
                          Options given here override the review's.
   --no-plan              Ignore <video>.redact.json.
   --set, --force         As for analyze (detection settings, e.g. --set faces.every=1).
 
 search options:
   --top <n>              Hits to return (default 10).
+  --speaker <s>          Only what this speaker says (a name given with speakers, or 2).
+
+speakers options:
+  --name <id=name>       Name a speaker, repeatable: --name 2=Dana (2= removes the name).
+  --merge <a=b>          a is b (one person found as two), repeatable: --merge 3=Dana.
+  --unmerge <id>         Undo a merge: the speaker stands alone again.
+  --move <span=to>       Speech given to the wrong speaker, repeatable: 1:02-1:05=Dana (all
+                         speech then) or "Speaker 2@1:02-1:05=Dana" (only theirs). A name that is
+                         no speaker's adds one.
+  --unmove <i>           Undo move i (as listed).
+  --voices <folder>      Also suggest names from speakers files under this folder (recursive;
+                         the video's own folder is always searched), repeatable.
+  --reset                Delete <video>.speakers.json first.
 
 ui options:
   --port <n>             Preferred port (default 4317; the next free one is used).
@@ -124,6 +143,15 @@ const { values: a, positionals } = parseArgs({
     lead: { type: 'string' },
     tail: { type: 'string' },
     'keep-words': { type: 'string' },
+    speakers: { type: 'string' },
+    speaker: { type: 'string' },
+    name: { type: 'string', multiple: true },
+    merge: { type: 'string', multiple: true },
+    unmerge: { type: 'string', multiple: true },
+    move: { type: 'string', multiple: true },
+    unmove: { type: 'string', multiple: true },
+    voices: { type: 'string', multiple: true },
+    reset: { type: 'boolean', default: false },
     port: { type: 'string', default: '4317' },
     'no-open': { type: 'boolean', default: false },
     'no-plan': { type: 'boolean', default: false },
@@ -218,12 +246,13 @@ async function main() {
     if (rest.length < 2) throw new UsageError('usage: videodoc search <query> <video|folder>...');
     const top = Number(a.top);
     if (!(top >= 1)) throw new UsageError(`--top takes a positive number, got '${a.top}'`);
-    return out(search(ctx, rest[0], rest.slice(1), { top }));
+    return out(search(ctx, rest[0], rest.slice(1), { top, speaker: a.speaker }));
   }
-  if (!['analyze', 'markdown', 'redact', 'info'].includes(cmd)) throw new UsageError(`unknown command '${cmd}' (have: ui, check, analyze, markdown, search, redact, info, layers; see --help)`);
+  if (!['analyze', 'markdown', 'redact', 'info', 'speakers'].includes(cmd)) throw new UsageError(`unknown command '${cmd}' (have: ui, check, analyze, markdown, search, speakers, redact, info, layers; see --help)`);
   if (rest.length !== 1) throw new UsageError(`usage: videodoc ${cmd} <video>`);
   const common = { layers: list(a.layers), set: a.set, force: a.force, dryRun: a['dry-run'], pipeline: a.pipeline };
   if (cmd === 'info') return out(info(ctx, rest[0]));
+  if (cmd === 'speakers') return out(speakers(ctx, rest[0], { name: a.name, merge: a.merge, unmerge: a.unmerge, move: a.move, unmove: a.unmove, voices: a.voices, reset: a.reset }));
   if (cmd === 'analyze') return out(await analyze(ctx, rest[0], { ...common, doc: a.out }));
   if (cmd === 'redact') {
     const num = (v: string | undefined, what: string) => {
@@ -236,7 +265,7 @@ async function main() {
       await redact(ctx, rest[0], {
         set: a.set, force: a.force, dryRun: a['dry-run'], pipeline: a.pipeline, out: a.out, style: a.style, margin: num(a.margin, 'margin'), hold: num(a.hold, 'hold'), keep: a.keep,
         keepPlates: a['keep-plates'], keepTracks: a['keep-tracks'], cover: a.cover, words: a.words, wordsFile: a['words-file'], profanity: a.profanity, sound: a.sound,
-        lead: num(a.lead, 'lead'), tail: num(a.tail, 'tail'), keepWords: a['keep-words'], plan: !a['no-plan'],
+        lead: num(a.lead, 'lead'), tail: num(a.tail, 'tail'), keepWords: a['keep-words'], speakers: a.speakers, plan: !a['no-plan'],
       }),
     );
   }

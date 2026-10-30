@@ -127,7 +127,20 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .read h2.bare + h2:not(.bare) { margin-top: 16px; }
 .read p.said { margin: 8px 0; padding: 2px 6px; border-radius: 4px; }
 .read p.said.now { background: var(--accent-soft); }
-.read .who { font-weight: 600; margin-right: 2px; }
+.read .who { font-weight: 600; margin-right: 2px; cursor: pointer; border-radius: 3px; }
+.read .who:hover { background: var(--accent-soft); }
+.read .who-pick { font: inherit; font-size: 13px; }
+.speakers { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 4px 0 16px; background: var(--panel); font-size: 14px; }
+.spk-head { margin-bottom: 6px; }
+.spk-head .muted { font-size: 12px; }
+.spk-list, .spk-moves { list-style: none; margin: 0; padding: 0; }
+.spk-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 3px 0; }
+.spk-name { width: 11em; max-width: 100%; font: inherit; padding: 2px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--text); }
+.spk-list select, .spk-list button { font-size: 12px; }
+.spk-sug { font-size: 12px; color: var(--muted); }
+.spk-moves { margin-top: 6px; font-size: 12px; color: var(--muted); }
+.said-by { display: inline-block; margin: 0 0 8px; font-size: 13px; }
+.rv-speakers { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: 13px; }
 .read .ts { border: 0; padding: 0 4px; margin-right: 4px; color: var(--accent); background: none; font-variant-numeric: tabular-nums; font-weight: 600; }
 .read .note { font-style: italic; color: var(--muted); cursor: pointer; }
 .read figure.kf { display: inline-block; margin: 4px 8px 4px 0; vertical-align: top; cursor: pointer; }

@@ -846,3 +846,27 @@ itself a lot); confusion is ~6%.
   the right voice, DER 7.7% (no confusion, nothing missed; turns run ~0.15 s long at their
   edges). The first version of its reference counted TTS's padding and sentence pauses as
   speech (22% "missed"); the reference is now the audible stretches of each turn.
+
+## videodoc step 10, part 2: speaker names and corrections (2026-10-29)
+
+How far apart one person's voices are in separate recordings, against two people's
+(`scripts/eval-voices.ts`, on the cached AMI inputs; no browser). Each meeting is cut into
+parts that stand in for separate videos, each part diarized alone (default settings, step 2),
+its speakers mapped to the reference's (DER mapping), and every pair of speakers in different
+parts compared by the cosine distance of their voices (cluster centroids, as the layer stores):
+
+| Parts per meeting (length) | Voices | Same person: median / p90 / max | Two people, same meeting: min / p10 / median | Different meetings: min |
+|---|---|---|---|---|
+| 2 (11.5 min) | 26 | 0.064 / 0.095 / 0.150 | 0.581 / 0.696 / 0.868 | 0.607 |
+| 3 (7.7 min) | 34 | 0.057 / 0.105 / 0.183 | 0.539 / 0.674 / 0.845 | 0.602 |
+| 4 (5.8 min) | 41 | 0.063 / 0.237 / 0.388 | 0.162 / 0.602 / 0.849 | 0.577 |
+| 6 (3.8 min) | 58 | 0.077 / 0.236 / 0.371 | 0.294 / 0.545 / 0.844 | 0.537 |
+
+- **Threshold 0.4** (`SAME_VOICE` in `src/doc/speakers.ts`), for suggesting a name from a voice
+  named in another video and for moving edits to the speakers found again: it misses no
+  same-person pair at any part length; it accepts 2.5% of two-people pairs at 5.8-minute parts
+  and 3.9% at 3.8 minutes (none at 7.7 minutes and longer, none across meetings, i.e. other
+  rooms and microphones). The few close two-people pairs are short parts where a found speaker
+  mixes two people. Hence suggestions only: a person confirms each.
+- Same room, same microphones is the hard case and the one measured: a podcast's host in every
+  episode is the use. Across rooms nothing came closer than 0.54.

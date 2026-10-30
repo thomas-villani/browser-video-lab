@@ -11,8 +11,9 @@ import { fileURLToPath } from 'node:url';
 import {
   deriveLayers, docPathFor, speakerName, fingerprint, fmtTime, formatDoc, formatLog, isTrackLayer, LAYER_NAME_RE, LAYER_NAMES, mergeOverrides, newDoc, parseDoc, parseKeep, parsePipeline, parseSettings,
   pipelineContext, plan, parsePlan, planPathFor, REDACT_DEFAULTS, REDACT_KINDS, REDACT_SOUNDS, REDACT_STYLES, coversAudio, redactionLog, search as searchDocs, summarize,
-  toMarkdown, withLayers,
-  type DocLayers, type KeyframeItem, type Pipeline, type Plan, type RedactKind, type RedactOptions as RedactSettings, type RedactSound, type RedactStyle, type Track, type VideoDoc,
+  toMarkdown, withLayers, addSpeaker, checkEdits, findSpeaker, formatEdits, mergeSpeakers, moveSpeech, nameSpeaker, namedVoices, newEdits, speakersPathFor, suggestSpeakerNames,
+  talkTime, unmergeSpeaker, unmove, withSpeakers,
+  type NamedVoice, type SpeakerEdits, type SpeakerItem, type DocLayers, type KeyframeItem, type Pipeline, type Plan, type RedactKind, type RedactOptions as RedactSettings, type RedactSound, type RedactStyle, type Track, type VideoDoc,
 } from '../src/doc/index.ts';
 
 export const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -322,6 +323,25 @@ function loadDoc(path: string): VideoDoc | undefined {
   return existsSync(path) ? parseDoc(readFileSync(path, 'utf8'), path) : undefined;
 }
 
+/** A person's speaker edits for `video` (<video>.speakers.json), checked against `doc`; none
+ *  when there is no file (or no speakers layer). A broken file is an error only when `strict`. */
+function loadEdits(ctx: Context, video: string, doc: VideoDoc, strict = false): { edits?: SpeakerEdits; warnings: string[] } {
+  const path = speakersPathFor(video);
+  if (!doc.layers.speakers || !existsSync(path)) return { warnings: [] };
+  try {
+    const r = checkEdits(JSON.parse(readFileSync(path, 'utf8')), doc);
+    for (const w of r.warnings) ctx.report.log(`  warning: ${path}: ${w}`);
+    return r;
+  } catch (e) {
+    if (strict) throw new UsageError(`${path}: ${(e as Error).message} (fix or delete it, or pass --reset)`);
+    ctx.report.log(`  warning: ${path}: ${(e as Error).message}; speaker names are not used`);
+    return { warnings: [(e as Error).message] };
+  }
+}
+
+/** `doc` with the speakers as a person edited them (names, merges, moves), for reading. Never saved. */
+const edited = (ctx: Context, video: string, doc: VideoDoc) => withSpeakers(doc, loadEdits(ctx, video, doc).edits);
+
 function saveDoc(path: string, doc: VideoDoc) {
   const tmp = `${path}.tmp`;
   writeFileSync(tmp, formatDoc(doc));
@@ -507,7 +527,7 @@ export async function markdown(ctx: Context, videoArg: string, o: MarkdownOption
   const link = (p: string) => (mdPath ? relative(dirname(mdPath), p) : p).replace(/\\/g, '/');
   const from = o.from !== undefined ? parseTime(o.from, 'from') : undefined;
   const to = o.to !== undefined ? parseTime(o.to, 'to') : undefined;
-  const text = toMarkdown(r.doc, { image: o.images ? (k) => link(imagePath(video, k)) : undefined, from, to });
+  const text = toMarkdown(edited(ctx, video, r.doc), { image: o.images ? (k) => link(imagePath(video, k)) : undefined, from, to });
   logLayers(ctx, r.doc, r.plan);
   if (o.images) ctx.report.log(`  images      ${keyframes.length} (${extracted} extracted${extracted ? ` in ${(imageMs / 1000).toFixed(1)} s` : ''}) in ${video}.keyframes`);
   if (mdPath) {
@@ -555,6 +575,9 @@ export interface RedactOptions extends Omit<AnalyzeOptions, 'layers' | 'doc'> {
   tail?: number;
   /** Matches to leave audible, by first-word key ("12.3"): "12.3,40.0" or a list. */
   keepWords?: string | string[];
+  /** Speakers to bleep every turn of: names (given with `speakers`) or "Speaker 2", as
+   *  "Dana,2" or a list. Replaces the review plan's. */
+  speakers?: string | string[];
   /** false: ignore <video>.redact.json (the app's review). */
   plan?: boolean;
 }
@@ -605,6 +628,7 @@ export function redactSettings(o: RedactOptions, base: RedactSettings = REDACT_D
   return {
     style, margin: num(o.margin, base.margin, 'margin', 2), hold: num(o.hold, base.hold, 'hold', 10), keep, keepPlates, keepTracks, cover: cover as RedactKind[],
     words, profanity: o.profanity ?? base.profanity, sound, lead: num(o.lead, base.lead, 'lead', 5), tail: num(o.tail, base.tail, 'tail', 5), keepWords,
+    speakers: list(o.speakers) ?? base.speakers ?? [],
   };
 }
 
@@ -636,16 +660,18 @@ export async function redact(ctx: Context, videoArg: string, o: RedactOptions = 
       // parsePlan below reports it.
     }
   }
-  const layers = [...need.cover, ...(need.words.length || need.profanity ? ['transcript'] : [])];
-  if (!layers.length && !addedAudio.length) throw new UsageError('nothing to redact: cover is none and there are no words to bleep (pass --words, --words-file or --profanity)');
+  const layers = [...need.cover, ...(need.words.length || need.profanity ? ['transcript'] : []), ...(need.speakers.length ? ['speakers'] : [])];
+  if (!layers.length && !addedAudio.length) throw new UsageError('nothing to redact: cover is none and there are no words or speakers to bleep (pass --words, --words-file, --profanity or --speakers)');
   const r = await ensure(ctx, video, docPathFor(video), layers, o);
   if ('dryRun' in r) return r.dryRun;
+  // Speakers by the names a person gave them.
+  const doc = edited(ctx, video, r.doc);
   let added: Track[] = [];
   const warnings: string[] = [];
   if (usePlan) {
     let p: ReturnType<typeof parsePlan>;
     try {
-      p = parsePlan(readFileSync(planPath, 'utf8'), r.doc);
+      p = parsePlan(readFileSync(planPath, 'utf8'), doc);
     } catch (e) {
       throw new UsageError(`${planPath}: ${(e as Error).message} (delete it, or pass --no-plan)`);
     }
@@ -658,7 +684,7 @@ export async function redact(ctx: Context, videoArg: string, o: RedactOptions = 
   }
   let pre: ReturnType<typeof redactionLog>;
   try {
-    pre = redactionLog(r.doc, settings, undefined, added, addedAudio);
+    pre = redactionLog(doc, settings, undefined, added, addedAudio);
   } catch (e) {
     throw new UsageError((e as Error).message);
   }
@@ -668,27 +694,29 @@ export async function redact(ctx: Context, videoArg: string, o: RedactOptions = 
   if (coversVideo) {
     const kinds = [...new Set(pre.tracks.map((x) => x.layer))];
     const what = `${(kinds.length ? kinds : ['faces']).map((k) => `${n(k)} ${k === 'faces' ? 'face' : k === 'plates' ? 'plate' : k}`).join(' and ')} tracks`;
-    ctx.report.log(`redacting ${what}${t.added ? ` (${t.added} added by hand)` : ''}${t.kept ? `, keeping ${t.kept} visible,` : ''} on ${t.framesWithRegions} of ${r.doc.source.frames} frames (${settings.style})`);
+    ctx.report.log(`redacting ${what}${t.added ? ` (${t.added} added by hand)` : ''}${t.kept ? `, keeping ${t.kept} visible,` : ''} on ${t.framesWithRegions} of ${doc.source.frames} frames (${settings.style})`);
   }
   if (pre.audio) {
     const a = pre.audio.totals;
-    ctx.report.log(`${settings.sound === 'bleep' ? 'bleeping' : 'muting'} ${a.matches - a.kept} spoken matches${a.added ? ` and ${a.added} spans added by hand` : ''}${a.kept ? `, leaving ${a.kept} audible` : ''}: ${a.seconds} s of audio`);
-    for (const s of pre.audio.spans.filter((x) => !x.kept).slice(0, 20)) ctx.report.log(`  ${fmtTime(s.t0, r.doc.source.duration >= 3600)}  ${s.added ? '(added by hand)' : `"${s.text}"${s.term === s.text ? '' : ` (${s.term})`}`}`);
+    const what = [`${a.matches - a.kept} spoken matches`, ...(a.turns ? [`${a.turns} turns of ${settings.speakers.join(', ')}`] : []), ...(a.added ? [`${a.added} spans added by hand`] : [])];
+    ctx.report.log(`${settings.sound === 'bleep' ? 'bleeping' : 'muting'} ${what.join(', ')}${a.kept ? `, leaving ${a.kept} audible` : ''}: ${a.seconds} s of audio`);
+    const long = doc.source.duration >= 3600;
+    for (const s of pre.audio.spans.filter((x) => !x.kept).slice(0, 20)) ctx.report.log(`  ${fmtTime(s.t0, long)}  ${s.added ? '(added by hand)' : s.speaker ? `(${s.speaker} speaking, to ${fmtTime(s.t1, long)})` : `"${s.text}"${s.term === s.text ? '' : ` (${s.term})`}`}`);
     if (pre.audio.spans.length > 20) ctx.report.log(`  ... (all ${pre.audio.spans.length} in the log)`);
-    if (a.matches === 0 && !a.added) ctx.report.log('  note: no listed word is in the transcript (check its spelling there: names are often transcribed differently)');
+    if (a.matches === 0 && !a.added && !a.turns && settings.words.length) ctx.report.log('  note: no listed word is in the transcript (check its spelling there: names are often transcribed differently)');
   }
   const part = `${out}.part`;
   writeFileSync(part, '');
   let result: { frames: number; ms: number };
   try {
     // The page gets the doc without the layers it does not need (a transcript can be large).
-    const doc = { ...r.doc, layers: { faces: r.doc.layers.faces, plates: r.doc.layers.plates, scenes: r.doc.layers.scenes, ...(pre.audio && { transcript: r.doc.layers.transcript }) } };
+    const sent = { ...doc, layers: { faces: doc.layers.faces, plates: doc.layers.plates, scenes: doc.layers.scenes, ...(pre.audio && { transcript: doc.layers.transcript, speakers: doc.layers.speakers }) } };
     result = await ctx.browser.run(
       { video, out: part },
       (page, base) =>
         page.evaluate(
           ([url, outUrl, d, s]: [string, string, VideoDoc, RedactSettings & { added: Track[]; addedAudio: [number, number][] }]) => window.videodoc.redact(url, outUrl, d, s),
-          [`${base}@file/video`, `${base}@file/out`, doc, { ...settings, added, addedAudio }],
+          [`${base}@file/video`, `${base}@file/out`, sent, { ...settings, added, addedAudio }],
         ),
       ctx.report.progress,
       ctx.signal,
@@ -697,12 +725,12 @@ export async function redact(ctx: Context, videoArg: string, o: RedactOptions = 
     rmSync(part, { force: true });
     throw e;
   }
-  if (coversVideo && result.frames !== r.doc.source.frames) {
+  if (coversVideo && result.frames !== doc.source.frames) {
     rmSync(part, { force: true });
-    throw new Error(`decoded ${result.frames} frames but the doc has ${r.doc.source.frames}; the regions would not line up (re-analyze with --force)`);
+    throw new Error(`decoded ${result.frames} frames but the doc has ${doc.source.frames}; the regions would not line up (re-analyze with --force)`);
   }
   renameSync(part, out);
-  const log = redactionLog(r.doc, settings, { name: basename(out), frames: result.frames, ms: result.ms }, added, addedAudio);
+  const log = redactionLog(doc, settings, { name: basename(out), frames: result.frames, ms: result.ms }, added, addedAudio);
   const logPath = `${out}.redactions.json`;
   writeFileSync(logPath, formatLog(log));
   if (coversVideo) ctx.report.log(`  ${result.frames} frames in ${(result.ms / 1000).toFixed(1)} s (${((result.frames * 1000) / result.ms).toFixed(0)} fps)`);
@@ -719,6 +747,8 @@ export interface SearchOptions {
   top?: number;
   /** Passage length, seconds. */
   window?: number;
+  /** Only what this speaker says: a name given with `speakers`, or "Speaker 2". */
+  speaker?: string;
 }
 
 /**
@@ -738,10 +768,11 @@ export function search(ctx: Context, query: string, paths: string[], o: SearchOp
     if (!doc) notAnalyzed.push(v);
     else if (!doc.layers.transcript) noTranscript.push(v);
     else {
-      docs.push(doc);
+      docs.push(edited(ctx, v, doc));
       found.push(v);
     }
   }
+  const noSpeaker = o.speaker === undefined ? [] : found.filter((_, i) => !docs[i].layers.speakers || !findSpeaker(docs[i].layers.speakers!.items, o.speaker!));
   const t0 = performance.now();
   const hits = searchDocs(docs, query, o);
   const ms = Math.round(performance.now() - t0);
@@ -759,28 +790,167 @@ export function search(ctx: Context, query: string, paths: string[], o: SearchOp
       at: h.at,
       score: h.score,
       snippet: h.snippet,
-      ...(h.speaker !== undefined && { speaker: speakerName(h.speaker) }),
+      ...(h.speaker !== undefined && { speaker: h.speaker }),
       ref: `transcript/${h.i0}`,
       ...(k && { keyframe: { ref: `keyframes/${h.keyframe}`, t: k.t, ...(image && existsSync(image) && { image }) } }),
     };
   });
-  ctx.report.log(`"${query}": ${hits.length} hits in ${docs.length} transcripts (${ms} ms)`);
+  ctx.report.log(`"${query}"${o.speaker !== undefined ? ` said by ${o.speaker}` : ''}: ${hits.length} hits in ${docs.length - noSpeaker.length} transcripts (${ms} ms)`);
   for (const r of results) ctx.report.log(`  ${r.score.toFixed(2).padStart(6)}  ${basename(r.video)}  ${r.time}  ${r.snippet.length > 160 ? `${r.snippet.slice(0, 157)}...` : r.snippet}`);
   if (notAnalyzed.length) ctx.report.log(`  not analyzed (run videodoc analyze): ${notAnalyzed.join(', ')}`);
   if (noTranscript.length) ctx.report.log(`  no transcript layer: ${noTranscript.join(', ')}`);
-  return { query, hits: results, searched: docs.length, ms, ...(notAnalyzed.length && { notAnalyzed }), ...(noTranscript.length && { noTranscript }) };
+  if (noSpeaker.length) ctx.report.log(`  no speaker ${o.speaker} (or no speakers layer): ${noSpeaker.join(', ')}`);
+  return {
+    query, ...(o.speaker !== undefined && { speaker: o.speaker }), hits: results, searched: docs.length - noSpeaker.length, ms,
+    ...(notAnalyzed.length && { notAnalyzed }), ...(noTranscript.length && { noTranscript }), ...(noSpeaker.length && { noSpeaker }),
+  };
 }
 
 export function info(ctx: Context, arg: string) {
   const path = userPath(ctx, arg.endsWith('.videodoc.json') ? arg : docPathFor(arg));
-  const doc = loadDoc(path);
-  if (!doc) throw new UsageError(`no doc at ${path} (run: videodoc analyze ${arg})`);
+  const saved = loadDoc(path);
+  if (!saved) throw new UsageError(`no doc at ${path} (run: videodoc analyze ${arg})`);
+  const doc = edited(ctx, path.slice(0, -'.videodoc.json'.length), saved);
   const summary = summarize(doc);
   ctx.report.log(`${doc.source.name}: ${fmtDuration(doc.source.duration)}, ${doc.source.width}x${doc.source.height}, ${doc.source.fps} fps`);
   for (const [name, s] of Object.entries(summary)) ctx.report.log(`  ${name.padEnd(11)} ${String(s.items).padStart(6)} items  ${s.model ?? ''}`);
   const missing = LAYER_NAMES.filter((n) => !doc.layers[n]);
   if (missing.length) ctx.report.log(`  not analyzed: ${missing.join(', ')}`);
   return { doc: path, schema: doc.schema, source: doc.source, layers: summary, missing };
+}
+
+export interface SpeakersOptions {
+  /** Name speakers: "2=Dana" (an empty name removes one), or { "2": "Dana" }. */
+  name?: string[] | Record<string, string>;
+  /** One person found as two: "3=Dana" (speaker 3 is Dana), or { "3": "Dana" }. After names. */
+  merge?: string[] | Record<string, string>;
+  /** Speakers to stand alone again (undo a merge), by id. */
+  unmerge?: (string | number)[];
+  /** Speech given to the wrong speaker: "1:02-1:05=Dana" (all speech then is Dana's) or
+   *  "Speaker 2@1:02-1:05=Dana" (only Speaker 2's), or { t0, t1, to, from? }. A `to` that is no
+   *  speaker's name adds a speaker (one the analysis missed). */
+  move?: (string | { t0: number | string; t1: number | string; to: string; from?: string })[];
+  /** Moves to undo, by index (as listed). */
+  unmove?: (string | number)[];
+  /** Folders (searched recursively) whose speakers files name voices, for suggestions; the
+   *  video's own folder is always searched. */
+  voices?: string[];
+  /** Delete <video>.speakers.json first (all names, merges and moves). */
+  reset?: boolean;
+}
+
+const pairs = (v: string[] | Record<string, string> | undefined, what: string): [string, string][] =>
+  Array.isArray(v)
+    ? v.map((x) => {
+        const i = x.indexOf('=');
+        if (i < 1) throw new UsageError(`${what} takes speaker=name pairs, e.g. 2=Dana, got '${x}'`);
+        return [x.slice(0, i).trim(), x.slice(i + 1).trim()];
+      })
+    : Object.entries(v ?? {});
+
+/** Named voices in the speakers files under `dirs` (recursively) and next to `video`, other than its own. */
+function knownVoices(ctx: Context, video: string, dirs: string[]): NamedVoice[] {
+  const files = new Set<string>();
+  const walk = (dir: string, deep: boolean) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (deep && e.isDirectory() && !e.name.endsWith('.keyframes') && !e.name.startsWith('.')) walk(join(dir, e.name), true);
+      else if (e.isFile() && e.name.endsWith('.speakers.json')) files.add(join(dir, e.name));
+    }
+  };
+  walk(dirname(video), false);
+  for (const d of dirs) {
+    const p = userPath(ctx, d);
+    if (!existsSync(p) || !statSync(p).isDirectory()) throw new UsageError(`voices takes folders, got ${p}`);
+    walk(p, true);
+  }
+  files.delete(speakersPathFor(video));
+  return [...files].flatMap((f) => {
+    try {
+      return namedVoices(JSON.parse(readFileSync(f, 'utf8')) as SpeakerEdits, f.slice(0, -'.speakers.json'.length));
+    } catch {
+      ctx.report.log(`  warning: ${f} is not a speakers file; skipped`);
+      return [];
+    }
+  });
+}
+
+/**
+ * The speakers of a video, and a person's edits to them, saved as <video>.speakers.json: names,
+ * merges (one person found as two) and moves (speech given to the wrong speaker). Names follow
+ * the voices when the speakers are found again. Suggests names for unnamed speakers from voices
+ * named in other videos (never applies them). Needs the speakers layer; no browser.
+ */
+export function speakers(ctx: Context, videoArg: string, o: SpeakersOptions = {}) {
+  const video = videoPath(ctx, videoArg);
+  const docPath = docPathFor(video);
+  const doc = loadDoc(docPath);
+  if (!doc?.layers.speakers) throw new UsageError(`no speakers layer for ${video} (run: videodoc analyze ${videoArg} --layers speakers)`);
+  const path = speakersPathFor(video);
+  const items = doc.layers.speakers.items;
+  if (o.reset && existsSync(path)) {
+    rmSync(path);
+    ctx.report.log(`deleted ${path}`);
+  }
+  const loaded = loadEdits(ctx, video, doc, true);
+  let edits = loaded.edits ?? newEdits(doc);
+  const before = formatEdits(edits);
+  const now = () => withSpeakers(doc, edits).layers.speakers!.items;
+  const find = (ref: string, list = now()): SpeakerItem => {
+    const s = findSpeaker(list, ref);
+    if (!s) throw new UsageError(`no speaker '${ref}' (the speakers are ${list.map((x) => speakerName(x)).join(', ')})`);
+    return s;
+  };
+  try {
+    for (const i of (o.unmove ?? []).map(Number).sort((a, b) => b - a)) edits = unmove(edits, i);
+    for (const id of o.unmerge ?? []) edits = unmergeSpeaker(edits, Number(String(id).replace(/\D/g, '')));
+    for (const [a, b] of pairs(o.name, 'name')) edits = nameSpeaker(edits, items, find(a).id, b);
+    for (const [a, b] of pairs(o.merge, 'merge')) edits = mergeSpeakers(edits, items, find(a).id, find(b).id);
+    for (const m of o.move ?? []) {
+      let t0: number, t1: number, to: string, from: string | undefined;
+      if (typeof m === 'string') {
+        const x = /^(?:(.+)@)?\s*([\d:.]+)\s*-\s*([\d:.]+)\s*=(.+)$/.exec(m);
+        if (!x) throw new UsageError(`move takes t0-t1=speaker or speaker@t0-t1=speaker (times in seconds, mm:ss or h:mm:ss), e.g. 1:02-1:05=Dana, got '${m}'`);
+        [from, t0, t1, to] = [x[1]?.trim(), parseTime(x[2], 'move'), parseTime(x[3], 'move'), x[4].trim()];
+      } else [t0, t1, to, from] = [parseTime(m.t0, 'move t0'), parseTime(m.t1, 'move t1'), m.to, m.from];
+      let target = findSpeaker(now(), to)?.id;
+      if (target === undefined) {
+        if (/^(speaker\s*)?\d+$/i.test(to)) throw new UsageError(`no speaker '${to}'`);
+        ({ edits, id: target } = addSpeaker(edits, items, to));
+        ctx.report.log(`  added a speaker: ${to}`);
+      }
+      edits = moveSpeech(edits, items, t0, t1, target, from === undefined ? undefined : find(from).id);
+    }
+  } catch (e) {
+    throw e instanceof UsageError ? e : new UsageError((e as Error).message);
+  }
+  const changed = formatEdits(edits) !== before;
+  if (changed) {
+    if (edits.speakers.length || edits.moves.length) writeFileSync(path, formatEdits(edits));
+    else rmSync(path, { force: true });
+  }
+  const list = now();
+  const suggestions = suggestSpeakerNames(list, knownVoices(ctx, video, o.voices ?? []));
+  const total = list.reduce((n, s) => n + talkTime(s), 0);
+  const long = doc.source.duration >= 3600;
+  const r1 = (v: number) => Math.round(v * 10) / 10;
+  const rows = list.map((s) => {
+    const sug = suggestions.find((x) => x.id === s.id);
+    return {
+      id: s.id, name: speakerName(s), named: !!s.name, seconds: r1(talkTime(s)), share: r1((100 * talkTime(s)) / Math.max(1e-9, total)), turns: s.turns.length,
+      first: fmtTime(s.turns[0][0], long), ...(s.merged && { merged: s.merged }),
+      ...(sug && { suggestion: { name: sug.name, distance: sug.distance, from: sug.video } }),
+    };
+  });
+  ctx.report.log(`${doc.source.name}: ${list.length} speakers${changed ? ` (saved ${existsSync(path) ? path : 'no edits'})` : ''}`);
+  for (const r of rows) ctx.report.log(`  ${String(r.id).padStart(3)}  ${r.name.padEnd(20)} ${String(r.seconds).padStart(7)} s  ${String(r.share).padStart(5)}%  from ${r.first}${r.merged ? `  (merged: ${r.merged.join(', ')})` : ''}${r.suggestion ? `  maybe ${r.suggestion.name}? (voice ${r.suggestion.distance} from ${basename(r.suggestion.from)})` : ''}`);
+  // A speaker merged since a move names the one it joined.
+  const id2name = (id: number) => speakerName(list.find((s) => s.id === id || s.merged?.includes(id)) ?? { id });
+  edits.moves.forEach((m, i) => ctx.report.log(`  move ${i}: ${fmtTime(m.t0, long)}-${fmtTime(m.t1, long)} ${m.from !== undefined ? `of ${id2name(m.from)} ` : ''}to ${id2name(m.to)}`));
+  return {
+    video, doc: docPath, ...(existsSync(path) && { edits: path }), changed, speakers: rows,
+    moves: edits.moves.map((m, index) => ({ index, t0: m.t0, t1: m.t1, ...(m.from !== undefined && { from: id2name(m.from) }), to: id2name(m.to) })),
+    ...(loaded.warnings.length && { warnings: loaded.warnings }),
+  };
 }
 
 /** Layers, their dependencies and settings with defaults (generated from PRODUCERS; with a

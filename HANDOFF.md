@@ -25,14 +25,14 @@ difference, denser visual analysis where nobody speaks.
 - Built: roadmap steps 1-6 (doc + planner, keyframes + markdown, MCP server, search, the app,
   redaction of faces, plates and spoken words with the review UI), the browser test suite
   (step 8's first part), step 9 (models as data, pipeline presets, track layers on any
-  detector; presets in the app) and step 10's first part (the speakers layer). Captions
-  (step 7) not started.
+  detector; presets in the app) and step 10 (the speakers layer; names and corrections).
+  Captions (step 7) not started.
 - Layers: `speech` (Silero VAD), `transcript` (whisper-base_timestamped, word times),
   `speakers` (pyannote segmentation-3.0 + WeSpeaker ResNet34, pyannote 3.1 clustering),
   `scenes`, `keyframes` (pure), `faces` (YuNet + adaptive sampling + tile refinement), `plates`
   (YOLOv9-t, same decode as faces), and any track layer a pipeline defines (`vehicles`).
   Defaults in `PRODUCERS` (`src/doc/plan.ts`); a pipeline's in `pipelineContext`.
-- Tests: `npm test` 72 pure-TS tests (seconds); `npm run test:browser` 12 tests in headless Edge
+- Tests: `npm test` 77 pure-TS tests (seconds); `npm run test:browser` 14 tests in headless Edge
   (~4 min; `npm run fixtures` first; docs/lab.md "Tests").
 - Audience (user, 2026-10-28): creators (bodycam/dashcam channels, podcasts, tutorials), not
   institutions; DESIGN.md "Audience" and roadmap steps 10-16.
@@ -75,14 +75,23 @@ difference, denser visual analysis where nobody speaks.
   `pwsh -File tests/fixtures/tts-dialog.ps1 <dir>` then `node scripts/tts-dialog.mjs <dir>`
   (PowerShell 7: Windows PowerShell 5 cannot select the Mark voice).
 
-## Next: step 10, part 2: names and corrections
+## Done: step 10, part 2: speaker names and corrections (2026-10-29)
 
-- Names in a user-edited file next to the video (like `.redact.json`), keyed by speaker id
-  and voice, so after re-analysis names move to the new speaker with the closest voice; merge
-  two speakers; later split from a point / reassign a turn. Suggest names for unnamed speakers
-  from voices named in other videos of the folder (suggest, never apply). CLI/MCP to list,
-  name and merge; Markdown and search use the names; the app gets a speakers panel (listen to
-  a speaker's turns, name, merge). Then: search by speaker, redact one speaker.
+- `src/doc/speakers.ts`: `<video>.speakers.json` (`SpeakerEdits`: speakers with `name`,
+  `same`, `added`, `voice`; `moves`), `checkEdits` (moves edits to the speakers found now by
+  voice, Hungarian, `SAME_VOICE` 0.4), `applyEdits` / `withSpeakers` (the doc as edited; never
+  saved), edit functions, `suggestSpeakerNames`. `SpeakerItem` gains `name` / `merged` in the
+  edited view only.
+- CLI `videodoc speakers` (`--name 2=Dana --merge 3=Dana --move "Speaker 2@1:02-1:05=Dana"
+  --unmerge --unmove --voices --reset`), MCP `speakers`; `search --speaker`, `redact
+  --speakers`; markdown/search/info/redact read the edits (`edited()` in cli/lib.ts).
+- App: speakers panel under the title (`speakersPanel` in main.ts), click a paragraph's
+  speaker to reassign it (toMarkdown's `paragraph` callback maps paragraphs to times), "Said
+  by" in search results, speakers to bleep in the review's audio section. Edits live on the
+  Entry (`speakersRaw`, checked lazily by `speakerEdits(e)`), saved next to folder videos.
+- Measured: `node scripts/eval-voices.ts` (NOTES.md).
+- Trap: in `redact()` (cli/lib.ts) the page callback's parameter is named `page`; a local
+  variable of that name passed to `page.evaluate` serializes the Playwright page instead.
 
 ## Done: step 9, the app's presets (2026-10-29)
 
@@ -243,7 +252,9 @@ benchmarks and evaluation tools that used to fill the README). Keep it current w
 
 ## Next
 
-Step 10 part 2 (speaker names and corrections, above); open step 9 items above.
+Pick with the user: step 7 (captions/OCR) or step 11 (sound events); open step 9 items
+above. Speaker follow-ups: split a speaker from a point on, voice disguise, captions with
+speakers.
 Test suite follow-ups (DESIGN.md step 8): an accuracy tier on the full labeled footage, the MCP
 server over a real browser. Audio follow-ups (DESIGN.md step 6): sound-alike name matching, drawing audio
 spans in the app, highlights in the reading view, audio-only review. Lead application (decided 2026-10-27) stays search

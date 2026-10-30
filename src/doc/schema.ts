@@ -58,12 +58,13 @@ export type Word = [t0: number, t1: number, text: string];
 export interface TranscriptItem { t0: number; t1: number; text: string; words?: Word[] }
 /**
  * A speaker (diarization: who speaks when). Ids are per video, numbered in order of first
- * appearance; names are not stored here (a person names speakers, and the name survives
- * re-analysis). `turns` are when the speaker talks, in seconds (they may overlap other
+ * appearance. `turns` are when the speaker talks, in seconds (they may overlap other
  * speakers'); `voice` is the speaker's voice embedding (WeSpeaker ResNet34, unit length), for
- * recognizing the same voice in other videos.
+ * recognizing the same voice in other videos. Names are not stored in the doc: a person's
+ * edits (<video>.speakers.json) give `name`, and `merged` lists the speakers merged into this
+ * one, in the doc as edited (withSpeakers in speakers.ts).
  */
-export interface SpeakerItem { id: number; turns: [t0: number, t1: number][]; voice: number[] }
+export interface SpeakerItem { id: number; turns: [t0: number, t1: number][]; voice: number[]; name?: string; merged?: number[] }
 /** A shot: frames [f0, f1] inclusive; `score` is the cut score that started it (0 for the first). */
 export interface SceneItem { t0: number; t1: number; f0: number; f1: number; score: number }
 /** A frame worth looking at: the start of a shot, the middle of a silent gap, or a fill-in

@@ -13,7 +13,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { LAYER_NAMES, PlanError, PRODUCERS, REDACT_DEFAULTS, REDACT_KINDS, REDACT_SOUNDS, REDACT_STYLES, VERSION } from '../src/doc/index.ts';
 import {
-  analyze, check, DEFAULT_IMAGE_SIZE, DEFAULT_LAYERS, info, layers, MARKDOWN_LAYERS, markdown, redact, search, UsageError, warmBrowser,
+  analyze, check, DEFAULT_IMAGE_SIZE, DEFAULT_LAYERS, info, layers, MARKDOWN_LAYERS, markdown, redact, search, speakers, UsageError, warmBrowser,
+  type SpeakersOptions,
   type Context, type Progress,
 } from './lib.ts';
 
@@ -91,8 +92,45 @@ const TOOLS = [
         query: { type: 'string', description: 'Words to find; passages containing them in order rank higher.' },
         paths: { type: 'array', items: { type: 'string' }, minItems: 1, description: 'Video files, .videodoc.json files or folders (searched recursively).' },
         top: { type: 'integer', minimum: 1, description: 'Hits to return (default 10).' },
+        speaker: { type: 'string', description: 'Only what this speaker says: a name given with the speakers tool, or "Speaker 2" (videos with a speakers layer).' },
       },
       required: ['query', 'paths'],
+    },
+  },
+  {
+    name: 'speakers',
+    title: 'Who speaks: list, name, merge',
+    description:
+      'The speakers of a video (from the speakers layer: analyze with layers ["speakers"] first), with how long each speaks, and edits to them saved as <video>.speakers.json: ' +
+      'names, merges (one person found as two) and moves (speech given to the wrong speaker). The markdown, search, info and redact tools use the names. ' +
+      'Names follow the voices when the speakers are found again. Each unnamed speaker may carry a suggestion: a voice named in another video that sounds the same ' +
+      '(a cosine distance under 0.4); suggestions are never applied, so confirm them with the user (or from the transcript) and pass them as names. ' +
+      'Speakers are found automatically and imperfectly: read the transcript (markdown) to check who says what before naming. No browser; instant.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        video: VIDEO,
+        name: { type: 'object', additionalProperties: { type: 'string' }, description: 'Names by speaker, e.g. {"2": "Dana"}; "" removes a name.' },
+        merge: { type: 'object', additionalProperties: { type: 'string' }, description: 'Speakers that are another (one person found as two), e.g. {"3": "Dana"} or {"3": "2"}.' },
+        unmerge: { type: 'array', items: { type: 'integer' }, description: 'Speaker ids to stand alone again.' },
+        move: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              t0: { type: ['number', 'string'] }, t1: { type: ['number', 'string'] },
+              to: { type: 'string', description: 'Who says it: a speaker, or a new name (adds a speaker the analysis missed).' },
+              from: { type: 'string', description: 'Only this speaker\'s speech moves (default: all speech in t0-t1 becomes to\'s).' },
+            },
+            required: ['t0', 't1', 'to'],
+          },
+          description: 'Speech given to the wrong speaker: times in seconds, "mm:ss" or "h:mm:ss".',
+        },
+        unmove: { type: 'array', items: { type: 'integer' }, description: 'Moves to undo, by index (as listed).' },
+        voices: { type: 'array', items: { type: 'string' }, description: 'Folders whose speakers files name voices, for suggestions (the video\'s folder is always searched).' },
+        reset: { type: 'boolean', description: 'Delete the speakers file first (all edits).' },
+      },
+      required: ['video'],
     },
   },
   {
@@ -137,6 +175,7 @@ const TOOLS = [
         lead: { type: 'number', minimum: 0, maximum: 5, description: `Seconds covered before each word (default ${REDACT_DEFAULTS.lead}; word times run late).` },
         tail: { type: 'number', minimum: 0, maximum: 5, description: `Seconds covered after each word (default ${REDACT_DEFAULTS.tail}).` },
         keepWords: { type: 'array', items: { type: 'string' }, description: 'Matches to leave audible, by word key from the log, e.g. "12.3".' },
+        speakers: { type: 'array', items: { type: 'string' }, description: 'Speakers to bleep everything they say (names given with the speakers tool, or "Speaker 2"); analyzes the speakers layer if missing. Replaces the review\'s.' },
         plan: { type: 'boolean', description: 'false: ignore <video>.redact.json (default true).' },
         set: SET,
         force: FORCE,
@@ -173,6 +212,7 @@ const server = new Server(
       'videodoc analyzes local video files on this machine (in a headless browser with WebGPU) into a saved document of time-indexed layers, then answers from it. ' +
       'To understand a video, call markdown (add images: true or embedImages to see keyframes). To find where something is said across videos, ' +
       'call search over files or folders, then markdown with from/to around a hit. To blur faces and plates, or bleep names and profanity, before sharing a video, call redact. ' +
+      'For who speaks (interviews, podcasts), analyze with the speakers layer; the speakers tool names and merges them. ' +
       'Analysis is cached per video and settings; analyze takes a folder.',
   },
 );
@@ -250,8 +290,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra): Promise<Call
       case 'search': {
         if (typeof args.query !== 'string') throw new UsageError('query is required');
         if (!Array.isArray(args.paths) || !args.paths.length) throw new UsageError('paths is required: video files or folders to search');
-        return { content: [{ type: 'text', text: json(search(ctx, args.query, args.paths as string[], { top: args.top as number | undefined })) }] };
+        return { content: [{ type: 'text', text: json(search(ctx, args.query, args.paths as string[], { top: args.top as number | undefined, speaker: args.speaker as string | undefined })) }] };
       }
+      case 'speakers':
+        return { content: [{ type: 'text', text: json(speakers(ctx, video(), args as SpeakersOptions)) }] };
       case 'analyze':
         return { content: [{ type: 'text', text: json(await analyze(ctx, video(), common)) }] };
       case 'redact':
@@ -267,6 +309,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra): Promise<Call
                   keepPlates: args.keepPlates as number[] | undefined, cover: args.cover as string[] | undefined, plan: args.plan as boolean | undefined,
                   words: args.words as string[] | undefined, profanity: args.profanity as boolean | undefined, sound: args.sound as string | undefined,
                   lead: args.lead as number | undefined, tail: args.tail as number | undefined, keepWords: args.keepWords as string[] | undefined,
+                  speakers: args.speakers as string[] | undefined,
                 }),
               ),
             },

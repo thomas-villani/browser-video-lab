@@ -14,8 +14,9 @@ saved to the doc, and a partly written redaction is deleted. A second Ctrl+C qui
 
 Commands that compute (`analyze`, `markdown` with missing layers, `redact`, `check`) start a
 headless Edge (or `--browser chrome`; `--headed` to watch it). Commands that only read docs
-(`search`, `info`, `layers`, and `markdown` when everything is analyzed) start no browser and
-return in well under a second.
+(`search`, `speakers`, `info`, `layers`, and `markdown` when everything is analyzed) start no
+browser and return in well under a second. Speaker names (`<video>.speakers.json`, from
+`speakers`) are used by `markdown`, `search`, `info` and `redact`.
 
 ## analyze
 
@@ -65,7 +66,7 @@ their dependencies, plus any `--layers`) first if they are missing.
 ## search
 
 ```bash
-videodoc search <query> <video|doc|folder>... [--top n]
+videodoc search <query> <video|doc|folder>... [--top n] [--speaker name]
 ```
 
 Keyword search (BM25 with light stemming) over the transcripts of saved docs; folders are
@@ -82,14 +83,54 @@ video collapse to the best one; passages with the words in order rank higher.
 ```
 
 `at` is where to seek to hear the first matched word (half a second before it is said);
-`speaker` ("Speaker 2") says who says it, for videos with a speakers layer; `notAnalyzed` lists videos without a
-transcript, so a caller can analyze them and search again.
+`speaker` ("Dana", or "Speaker 2" when unnamed) says who says it, for videos with a speakers layer;
+`notAnalyzed` lists videos without a transcript, so a caller can analyze them and search again.
+
+`--speaker Dana` searches only what Dana says (a name, or `2` / "Speaker 2"); videos without such a
+speaker are listed in `noSpeaker`.
+
+## speakers
+
+```bash
+videodoc speakers <video> [--name id=name]... [--merge a=b]... [--unmerge id]... [--move span=to]... [--unmove i]... [--voices folder]... [--reset]
+```
+
+Lists the speakers of an analyzed video (analyze with `--layers speakers` first) and edits them:
+names, merges and moves, saved as `<video>.speakers.json` ([format](format.md#speaker-names-videospeakersjson)).
+No browser.
+
+- `--name 2=Dana`: name speaker 2 (`2=` removes the name). A name another speaker has is an
+  error: they are one person, so merge them.
+- `--merge 3=Dana`: speaker 3 is Dana (one person found as two); Dana keeps the name. Applied
+  after `--name`, so `--name 1=Dana --merge 3=Dana` works in one call.
+- `--unmerge 3`: separate it again.
+- `--move 1:02-1:05=Dana`: all speech in that span is Dana's; `--move "Speaker 2@1:02-1:05=Dana"`
+  moves only Speaker 2's. A name that is no speaker's adds one (a voice the analysis missed).
+- `--unmove 0`: undo a move, by its index in `moves`.
+- `--voices ~/podcast`: also suggest names from voices named under this folder (recursive); the
+  video's own folder is always searched.
+- `--reset`: delete the speakers file first.
+
+Speakers are referred to by name, `Speaker 2` or `2`. stdout:
+
+```json
+{"video": "/videos/ep12.mp4", "doc": "...", "edits": "/videos/ep12.mp4.speakers.json", "changed": true,
+ "speakers": [{"id": 1, "name": "Dana", "named": true, "seconds": 812.4, "share": 61.2, "turns": 140, "first": "00:03", "merged": [4]},
+              {"id": 2, "name": "Speaker 2", "named": false, "seconds": 498.1, "share": 37.5, "turns": 131, "first": "00:41",
+               "suggestion": {"name": "Sam", "distance": 0.08, "from": "/videos/ep11.mp4"}}],
+ "moves": [{"index": 0, "t0": 61.2, "t1": 63.5, "from": "Speaker 2", "to": "Dana"}]}
+```
+
+A `suggestion` is a voice named in another video that sounds the same (cosine distance under
+0.4; one person's voice in separate recordings measured at most 0.39, two people's mostly far
+above: NOTES.md). It is never applied: check it, then `--name 2=Sam`. Edits follow the voices
+when the speakers are found again; ones whose voice is gone are dropped with a warning.
 
 ## redact
 
 ```bash
 videodoc redact <video> [--out file.mp4] [--style blur|pixelate|fill] [--margin f] [--hold s] [--keep ids] [--keep-plates ids] [--keep-tracks layer=ids]... [--cover faces,plates|none]
-                [--words list] [--words-file path] [--profanity] [--sound bleep|mute] [--lead s] [--tail s] [--keep-words keys] [--no-plan] [--pipeline preset.json] [--set ...] [--force]
+                [--words list] [--words-file path] [--profanity] [--speakers list] [--sound bleep|mute] [--lead s] [--tail s] [--keep-words keys] [--no-plan] [--pipeline preset.json] [--set ...] [--force]
 ```
 
 Writes a copy with every face and license plate covered (H.264 MP4) and the listed words
@@ -118,6 +159,8 @@ copied.
   Spell names as the transcript does (`videodoc markdown` shows it).
 - `--words-file names.txt`: one word or phrase per line (`#` comments), added to `--words`.
 - `--profanity`: also bleep the built-in strong-language list.
+- `--speakers "Dana,3"`: bleep everything these speakers say (names from `speakers`, or ids):
+  each of their turns, 0.25 s either side. Finds the speakers first if the doc lacks them.
 - `--sound mute`: silence instead of a 1 kHz tone.
 - `--lead 0.4 --tail 0.2` (defaults): seconds covered before and after each word (Whisper's word
   times run late).
@@ -188,6 +231,12 @@ videodoc redact hearing.mp4 --style fill --keep 12 --out hearing.public.mp4
 
 # Bleep two names and strong language, leaving the picture as it is
 videodoc redact interview.mp4 --cover none --words "Ackover,Daniel Reyes" --profanity
+
+# Who speaks: name them once, then read and search by name
+videodoc analyze ep12.mp4 --layers speakers
+videodoc speakers ep12.mp4 --name 1=Dana --name 2=Sam --merge 3=Dana
+videodoc search "budget" ~/podcast/ --speaker Sam
+videodoc redact ep12.mp4 --cover none --speakers Sam      # a guest who asked not to be heard
 
 # What would be computed?
 videodoc analyze talk.mp4 --layers faces --dry-run

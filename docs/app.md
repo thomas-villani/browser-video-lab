@@ -56,12 +56,32 @@ with a picture for each shot and each silent stretch. Click a time, a picture or
 to jump the video there; while it plays, the paragraph being said is highlighted. **Copy
 Markdown** puts the text on the clipboard (to paste into a chat or notes).
 
+### Speakers
+
+A video analyzed with **Who speaks** has a speakers panel under its title: each speaker with how
+long they speak.
+
+- **Name** a speaker in its box; the text, search hits and redaction use the name.
+- **Listen** plays the speaker's next turn.
+- **Same person as…** merges a speaker into another (one person found as two); **+ Speaker 3 ×**
+  separates them again.
+- **Click a speaker's name in the text** to give that paragraph to someone else, or to someone
+  the analysis missed (**Someone else…**). The panel lists these changes with **Undo**.
+- **Sounds like Dana in ep11.mp4. It's Dana**: a voice named in another loaded video sounds the
+  same. It is only a suggestion until you click it.
+
+In an opened folder the names are saved next to the video as `<video>.speakers.json` (the file
+the CLI and agents use too); for dropped videos they are kept until the tab closes (drop the
+`.speakers.json` with the video to bring them back). Names follow the voices when the video is
+analyzed again.
+
 ## Searching
 
 Type in the search box (or press `/`) to search what is said in every loaded video. Hits show the
 video, the time, the passage with the words marked, and the nearest picture; click one to open
 the video at the moment the words are said. When nothing matches, the app suggests queries from
-the transcripts (names and places that come up).
+the transcripts (names and places that come up). When speakers have names, **Said by** limits
+the search to what one of them says.
 
 ## Review and redaction
 

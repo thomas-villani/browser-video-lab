@@ -6,7 +6,7 @@
 // segment, up to `window` seconds), so a phrase never falls across a boundary; overlapping or
 // touching hits in the same video are collapsed to the best one.
 import type { KeyframeItem, TranscriptItem, VideoDoc } from './schema.ts';
-import { speakerAt } from './speakers.ts';
+import { findSpeaker, speakerAt, speakerName, whoSaid } from './speakers.ts';
 
 const STOP = new Set(
   ('a an and are as at be been but by can did do does for from had has have he her his i if in into is it its me my no not of on or our ' +
@@ -66,6 +66,9 @@ export interface SearchOptions {
   gap?: number;
   k1?: number;
   b?: number;
+  /** Only what this speaker says (a name, "Speaker 2" or "2"; in docs as edited: withSpeakers).
+   *  Docs without such a speaker are left out. */
+  speaker?: string;
 }
 
 export interface SearchHit extends Passage {
@@ -79,8 +82,9 @@ export interface SearchHit extends Passage {
   snippet: string;
   /** Keyframe nearest the hit (index into the doc's keyframes layer), if the doc has keyframes. */
   keyframe?: number;
-  /** Who says the first matched word (speakers layer id), if the doc has speakers. */
-  speaker?: number;
+  /** Who says the first matched word, if the doc has speakers: the name given, or "Speaker 2". */
+  speaker?: string;
+  speakerId?: number;
 }
 
 /** Wrap words whose stem is in `stems` in **bold**. */
@@ -108,8 +112,17 @@ export function search(docs: VideoDoc[], query: string, o: SearchOptions = {}): 
   const { top = 10, window = 20, gap = 2, k1 = 1.2, b = 0.75 } = o;
   const q = [...new Set(terms(query))];
   if (!q.length) return [];
-  const all = docs.flatMap((d, i) => passages(d.layers.transcript?.items ?? [], i, window));
-  const items = docs.map((d) => d.layers.transcript?.items ?? []);
+  // With a speaker, each doc's transcript is cut down to what that speaker says; `src` maps its
+  // items back to the transcript's.
+  const cutDown = docs.map((d) => {
+    const items = d.layers.transcript?.items ?? [];
+    if (o.speaker === undefined) return { items, src: items.map((_, i) => i) };
+    const s = d.layers.speakers && findSpeaker(d.layers.speakers.items, o.speaker);
+    const said = s ? whoSaid(items, d.layers.speakers!.items).filter((x) => x.speaker === s.id) : [];
+    return { items: said.map((x): TranscriptItem => ({ t0: x.t0, t1: x.t1, text: x.text, ...(x.words && { words: x.words }) })), src: said.map((x) => x.item) };
+  });
+  const items = cutDown.map((c) => c.items);
+  const all = items.flatMap((it, i) => passages(it, i, window));
   const toks = all.map((p) => terms(p.text));
   const avg = toks.reduce((n, t) => n + t.length, 0) / Math.max(1, toks.length);
   const df = new Map<string, number>(q.map((t) => [t, 0]));
@@ -139,8 +152,13 @@ export function search(docs: VideoDoc[], query: string, o: SearchOptions = {}): 
     const word = first?.words?.find((w) => terms(w[2]).some((x) => matched.has(x)));
     const at = word ? Math.max(first!.t0, Math.round((word[0] - AT_LEAD) * 100) / 100) : (first?.t0 ?? s.p.t0);
     const spk = docs[s.p.doc].layers.speakers?.items;
-    const speaker = spk && (word ? speakerAt(spk, word[0], Math.max(word[1], word[0] + 0.01)) : first && speakerAt(spk, first.t0, first.t1));
-    hits.push({ ...s.p, score: Math.round(s.score * 1000) / 1000, at, matched: s.matched, snippet: highlight(s.p.text, new Set(s.matched)), ...(keyframe !== undefined && { keyframe }), ...(speaker !== undefined && { speaker }) });
+    const id = spk && (word ? speakerAt(spk, word[0], Math.max(word[1], word[0] + 0.01)) : first && speakerAt(spk, first.t0, first.t1));
+    const who = id !== undefined ? spk!.find((x) => x.id === id) : undefined;
+    const { src } = cutDown[s.p.doc];
+    hits.push({
+      ...s.p, i0: src[s.p.i0], i1: src[s.p.i1], score: Math.round(s.score * 1000) / 1000, at, matched: s.matched, snippet: highlight(s.p.text, new Set(s.matched)),
+      ...(keyframe !== undefined && { keyframe }), ...(who && { speaker: speakerName(who), speakerId: who.id }),
+    });
   }
   return hits;
 }

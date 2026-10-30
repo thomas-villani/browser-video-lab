@@ -2,7 +2,8 @@
 // sections; the transcript runs through them in timed paragraphs; keyframe images (when the
 // caller has them) and silent gaps sit where they happen. Needs no captions and no LLM, and
 // works with whatever layers the doc has. With a speakers layer, paragraphs say who speaks
-// (`**[01:23] Speaker 2:**`) and break where the speaker changes. Pure TS.
+// (`**[01:23] Speaker 2:**`, or the name given, in a doc as edited: withSpeakers) and break where
+// the speaker changes. Pure TS.
 import { silentGaps } from './keyframes.ts';
 import { speakerName, whoSaid } from './speakers.ts';
 import type { KeyframeItem, SceneItem, Track, VideoDoc } from './schema.ts';
@@ -16,11 +17,12 @@ export interface MarkdownOptions {
   silence?: number;
   /** Start a new paragraph when speech pauses this long, seconds. */
   pause?: number;
-  /** Names for speakers by id (default "Speaker 2"). */
-  names?: Record<string, string>;
   /** Render only [from, to) seconds (e.g. around a search hit); shots and passages overlapping it. */
   from?: number;
   to?: number;
+  /** Called for each paragraph of speech, in order: its exact times and speaker (the app maps
+   *  its rendered paragraphs to these). */
+  paragraph?: (p: { t0: number; t1: number; speaker?: number }) => void;
 }
 
 /** 83.4 -> "01:23"; with `long`, "0:01:23". */
@@ -105,7 +107,8 @@ export function toMarkdown(doc: VideoDoc, opts: MarkdownOptions = {}): string {
     let para: { t: number; t1: number; text: string[]; speaker?: number } | undefined;
     let waiting: Extract<Event, { kind: 'image' }>[] = [];
     const flush = () => {
-      if (para) out.push('', `**[${ts(para.t)}]${para.speaker !== undefined ? ` ${speakerName(para.speaker, opts.names)}:` : ''}** ${para.text.join(' ')}`);
+      if (para) opts.paragraph?.({ t0: para.t, t1: para.t1, speaker: para.speaker });
+      if (para) out.push('', `**[${ts(para.t)}]${para.speaker !== undefined ? ` ${speakerName(speakers!.items.find((s) => s.id === para!.speaker) ?? { id: para.speaker })}:` : ''}** ${para.text.join(' ')}`);
       para = undefined;
       for (const w of waiting) {
         const src = opts.image?.(w.k, w.i);

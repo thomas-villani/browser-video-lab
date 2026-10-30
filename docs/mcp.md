@@ -21,9 +21,10 @@ be in place first ([getting started](getting-started.md)); the `check` tool says
 | Tool | What it does | Main arguments |
 |---|---|---|
 | `markdown` | The video as Markdown (shots, timed speech, silences, keyframes); analyzes missing layers first | `video`, `from`, `to`, `images`, `embedImages`, `imageSize`, `layers`, `out` |
-| `search` | Where something is said across videos: ranked passages with times, snippet, nearest keyframe | `query`, `paths` (files or folders), `top` |
+| `search` | Where something is said across videos: ranked passages with times, snippet, nearest keyframe, speaker | `query`, `paths` (files or folders), `top`, `speaker` |
+| `speakers` | Who speaks in a video and edits to them (names, merges, moves) saved as `<video>.speakers.json`; name suggestions from other videos | `video`, `name`, `merge`, `unmerge`, `move`, `unmove`, `voices`, `reset` |
 | `analyze` | Compute layers into the doc (a folder: every video) and summarize them | `video`, `layers`, `pipeline`, `set`, `force`, `dryRun` |
-| `redact` | A copy with faces and license plates covered and listed words bleeped, plus the redaction log | `video`, `out`, `style`, `margin`, `hold`, `keep`, `keepPlates`, `cover`, `words`, `profanity`, `sound`, `lead`, `tail`, `keepWords`, `plan` |
+| `redact` | A copy with faces and license plates covered and listed words (or speakers) bleeped, plus the redaction log | `video`, `out`, `style`, `margin`, `hold`, `keep`, `keepPlates`, `cover`, `words`, `profanity`, `speakers`, `sound`, `lead`, `tail`, `keepWords`, `plan` |
 | `info` | Summarize a saved doc (no compute) | `video` |
 | `layers` | Layers, dependencies, every setting with its default | `pipeline` |
 | `check` | Browser, WebGPU, decoders, model files | — |
@@ -42,6 +43,11 @@ The server's instructions tell the agent the usual flow:
 4. To bleep names: read the transcript first (`markdown`) and pass the spellings it uses as
    `words` (Whisper misspells rare names); `profanity: true` adds strong language; `cover: []`
    leaves the picture alone. Tell the user to listen to the result.
+5. Who speaks: `analyze` with `layers: ["speakers"]`, then `speakers` to list them. Read the
+   transcript to tell who is who before naming (`name: {"1": "Dana"}`); `merge` one person
+   found as two. Suggestions (voices named in other videos) are only suggestions: confirm them
+   with the user. Names then show in `markdown`, `search` (and `speaker` filters by them) and
+   `redact` (`speakers` bleeps one person).
 
 `embedImages: n` returns up to n keyframes as image content, spread evenly over the video (or the
 `from`/`to` window), for agents that can see images; `images: true` only links them by path.
