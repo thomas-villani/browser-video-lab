@@ -9,7 +9,7 @@
 //             redaction case. Track ends are extended by one stride so the first/last
 //             frames of an appearance are still covered.
 
-import { ByteTracker, type Box, type ByteTrackOptions, type Detection } from './bytetrack.ts';
+import { type Box, ByteTracker, type ByteTrackOptions, type Detection } from './bytetrack.ts';
 
 export type SparseMode = 'hold' | 'online' | 'offline';
 
@@ -124,14 +124,12 @@ export function sparseBoxes(frames: Detection[][], opts: SparseOptions & { lastK
     }
     const maxGap = trackBuffer * stride;
     for (const list of anchors.values()) {
-      const linked = (i: number, j: number) =>
-        i >= 0 && j < list.length && list[j].frame - list[i].frame <= maxGap;
+      const linked = (i: number, j: number) => i >= 0 && j < list.length && list[j].frame - list[i].frame <= maxGap;
       list.forEach((a, i) => {
         // Segment start: extend backwards one stride, extrapolating along the next anchor's motion.
         if (!linked(i - 1, i)) {
           const ref = linked(i, i + 1) ? list[i + 1] : undefined;
-          for (let f = a.frame - stride + 1; f < a.frame; f++)
-            emit(f, ref ? lerp(a.box, ref.box, (f - a.frame) / (ref.frame - a.frame)) : a.box);
+          for (let f = a.frame - stride + 1; f < a.frame; f++) emit(f, ref ? lerp(a.box, ref.box, (f - a.frame) / (ref.frame - a.frame)) : a.box);
         }
         if (linked(i, i + 1)) {
           const next = list[i + 1];
@@ -140,8 +138,7 @@ export function sparseBoxes(frames: Detection[][], opts: SparseOptions & { lastK
         } else {
           // Segment end: extend forwards one stride, extrapolating along the previous anchor's motion.
           const ref = linked(i - 1, i) ? list[i - 1] : undefined;
-          for (let f = a.frame; f < a.frame + stride; f++)
-            emit(f, ref ? lerp(ref.box, a.box, (f - ref.frame) / (a.frame - ref.frame)) : a.box);
+          for (let f = a.frame; f < a.frame + stride; f++) emit(f, ref ? lerp(ref.box, a.box, (f - ref.frame) / (a.frame - ref.frame)) : a.box);
         }
       });
     }

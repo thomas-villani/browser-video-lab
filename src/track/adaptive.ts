@@ -80,9 +80,7 @@ export function agree(a: Sampled, b: Sampled, minIou: number, extendOneSided: bo
   if (loneA.length || loneB.length) {
     if (!always && (!extendOneSided || (loneA.length && loneB.length))) return null;
   }
-  const pairs = matches
-    .filter(([i, j]) => a.weak[i].strong || b.weak[j].strong)
-    .map(([i, j]) => [a.weak[i].box, b.weak[j].box] as [Box, Box]);
+  const pairs = matches.filter(([i, j]) => a.weak[i].strong || b.weak[j].strong).map(([i, j]) => [a.weak[i].box, b.weak[j].box] as [Box, Box]);
   return { pairs, held: [...loneA, ...loneB], loneA, loneB };
 }
 
@@ -127,12 +125,7 @@ export function intervals(n: number, opts: Pick<AdaptiveOptions, 'maxStride' | '
  * detections in the same order, and returns boxes for frames a..b. `cache` is shared across
  * intervals so a keyframe shared by two neighbors is detected once.
  */
-export function* bisect(
-  a: number,
-  b: number,
-  opts: AdaptiveOptions,
-  cache: Map<number, Sampled>,
-): Generator<number[], Box[][], Detection[][]> {
+export function* bisect(a: number, b: number, opts: AdaptiveOptions, cache: Map<number, Sampled>): Generator<number[], Box[][], Detection[][]> {
   const out: Box[][] = Array.from({ length: b - a + 1 }, () => []);
   let pending: [number, number][] = [[a, b]];
   let need = [...new Set([a, b])].filter((f) => !cache.has(f));

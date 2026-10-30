@@ -87,7 +87,7 @@ export async function newPage(browser) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   let relayed = 0;
   // ORT's notice that some nodes run on the CPU is expected (shape ops), not an error.
-  const relay = (kind, text) => !/VerifyEachNodeIsAssignedToAnEp/.test(text) && relayed++ < 5 &&console.error(`  [${kind}] ${text.split('\n')[0].slice(0, 200)}`);
+  const relay = (kind, text) => !/VerifyEachNodeIsAssignedToAnEp/.test(text) && relayed++ < 5 && console.error(`  [${kind}] ${text.split('\n')[0].slice(0, 200)}`);
   page.on('pageerror', (e) => relay('pageerror', e.message));
   page.on('console', (m) => m.type() === 'error' && relay('console', m.text()));
   return page;

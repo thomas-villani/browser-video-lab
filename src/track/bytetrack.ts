@@ -5,7 +5,7 @@
 // Pure TypeScript, no dependencies. Boxes are [x, y, w, h] top-left in pixels.
 
 import { linearAssignment } from './assignment.ts';
-import { fromXyah, initiate, predict, toXyah, update, type KalmanState } from './kalman.ts';
+import { fromXyah, initiate, type KalmanState, predict, toXyah, update } from './kalman.ts';
 
 export type Box = [x: number, y: number, w: number, h: number];
 
@@ -141,9 +141,7 @@ export class ByteTracker {
     const o = this.options;
     const frame = ++this.frameId;
     const high = detections.filter((d) => d.score >= o.trackThresh).map((d) => new STrack(d));
-    const low = detections
-      .filter((d) => d.score > o.lowThresh && d.score < o.trackThresh)
-      .map((d) => new STrack(d));
+    const low = detections.filter((d) => d.score > o.lowThresh && d.score < o.trackThresh).map((d) => new STrack(d));
 
     for (const t of [...this.tracked, ...this.lost]) t.observed = false;
     const unconfirmed = this.tracked.filter((t) => !t.activated);
@@ -209,9 +207,7 @@ export class ByteTracker {
     this.tracked = [...new Set(tracked)];
     const trackedSet = new Set(this.tracked);
     const removedSet = new Set(removed);
-    this.lost = [...new Set([...this.lost, ...lostNow])].filter(
-      (t) => t.state === 'lost' && !trackedSet.has(t) && !removedSet.has(t),
-    );
+    this.lost = [...new Set([...this.lost, ...lostNow])].filter((t) => t.state === 'lost' && !trackedSet.has(t) && !removedSet.has(t));
     this.dedupe();
 
     return this.tracked

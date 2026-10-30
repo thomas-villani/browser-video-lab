@@ -10,8 +10,8 @@
 //
 // With dump=1 the result also holds per-frame boxes, the sampled frames, and scene scores.
 import { Detector } from './runtime/detector';
-import { VideoSource } from './runtime/source';
 import { DEFAULT_REFINE, type RefineOptions } from './runtime/refine';
+import { VideoSource } from './runtime/source';
 import { adaptiveStream } from './runtime/stream';
 
 declare global {
@@ -45,7 +45,15 @@ function readConfig() {
 function readRefine(q: URLSearchParams, num: (k: string, d: number) => number): RefineOptions {
   const [tileW, tileH] = (q.get('tile') || `${DEFAULT_REFINE.tileW}x${DEFAULT_REFINE.tileH}`).split('x').map(Number);
   const d = DEFAULT_REFINE;
-  return { tileW, tileH, overlap: num('overlap', d.overlap), trigger: num('trigger', d.trigger), grow: num('grow', d.grow), every: num('every', d.every), small: num('small', d.small) };
+  return {
+    tileW,
+    tileH,
+    overlap: num('overlap', d.overlap),
+    trigger: num('trigger', d.trigger),
+    grow: num('grow', d.grow),
+    every: num('every', d.every),
+    small: num('small', d.small),
+  };
 }
 
 const r1 = (v: number) => Math.round(v * 10) / 10;

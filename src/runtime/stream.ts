@@ -12,11 +12,11 @@
 // Several detectors (heads, e.g. faces and plates) can share the decode: multiStream.
 import type { GeometryOptions } from '../models';
 import { SceneScorer } from '../scene';
-import { bisect, intervals, type AdaptiveOptions, type Sampled } from '../track/adaptive';
+import { type AdaptiveOptions, bisect, intervals, type Sampled } from '../track/adaptive';
 import type { Box } from '../track/bytetrack';
 import type { Detector } from './detector';
 import { FrameIngest, type IngestOptions } from './ingest';
-import { activeTiles, mergeBoxes, ownBoxes, refinedFor, tileGrid, type RefineOptions } from './refine';
+import { activeTiles, mergeBoxes, ownBoxes, type RefineOptions, refinedFor, tileGrid } from './refine';
 import type { VideoSource } from './source';
 
 /** One detector over the shared decode, with its own sampling (and optional refinement). */
@@ -129,7 +129,13 @@ export async function* multiStream(source: VideoSource, heads: Head[], opts: Mul
     const refine = async (f: number, current: Box[]) => {
       if (!r || refined.has(f)) return;
       if (!raw.has(f)) await detect(f);
-      const triggers = [...current, ...raw.get(f)!.filter((d) => d.score >= r.trigger).map((d) => d.box)].filter((b) => !r.small || b[3] < r.small);
+      const triggers = [
+        ...current,
+        ...raw
+          .get(f)!
+          .filter((d) => d.score >= r.trigger)
+          .map((d) => d.box),
+      ].filter((b) => !r.small || b[3] < r.small);
       const active = activeTiles(tiles, triggers, r.grow);
       const found = await Promise.all(
         active.map(async (t) => {

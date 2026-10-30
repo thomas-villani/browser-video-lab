@@ -2,9 +2,9 @@
 // described as data (src/doc/models.ts: MODELS, decoder presets); a spec with a hand-written
 // `decode` can be registered too (registerModel). Decoders return boxes in source-frame pixels,
 // so callers never see crops or padding.
-import { decode, MODELS as CONFIGS, ModelError, resolveModel, type Detection, type InputGeometry, type ModelConfig, type Preprocess, type Rect } from './doc/models.ts';
+import { MODELS as CONFIGS, type Detection, decode, type InputGeometry, type ModelConfig, ModelError, type Preprocess, type Rect, resolveModel } from './doc/models.ts';
 
-export { nms, type Detection, type InputGeometry, type ModelConfig, type Rect } from './doc/models.ts';
+export { type Detection, type InputGeometry, type ModelConfig, nms, type Rect } from './doc/models.ts';
 
 export interface ModelSpec extends Preprocess {
   id: string;

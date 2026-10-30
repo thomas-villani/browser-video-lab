@@ -52,7 +52,11 @@ if (!a.video) {
   process.exit(2);
 }
 
-const list = (s) => (s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+const list = (s) =>
+  (s ?? '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
 let combos = [{}];
 const knobs = ['maxstride', 'longside', 'cut', ...(a.refine ? ['tile', 'every', 'grow', 'trigger', 'small'] : [])];
 for (const k of knobs) {

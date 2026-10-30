@@ -67,12 +67,23 @@ const pad = Number(a.pad);
 const padBox = ([x, y, w, h]: Box): Box => [x - w * pad, y - h * pad, w * (1 + 2 * pad), h * (1 + 2 * pad)];
 const grid = (tw: number, th: number, ov: number) => tileGrid(W, H, tw, th, ov);
 
-interface Policy { tile: string; trig: number; small: number; grow: number; every: number }
+interface Policy {
+  tile: string;
+  trig: number;
+  small: number;
+  grow: number;
+  every: number;
+}
 const product = (o: Record<string, string>) =>
   Object.entries(o).reduce<Record<string, string>[]>((acc, [k, v]) => acc.flatMap((p) => v.split(',').map((x) => ({ ...p, [k]: x }))), [{}]);
 
 function score(boxesAt: (f: number) => Box[]) {
-  let faces = 0, missed = 0, small = 0, smallMissed = 0, preds = 0, correct = 0;
+  let faces = 0,
+    missed = 0,
+    small = 0,
+    smallMissed = 0,
+    preds = 0,
+    correct = 0;
   for (const [f, l] of latest) {
     const pred = boxesAt(f).map(padBox);
     const known = l.faces.filter((x) => x.status !== 'rejected').map((x) => x.box);
@@ -80,7 +91,7 @@ function score(boxesAt: (f: number) => Box[]) {
       const miss = !pred.some((b) => covers(b, g));
       faces++;
       missed += +miss;
-      if (g[3] < 40) (small++, (smallMissed += +miss));
+      if (g[3] < 40) small++, (smallMissed += +miss);
     }
     preds += pred.length;
     correct += pred.filter((b) => known.some((g) => iou(b, g) >= 0.3 || covers(b, g))).length;
@@ -106,7 +117,10 @@ for (const o of product({ tile: a.tile!, trig: a.trig!, small: a.small!, grow: a
     const trig = (low.get(f) ?? []).filter((b) => b[4] >= p.trig && (!p.small || b[3] < p.small)).map((b) => b.slice(0, 4) as Box);
     const active = activeTiles(tiles, trig, p.grow);
     tileCount += active.length;
-    refined.set(f, active.flatMap((t) => ownBoxes(t, highBoxes[f] ?? [])));
+    refined.set(
+      f,
+      active.flatMap((t) => ownBoxes(t, highBoxes[f] ?? [])),
+    );
   }
   const at = (f: number) => {
     const f0 = f - (f % p.every);
@@ -123,10 +137,14 @@ for (const o of product({ tile: a.tile!, trig: a.trig!, small: a.small!, grow: a
   });
 }
 
-console.error(`${clip}: ${latest.size} labeled frames, ${n} frames, ${grid(...(a.tile!.split(',')[0].split('x').map(Number) as [number, number]), Number(a.overlap)).length} tiles in the first grid`);
+console.error(
+  `${clip}: ${latest.size} labeled frames, ${n} frames, ${grid(...(a.tile!.split(',')[0].split('x').map(Number) as [number, number]), Number(a.overlap)).length} tiles in the first grid`,
+);
 console.error(`${'policy'.padEnd(50)}${['Mpx/fr', 'tiles', 'miss %', '<40px', 'prec %'].map((c) => c.padStart(8)).join('')}`);
 for (const r of rows) {
   process.stdout.write(JSON.stringify(r) + '\n');
   const num = (v: unknown, d = 1) => (v as number).toFixed(d);
-  console.error(`${String(r.policy).padEnd(50)}${[num(r.mpxPerFrame, 3), num(r.tilesPerFrame), num(r.missRate), num(r.missUnder40), num(r.precision)].map((c) => c.padStart(8)).join('')}`);
+  console.error(
+    `${String(r.policy).padEnd(50)}${[num(r.mpxPerFrame, 3), num(r.tilesPerFrame), num(r.missRate), num(r.missUnder40), num(r.precision)].map((c) => c.padStart(8)).join('')}`,
+  );
 }

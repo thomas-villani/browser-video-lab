@@ -49,7 +49,29 @@ if (import.meta.filename === resolve(process.argv[1] ?? '')) {
       continue;
     }
     console.error(`${name}: ${src} ${start}-${start + len} s`);
-    ffmpeg(['-ss', String(start), '-i', from, '-t', String(len), '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', to]);
+    ffmpeg([
+      '-ss',
+      String(start),
+      '-i',
+      from,
+      '-t',
+      String(len),
+      '-c:v',
+      'libx264',
+      '-preset',
+      'fast',
+      '-crf',
+      '18',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      '-b:a',
+      '128k',
+      '-movflags',
+      '+faststart',
+      to,
+    ]);
     out[name] = { path: to, status: 'cut' };
   }
   console.log(JSON.stringify(out, null, 1));

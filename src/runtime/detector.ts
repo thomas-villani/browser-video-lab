@@ -7,8 +7,8 @@
 // a time; two sessions running at once on the WebGPU device hang), while readback and decoding of
 // up to `depth` calls per detector proceed concurrently.
 import * as ort from 'onnxruntime-web/webgpu';
-import { geometryFor, modelSpec, type Detection, type GeometryOptions, type ModelSpec } from '../models';
-import { GpuPreprocessor, type FrameSource } from '../preprocess';
+import { type Detection, type GeometryOptions, geometryFor, type ModelSpec, modelSpec } from '../models';
+import { type FrameSource, GpuPreprocessor } from '../preprocess';
 import { BatchedReadback } from '../readback';
 import { asset } from './asset';
 
@@ -83,9 +83,7 @@ export class Detector {
     const [w, h] = 'displayWidth' in source ? [source.displayWidth, source.displayHeight] : [source.width, source.height];
     const geo = geometryFor(this.spec, w, h, opts);
     const t0 = performance.now();
-    const run = runChain.then(() =>
-      this.session.run({ [this.spec.inputName]: this.pre.run(source, geo, slot) }),
-    );
+    const run = runChain.then(() => this.session.run({ [this.spec.inputName]: this.pre.run(source, geo, slot) }));
     runChain = run.catch(() => undefined);
     let outputs: ort.InferenceSession.OnnxValueMapType;
     try {

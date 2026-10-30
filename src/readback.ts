@@ -9,9 +9,7 @@ type Outputs = ort.InferenceSession.OnnxValueMapType;
 
 /** Per-tensor readback via ORT (one map per output). */
 export async function readEach(outputs: Outputs): Promise<Record<string, Float32Array>> {
-  const entries = await Promise.all(
-    Object.entries(outputs).map(async ([k, v]) => [k, (await v.getData()) as Float32Array] as const),
-  );
+  const entries = await Promise.all(Object.entries(outputs).map(async ([k, v]) => [k, (await v.getData()) as Float32Array] as const));
   return Object.fromEntries(entries);
 }
 
@@ -23,8 +21,12 @@ export class BatchedReadback {
 
   async read(outputs: Outputs): Promise<Record<string, Float32Array>> {
     // Empty outputs (a detector with NMS inside that found nothing) have nothing to copy.
-    const empty = Object.entries(outputs).filter(([, t]) => !t.size).map(([name]) => [name, new Float32Array(0)] as const);
-    const items = Object.entries(outputs).filter(([, t]) => t.size).map(([name, t]) => ({ name, buf: t.gpuBuffer, bytes: t.size * 4 }));
+    const empty = Object.entries(outputs)
+      .filter(([, t]) => !t.size)
+      .map(([name]) => [name, new Float32Array(0)] as const);
+    const items = Object.entries(outputs)
+      .filter(([, t]) => t.size)
+      .map(([name, t]) => ({ name, buf: t.gpuBuffer, bytes: t.size * 4 }));
     if (!items.length) return Object.fromEntries(empty);
     // copyBufferToBuffer offsets must be 4-byte aligned; float32 sizes always are.
     let total = 0;

@@ -2,9 +2,9 @@
 // config, and which decode pass computes the rest. Pure (no browser APIs), so the CLI can plan
 // in Node and skip launching a browser when nothing is missing.
 import { hashOf } from './hash.ts';
-import { selectKeyframes, type KeyframeConfig } from './keyframes.ts';
+import { type KeyframeConfig, selectKeyframes } from './keyframes.ts';
 import { MODELS, type ModelConfig } from './models.ts';
-import { LAYER_NAMES, VERSION, type Layer, type LayerName, type Layers, type VideoDoc } from './schema.ts';
+import { LAYER_NAMES, type Layer, type LayerName, type Layers, VERSION, type VideoDoc } from './schema.ts';
 
 export type ConfigValue = number | string | boolean;
 /** 'pure' layers are derived from other layers (deriveLayers): no browser, no decode. */
@@ -74,7 +74,7 @@ export const PRODUCERS: Record<LayerName, ProducerSpec> = {
     help: {
       segmentation: 'segmentation model repo under public/models',
       embedding: 'voice embedding model repo under public/models',
-      step: 'seconds between the starts of the 10 s windows (1 is pyannote\'s; 5 is twice as fast, a little less accurate)',
+      step: "seconds between the starts of the 10 s windows (1 is pyannote's; 5 is twice as fast, a little less accurate)",
       threshold: 'voices closer than this are one speaker (lower splits more)',
       minClusterSize: 'voices found in fewer windows join the most similar speaker',
       maxSpeakers: 'at most this many speakers (0 = as many as found)',
@@ -199,7 +199,12 @@ export async function plan(doc: VideoDoc | undefined, requested: string[], overr
   for (const name of resolve(requested, producers)) {
     const p = producers[name];
     for (const k of Object.keys(overrides[name] ?? {})) {
-      if (!(k in p.defaults)) throw new PlanError(`unknown setting '${name}.${k}' (have: ${Object.keys(p.defaults).map((x) => `${name}.${x}`).join(', ')})`);
+      if (!(k in p.defaults))
+        throw new PlanError(
+          `unknown setting '${name}.${k}' (have: ${Object.keys(p.defaults)
+            .map((x) => `${name}.${x}`)
+            .join(', ')})`,
+        );
     }
     const config = { ...p.defaults, ...overrides[name] };
     let model: PlannedModel | undefined;
@@ -234,7 +239,12 @@ export function parseSettings(settings: string[], producers: Producers = PRODUCE
     const p = producers[layer];
     if (!p) throw new PlanError(`unknown layer '${layer}' in '${s}' (have: ${Object.keys(producers).join(', ')})`);
     const d = p.defaults[key];
-    if (d === undefined) throw new PlanError(`unknown setting '${layer}.${key}' (have: ${Object.keys(p.defaults).map((x) => `${layer}.${x}`).join(', ')})`);
+    if (d === undefined)
+      throw new PlanError(
+        `unknown setting '${layer}.${key}' (have: ${Object.keys(p.defaults)
+          .map((x) => `${layer}.${x}`)
+          .join(', ')})`,
+      );
     let v: ConfigValue = raw;
     if (typeof d === 'number') {
       v = Number(raw);

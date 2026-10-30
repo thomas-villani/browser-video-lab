@@ -52,7 +52,10 @@ export function dropPreset(p: Preset) {
 
 /** A file under `dir` by a relative path (`./models/x.onnx`); paths above it are not reachable. */
 export async function fileIn(dir: FileSystemDirectoryHandle, path: string): Promise<File | undefined> {
-  const parts = path.replace(/\\/g, '/').split('/').filter((p) => p && p !== '.');
+  const parts = path
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter((p) => p && p !== '.');
   if (!parts.length || parts.includes('..')) return undefined;
   try {
     let d = dir;

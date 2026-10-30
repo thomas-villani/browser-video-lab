@@ -11,9 +11,7 @@ const frames = JSON.parse(readFileSync('public/label/frames.json', 'utf8'));
 const retina = JSON.parse(readFileSync('public/label/retina.json', 'utf8'));
 const dumps = {};
 const yunetAt = (clip, frame) => {
-  dumps[clip] ??= new Map(
-    JSON.parse(readFileSync(`results/${clip}.dets.json`, 'utf8')).frameDetections.map((fd) => [fd.frame, fd.boxes]),
-  );
+  dumps[clip] ??= new Map(JSON.parse(readFileSync(`results/${clip}.dets.json`, 'utf8')).frameDetections.map((fd) => [fd.frame, fd.boxes]));
   return dumps[clip].get(frame) ?? [];
 };
 

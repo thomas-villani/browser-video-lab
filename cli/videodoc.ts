@@ -8,8 +8,23 @@
 import { parseArgs } from 'node:util';
 import { DocError, LAYER_NAMES, PlanError, REDACT_DEFAULTS, REDACT_SOUNDS, REDACT_STYLES } from '../src/doc/index.ts';
 import {
-  analyze, check, DEFAULT_IMAGE_SIZE, DEFAULT_LAYERS, info, layers, MARKDOWN_LAYERS, markdown, oneShotBrowser, openUrl, redact, search, serveApp, speakers, UsageError,
-  type Context, type Progress,
+  analyze,
+  type Context,
+  check,
+  DEFAULT_IMAGE_SIZE,
+  DEFAULT_LAYERS,
+  info,
+  layers,
+  MARKDOWN_LAYERS,
+  markdown,
+  oneShotBrowser,
+  openUrl,
+  type Progress,
+  redact,
+  search,
+  serveApp,
+  speakers,
+  UsageError,
 } from './lib.ts';
 
 const HELP = `videodoc: analyze a video once, query it many times. Runs in a local headless browser (WebGPU).
@@ -217,7 +232,11 @@ const ctx: Context = {
   cwd: process.env.INIT_CWD ?? process.cwd(),
 };
 
-const list = (s: string | undefined) => (s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+const list = (s: string | undefined) =>
+  (s ?? '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
 
 async function main() {
   const [cmd, ...rest] = positionals;
@@ -248,11 +267,13 @@ async function main() {
     if (!(top >= 1)) throw new UsageError(`--top takes a positive number, got '${a.top}'`);
     return out(search(ctx, rest[0], rest.slice(1), { top, speaker: a.speaker }));
   }
-  if (!['analyze', 'markdown', 'redact', 'info', 'speakers'].includes(cmd)) throw new UsageError(`unknown command '${cmd}' (have: ui, check, analyze, markdown, search, speakers, redact, info, layers; see --help)`);
+  if (!['analyze', 'markdown', 'redact', 'info', 'speakers'].includes(cmd))
+    throw new UsageError(`unknown command '${cmd}' (have: ui, check, analyze, markdown, search, speakers, redact, info, layers; see --help)`);
   if (rest.length !== 1) throw new UsageError(`usage: videodoc ${cmd} <video>`);
   const common = { layers: list(a.layers), set: a.set, force: a.force, dryRun: a['dry-run'], pipeline: a.pipeline };
   if (cmd === 'info') return out(info(ctx, rest[0]));
-  if (cmd === 'speakers') return out(speakers(ctx, rest[0], { name: a.name, merge: a.merge, unmerge: a.unmerge, move: a.move, unmove: a.unmove, voices: a.voices, reset: a.reset }));
+  if (cmd === 'speakers')
+    return out(speakers(ctx, rest[0], { name: a.name, merge: a.merge, unmerge: a.unmerge, move: a.move, unmove: a.unmove, voices: a.voices, reset: a.reset }));
   if (cmd === 'analyze') return out(await analyze(ctx, rest[0], { ...common, doc: a.out }));
   if (cmd === 'redact') {
     const num = (v: string | undefined, what: string) => {
@@ -263,9 +284,27 @@ async function main() {
     };
     return out(
       await redact(ctx, rest[0], {
-        set: a.set, force: a.force, dryRun: a['dry-run'], pipeline: a.pipeline, out: a.out, style: a.style, margin: num(a.margin, 'margin'), hold: num(a.hold, 'hold'), keep: a.keep,
-        keepPlates: a['keep-plates'], keepTracks: a['keep-tracks'], cover: a.cover, words: a.words, wordsFile: a['words-file'], profanity: a.profanity, sound: a.sound,
-        lead: num(a.lead, 'lead'), tail: num(a.tail, 'tail'), keepWords: a['keep-words'], speakers: a.speakers, plan: !a['no-plan'],
+        set: a.set,
+        force: a.force,
+        dryRun: a['dry-run'],
+        pipeline: a.pipeline,
+        out: a.out,
+        style: a.style,
+        margin: num(a.margin, 'margin'),
+        hold: num(a.hold, 'hold'),
+        keep: a.keep,
+        keepPlates: a['keep-plates'],
+        keepTracks: a['keep-tracks'],
+        cover: a.cover,
+        words: a.words,
+        wordsFile: a['words-file'],
+        profanity: a.profanity,
+        sound: a.sound,
+        lead: num(a.lead, 'lead'),
+        tail: num(a.tail, 'tail'),
+        keepWords: a['keep-words'],
+        speakers: a.speakers,
+        plan: !a['no-plan'],
       }),
     );
   }

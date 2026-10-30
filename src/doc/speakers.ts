@@ -50,7 +50,17 @@ export function whoSaid(items: TranscriptItem[], speakers: SpeakerItem[]): Said[
     for (let i = 1; i <= it.words.length; i++) {
       if (i < it.words.length && who[i] === who[from]) continue;
       const words = it.words.slice(from, i);
-      out.push({ t0: words[0][0], t1: words[words.length - 1][1], text: words.map((w) => w[2].trim()).join(' ').replace(/\s+([,.?!;:…])/g, '$1'), speaker: who[from], item, words });
+      out.push({
+        t0: words[0][0],
+        t1: words[words.length - 1][1],
+        text: words
+          .map((w) => w[2].trim())
+          .join(' ')
+          .replace(/\s+([,.?!;:…])/g, '$1'),
+        speaker: who[from],
+        item,
+        words,
+      });
       from = i;
     }
   });
@@ -133,7 +143,12 @@ export interface SpeakerEdit {
 
 /** Speech in [t0, t1] is `to`'s: `from`'s turns there move to `to` (without `from`, everyone's,
  *  and all of [t0, t1] becomes `to`'s). Applied in order, after merges. */
-export interface SpeakerMove { t0: number; t1: number; from?: number; to: number }
+export interface SpeakerMove {
+  t0: number;
+  t1: number;
+  from?: number;
+  to: number;
+}
 
 export interface SpeakerEdits {
   schema: typeof SPEAKERS_SCHEMA;
@@ -174,13 +189,17 @@ export function checkEdits(v: unknown, doc: VideoDoc): { edits: SpeakerEdits; wa
   const items = doc.layers.speakers?.items ?? [];
   const warnings: string[] = [];
   const ok = (x: unknown): x is number => Number.isInteger(x);
-  let list = (Array.isArray(e.speakers) ? e.speakers : []).filter((s) => s && ok(s.id)).map((s): SpeakerEdit => ({
-    id: s.id,
-    ...(typeof s.name === 'string' && s.name.trim() && { name: s.name.trim() }),
-    ...(ok(s.same) && s.same !== s.id && { same: s.same }),
-    ...(s.added === true && { added: true as const }),
-    ...(Array.isArray(s.voice) && s.voice.length && s.voice.every(Number.isFinite) && { voice: s.voice }),
-  }));
+  let list = (Array.isArray(e.speakers) ? e.speakers : [])
+    .filter((s) => s && ok(s.id))
+    .map(
+      (s): SpeakerEdit => ({
+        id: s.id,
+        ...(typeof s.name === 'string' && s.name.trim() && { name: s.name.trim() }),
+        ...(ok(s.same) && s.same !== s.id && { same: s.same }),
+        ...(s.added === true && { added: true as const }),
+        ...(Array.isArray(s.voice) && s.voice.length && s.voice.every(Number.isFinite) && { voice: s.voice }),
+      }),
+    );
   const label = (s: SpeakerEdit) => s.name ?? `Speaker ${s.id}`;
 
   // Which layer speaker each voiced edit is now: the same id when its voice is unchanged (the
@@ -210,7 +229,9 @@ export function checkEdits(v: unknown, doc: VideoDoc): { edits: SpeakerEdits; wa
     used.add(id);
     map.set(s.id, id);
   }
-  list = list.filter((s) => map.has(s.id)).map((s) => ({ ...s, id: map.get(s.id)!, ...(s.voice && !s.added && { voice: items.find((x) => x.id === map.get(s.id))?.voice ?? s.voice }) }));
+  list = list
+    .filter((s) => map.has(s.id))
+    .map((s) => ({ ...s, id: map.get(s.id)!, ...(s.voice && !s.added && { voice: items.find((x) => x.id === map.get(s.id))?.voice ?? s.voice }) }));
   // References to layer speakers nobody edited (a merge into Speaker 3) need it unchanged.
   const ref = (id: number) => map.get(id) ?? (unchanged && items.some((x) => x.id === id) ? id : undefined);
   list = list.flatMap((s) => {
@@ -282,7 +303,10 @@ export function applyEdits(items: SpeakerItem[], edits?: SpeakerEdits): SpeakerI
     const it = out.get(s.id);
     if (it && s.name) it.name = s.name;
   }
-  return [...out.values()].filter((s) => s.turns.length).map((s) => ({ ...s, turns: s.turns.map((t): Span => [r3(t[0]), r3(t[1])]) })).sort((a, b) => a.id - b.id);
+  return [...out.values()]
+    .filter((s) => s.turns.length)
+    .map((s) => ({ ...s, turns: s.turns.map((t): Span => [r3(t[0]), r3(t[1])]) }))
+    .sort((a, b) => a.id - b.id);
 }
 
 /** `doc` with its speakers as edited (the doc itself is not changed). */
@@ -365,13 +389,22 @@ export function unmove(edits: SpeakerEdits, index: number): SpeakerEdits {
 // ---- names from other videos ----
 
 /** A voice a person named: in which video, under which name. */
-export interface NamedVoice { name: string; voice: number[]; video: string }
+export interface NamedVoice {
+  name: string;
+  voice: number[];
+  video: string;
+}
 
 /** The named voices of an edits file (`video` says where it comes from). */
 export const namedVoices = (edits: SpeakerEdits, video: string): NamedVoice[] =>
   edits.speakers.flatMap((s) => (s.name && s.voice && !s.added ? [{ name: s.name, voice: s.voice, video }] : []));
 
-export interface NameSuggestion { id: number; name: string; distance: number; video: string }
+export interface NameSuggestion {
+  id: number;
+  name: string;
+  distance: number;
+  video: string;
+}
 
 /**
  * Names for unnamed speakers from voices named in other videos: for each, the closest named

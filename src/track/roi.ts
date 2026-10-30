@@ -14,7 +14,7 @@
 // crop) and receives detections, so one implementation serves replay and the live pipeline.
 // All requests in a batch are independent, so a live detector can pack crops into one call.
 
-import { agree, intervals, toSampled, type AdaptiveOptions, type Sampled } from './adaptive.ts';
+import { type AdaptiveOptions, agree, intervals, type Sampled, toSampled } from './adaptive.ts';
 import type { Box, Detection } from './bytetrack.ts';
 
 export interface RoiOptions extends Pick<AdaptiveOptions, 'minIou' | 'minScore' | 'lowScore' | 'cuts'> {
@@ -96,12 +96,7 @@ function* follow(
  * Solve window [a, b]. `cache` holds full-frame detections shared between neighboring
  * windows. Returns boxes for frames a..b.
  */
-export function* roiWindow(
-  a: number,
-  b: number,
-  opts: RoiOptions,
-  cache: Map<number, Sampled>,
-): Generator<DetectRequest[], Box[][], Detection[][]> {
+export function* roiWindow(a: number, b: number, opts: RoiOptions, cache: Map<number, Sampled>): Generator<DetectRequest[], Box[][], Detection[][]> {
   const need = [...new Set([a, b])].filter((f) => !cache.has(f));
   if (need.length) {
     const dets = yield need.map((frame) => ({ frame }));
@@ -126,11 +121,25 @@ export function* roiWindow(
   const interior = Array.from({ length: b - a - 1 }, (_, i) => a + 1 + i);
   const zero: Box = [0, 0, 0, 0];
   const forward: Box[][] = Array.from({ length: b - a + 1 }, () => []);
-  yield* follow(loneA.map((box) => ({ box, vel: zero })), interior, a, opts, forward, () => false);
+  yield* follow(
+    loneA.map((box) => ({ box, vel: zero })),
+    interior,
+    a,
+    opts,
+    forward,
+    () => false,
+  );
   // Backward tracks stop where a forward track already holds the same face.
   const met = (f: number, box: Box) => forward[f - a].some((x) => iou(x, box) >= opts.minIou);
   const backward: Box[][] = Array.from({ length: b - a + 1 }, () => []);
-  yield* follow(loneB.map((box) => ({ box, vel: zero })), interior.reverse(), a, opts, backward, met);
+  yield* follow(
+    loneB.map((box) => ({ box, vel: zero })),
+    interior.reverse(),
+    a,
+    opts,
+    backward,
+    met,
+  );
   for (let i = 1; i < b - a; i++) out[i].push(...forward[i], ...backward[i]);
   return out;
 }
@@ -148,12 +157,7 @@ export interface RoiResult {
  * Synchronous driver for replay. `group` windows advance in lockstep and their requests are
  * merged into one batch, as a live pipeline would pack them into one mosaic call.
  */
-export function roiBoxes(
-  n: number,
-  detect: (req: DetectRequest) => Detection[],
-  opts: RoiOptions,
-  group = 4,
-): RoiResult {
+export function roiBoxes(n: number, detect: (req: DetectRequest) => Detection[], opts: RoiOptions, group = 4): RoiResult {
   const cache = new Map<number, Sampled>();
   const out: Box[][] = Array.from({ length: n }, () => []);
   const all = intervals(n, { maxStride: opts.window, cuts: opts.cuts });

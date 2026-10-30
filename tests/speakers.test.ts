@@ -2,12 +2,37 @@
 // assignment, reconstruction, and the DER used to measure it. Run: npm test
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { assignMax, cluster, decodePowerset, diarize, DIARIZE_DEFAULTS, FRAME_STEP, SEG, speakerCount, windowStarts, type WindowSeg } from '../src/audio/diarize.ts';
-import { der, hungarianMax, parseRttm } from '../src/audio/der.ts';
 import { markdownToHtml } from '../src/app/render.ts';
+import { der, hungarianMax, parseRttm } from '../src/audio/der.ts';
+import { assignMax, cluster, DIARIZE_DEFAULTS, decodePowerset, diarize, FRAME_STEP, SEG, speakerCount, type WindowSeg, windowStarts } from '../src/audio/diarize.ts';
 import {
-  addSpeaker, applyEdits, checkEdits, findSpeaker, formatEdits, mergeSpeakers, moveSpeech, nameSpeaker, namedVoices, newDoc, newEdits, REDACT_DEFAULTS, redactionLog, SAME_VOICE, search,
-  speakerAt, suggestSpeakerNames, summarize, toMarkdown, unmergeSpeaker, unmove, whoSaid, withLayers, withSpeakers, type Layer, type SpeakerItem, type Word,
+  addSpeaker,
+  applyEdits,
+  checkEdits,
+  findSpeaker,
+  formatEdits,
+  type Layer,
+  mergeSpeakers,
+  moveSpeech,
+  namedVoices,
+  nameSpeaker,
+  newDoc,
+  newEdits,
+  REDACT_DEFAULTS,
+  redactionLog,
+  SAME_VOICE,
+  type SpeakerItem,
+  search,
+  speakerAt,
+  suggestSpeakerNames,
+  summarize,
+  toMarkdown,
+  unmergeSpeaker,
+  unmove,
+  type Word,
+  whoSaid,
+  withLayers,
+  withSpeakers,
 } from '../src/doc/index.ts';
 
 /** A voice: a unit vector near axis `k` (dimension 8), jittered by `j`. */
@@ -40,8 +65,21 @@ test('clustering: centroid linkage stops at the threshold; small clusters join l
   assert.notEqual(labels[0], labels[20]);
   assert.equal(labels[40], labels[0], 'the outlier joins the nearest large cluster');
   assert.equal(new Set(cluster(vecs, { ...DIARIZE_DEFAULTS, maxSpeakers: 1 })).size, 1);
-  assert.deepEqual(assignMax([[1, 5], [4, 2], [3, 3]]), [1, 0, -1]);
-  assert.deepEqual(hungarianMax([[1, 5, 0], [4, 2, 0]]), [1, 0]);
+  assert.deepEqual(
+    assignMax([
+      [1, 5],
+      [4, 2],
+      [3, 3],
+    ]),
+    [1, 0, -1],
+  );
+  assert.deepEqual(
+    hungarianMax([
+      [1, 5, 0],
+      [4, 2, 0],
+    ]),
+    [1, 0],
+  );
 });
 
 test('diarize: two speakers taking turns across overlapping windows', () => {
@@ -85,11 +123,28 @@ test('who said what: words go to the speaker talking over them; paragraphs break
     { id: 1, turns: [[0, 2.1]] as [number, number][], voice: [] },
     { id: 2, turns: [[2.1, 5]] as [number, number][], voice: [] },
   ];
-  const items = [{ t0: 0, t1: 4, text: ' Did you see it? Yes, twice.', words: [[0, 0.4, ' Did'], [0.4, 0.6, ' you'], [0.6, 0.9, ' see'], [0.9, 1.6, ' it?'], [2.3, 2.8, ' Yes,'], [3, 3.9, ' twice.']] as Word[] }];
-  assert.deepEqual(whoSaid(items, speakers).map(({ words, ...s }) => ({ ...s, words: words!.length })), [
-    { t0: 0, t1: 1.6, text: 'Did you see it?', speaker: 1, item: 0, words: 4 },
-    { t0: 2.3, t1: 3.9, text: 'Yes, twice.', speaker: 2, item: 0, words: 2 },
-  ]);
+  const items = [
+    {
+      t0: 0,
+      t1: 4,
+      text: ' Did you see it? Yes, twice.',
+      words: [
+        [0, 0.4, ' Did'],
+        [0.4, 0.6, ' you'],
+        [0.6, 0.9, ' see'],
+        [0.9, 1.6, ' it?'],
+        [2.3, 2.8, ' Yes,'],
+        [3, 3.9, ' twice.'],
+      ] as Word[],
+    },
+  ];
+  assert.deepEqual(
+    whoSaid(items, speakers).map(({ words, ...s }) => ({ ...s, words: words!.length })),
+    [
+      { t0: 0, t1: 1.6, text: 'Did you see it?', speaker: 1, item: 0, words: 4 },
+      { t0: 2.3, t1: 3.9, text: 'Yes, twice.', speaker: 2, item: 0, words: 2 },
+    ],
+  );
   assert.equal(speakerAt(speakers, 1.9, 2.5), 2);
   assert.equal(speakerAt(speakers, 6, 7), undefined);
   const doc = withLayers(newDoc({ name: 'a.mp4', fingerprint: 'v0:1:x', size: 1, duration: 5, width: 640, height: 360, fps: 25, frames: 125, video: { codec: 'avc1' } }), {
@@ -99,7 +154,10 @@ test('who said what: words go to the speaker talking over them; paragraphs break
   const md = toMarkdown(withSpeakers(doc, nameSpeaker(newEdits(doc), speakers, 2, 'Dana')));
   assert.match(md, /2 speakers/);
   assert.match(md, /\*\*\[00:00\] Speaker 1:\*\* Did you see it\?\n\n\*\*\[00:02\] Dana:\*\* Yes, twice\./);
-  assert.match(markdownToHtml(md, () => undefined), /<button class="ts" data-t="2">00:02<\/button> <b class="who">Dana:<\/b> Yes, twice\./);
+  assert.match(
+    markdownToHtml(md, () => undefined),
+    /<button class="ts" data-t="2">00:02<\/button> <b class="who">Dana:<\/b> Yes, twice\./,
+  );
 });
 
 // ---- edits: names, merges, moves (<video>.speakers.json) ----
@@ -115,7 +173,15 @@ const SRC = { name: 'a.mp4', fingerprint: 'v0:1:x', size: 1, duration: 30, width
 /** A doc with three speakers taking turns over 30 s, and a transcript of one word per second. */
 function talk(speakers: SpeakerItem[]) {
   const words: Word[] = Array.from({ length: 30 }, (_, i) => [i + 0.1, i + 0.6, ` w${i}`]);
-  const items = [0, 10, 20].map((t) => ({ t0: t, t1: t + 10, text: words.slice(t, t + 10).map((w) => w[2]).join(''), words: words.slice(t, t + 10) }));
+  const items = [0, 10, 20].map((t) => ({
+    t0: t,
+    t1: t + 10,
+    text: words
+      .slice(t, t + 10)
+      .map((w) => w[2])
+      .join(''),
+    words: words.slice(t, t + 10),
+  }));
   return withLayers(newDoc(SRC), {
     transcript: { producer: { configHash: 'h', config: {} }, items } as unknown as Layer<never>,
     speakers: { producer: { configHash: 's', config: {} }, items: speakers } as unknown as Layer<never>,
@@ -138,12 +204,40 @@ test('speaker edits: names, a merge and moves give the doc as edited; the doc it
   const guest = addSpeaker(e, items, 'Guest');
   e = moveSpeech(guest.edits, items, 22, 23, guest.id);
   const s = withSpeakers(doc, e).layers.speakers!.items;
-  assert.deepEqual(s.map((x) => [x.id, x.name, x.turns, x.merged]), [
-    [1, undefined, [[0, 10], [12, 14]], undefined],
-    [2, 'Dana', [[10, 12], [14, 20], [25, 30]], [4]],
-    [3, undefined, [[20, 22], [23, 25]], undefined],
-    [5, 'Guest', [[22, 23]], undefined],
-  ]);
+  assert.deepEqual(
+    s.map((x) => [x.id, x.name, x.turns, x.merged]),
+    [
+      [
+        1,
+        undefined,
+        [
+          [0, 10],
+          [12, 14],
+        ],
+        undefined,
+      ],
+      [
+        2,
+        'Dana',
+        [
+          [10, 12],
+          [14, 20],
+          [25, 30],
+        ],
+        [4],
+      ],
+      [
+        3,
+        undefined,
+        [
+          [20, 22],
+          [23, 25],
+        ],
+        undefined,
+      ],
+      [5, 'Guest', [[22, 23]], undefined],
+    ],
+  );
   assert.equal(doc.layers.speakers!.items.length, 4, 'the doc keeps its speakers');
   assert.equal(findSpeaker(s, 'dana')?.id, 2);
   assert.equal(findSpeaker(s, 'Speaker 4')?.id, 2, 'a merged id finds the speaker it joined');
@@ -155,10 +249,17 @@ test('speaker edits: names, a merge and moves give the doc as edited; the doc it
   assert.match(md, /\*\*\[00:22\] Guest:\*\* w22/);
   const hit = search([withSpeakers(doc, e)], 'w15')[0];
   assert.equal(hit.speaker, 'Dana');
-  assert.deepEqual(search([withSpeakers(doc, e)], 'w12 w15 w27', { speaker: 'Dana' }).map((h) => [h.t0, h.matched.sort()]), [[14.1, ['w15', 'w27']]], 'only what Dana says');
+  assert.deepEqual(
+    search([withSpeakers(doc, e)], 'w12 w15 w27', { speaker: 'Dana' }).map((h) => [h.t0, h.matched.sort()]),
+    [[14.1, ['w15', 'w27']]],
+    'only what Dana says',
+  );
   assert.equal(summarize(withSpeakers(doc, e)).speakers.named, 2);
   // Undo.
-  assert.deepEqual(applyEdits(items, unmove(unmergeSpeaker(e, 4), 0)).map((x) => x.id), [1, 2, 3, 4, 5]);
+  assert.deepEqual(
+    applyEdits(items, unmove(unmergeSpeaker(e, 4), 0)).map((x) => x.id),
+    [1, 2, 3, 4, 5],
+  );
   // Saved and read back.
   const back = checkEdits(JSON.parse(formatEdits(e)), doc);
   assert.deepEqual(back.warnings, []);
@@ -185,12 +286,23 @@ test('speaker edits follow the voices when the speakers are found again, and dro
   assert.equal(r.warnings.length, 1);
   assert.match(r.warnings[0], /^Cal: no speaker found now has that voice/);
   const s = applyEdits(again.layers.speakers!.items, r.edits);
-  assert.deepEqual(s.map((x) => [x.id, x.name, x.turns, x.merged]), [
-    [2, 'Ann', [[0, 5], [6, 20]], [1]],
-    [3, undefined, [[20, 25]], undefined],
-    [4, undefined, [[25, 30]], undefined],
-    [5, 'Guest', [[5, 6]], undefined],
-  ]);
+  assert.deepEqual(
+    s.map((x) => [x.id, x.name, x.turns, x.merged]),
+    [
+      [
+        2,
+        'Ann',
+        [
+          [0, 5],
+          [6, 20],
+        ],
+        [1],
+      ],
+      [3, undefined, [[20, 25]], undefined],
+      [4, undefined, [[25, 30]], undefined],
+      [5, 'Guest', [[5, 6]], undefined],
+    ],
+  );
 });
 
 test('names suggested from voices named elsewhere: the closest within SAME_VOICE, one each, never a name in use', () => {
@@ -205,7 +317,10 @@ test('names suggested from voices named elsewhere: the closest within SAME_VOICE
     { name: 'Bo', voice: unit(6), video: 'b.mp4' },
     { name: 'Ann', voice: unit(0, 0.05), video: 'c.mp4' },
   ];
-  assert.deepEqual(suggestSpeakerNames(s, known).map((x) => [x.id, x.name, x.video]), [[1, 'Ann', 'c.mp4']]);
+  assert.deepEqual(
+    suggestSpeakerNames(s, known).map((x) => [x.id, x.name, x.video]),
+    [[1, 'Ann', 'c.mp4']],
+  );
   assert.ok(SAME_VOICE > 0.3 && SAME_VOICE < 0.6);
   const e = nameSpeaker(newEdits(talk(three())), three(), 2, 'Dana');
   assert.deepEqual(namedVoices(e, 'x.mp4'), [{ name: 'Dana', voice: unit(2), video: 'x.mp4' }]);
@@ -215,7 +330,10 @@ test('redaction bleeps every turn of a speaker, by name', () => {
   const doc = talk(three());
   const e = nameSpeaker(newEdits(doc), three(), 2, 'Dana');
   const log = redactionLog(withSpeakers(doc, e), { ...REDACT_DEFAULTS, cover: [], speakers: ['Dana'] });
-  assert.deepEqual(log.audio?.spans.map((x) => [x.t0, x.t1, x.speaker]), [[9.75, 20.25, 'Dana']]);
+  assert.deepEqual(
+    log.audio?.spans.map((x) => [x.t0, x.t1, x.speaker]),
+    [[9.75, 20.25, 'Dana']],
+  );
   assert.equal(log.audio?.totals.turns, 1);
   assert.match(log.caveat, /diarization/);
   assert.throws(() => redactionLog(doc, { ...REDACT_DEFAULTS, cover: [], speakers: ['Dana'] }), /no speaker 'Dana'/);

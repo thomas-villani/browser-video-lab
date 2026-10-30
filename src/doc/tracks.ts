@@ -62,9 +62,9 @@ export function linkTracks(frames: Box[][], cuts: number[] = [], opts: TrackOpti
     if (prev !== open) done.push(...open);
     const cost = s
       ? prev.map((t) => {
-        const p = predict(t);
-        return boxes.map((b) => shift(p, b) / s);
-      })
+          const p = predict(t);
+          return boxes.map((b) => shift(p, b) / s);
+        })
       : prev.map((t) => boxes.map((b) => 1 - iou(t.boxes[t.boxes.length - 1], b)));
     const a = linearAssignment(cost, s ? 1 : 1 - opts.minIou, boxes.length);
     const next: typeof done = [];

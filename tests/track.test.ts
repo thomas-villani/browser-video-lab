@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { adaptiveBoxes } from '../src/track/adaptive.ts';
 import { linearAssignment } from '../src/track/assignment.ts';
-import { ByteTracker, type Box } from '../src/track/bytetrack.ts';
+import { type Box, ByteTracker } from '../src/track/bytetrack.ts';
 import { coverage } from '../src/track/coverage.ts';
 import { fromXyah, initiate, predict, toXyah, update } from '../src/track/kalman.ts';
 import { sparseBoxes } from '../src/track/sparse.ts';
@@ -24,7 +24,15 @@ test('assignment: zero rows still reports every column as unmatched', () => {
 });
 
 test('assignment: respects the cost limit and handles rectangular input', () => {
-  const r = linearAssignment([[0.1, 0.9], [0.95, 0.99], [0.2, 0.3]], 0.5, 2);
+  const r = linearAssignment(
+    [
+      [0.1, 0.9],
+      [0.95, 0.99],
+      [0.2, 0.3],
+    ],
+    0.5,
+    2,
+  );
   assert.deepEqual(new Set(r.matches.map((m) => m.join())), new Set(['0,0', '2,1']));
   assert.deepEqual(r.unmatchedRows, [1]);
   assert.deepEqual(r.unmatchedCols, []);

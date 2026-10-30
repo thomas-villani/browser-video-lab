@@ -64,9 +64,7 @@ export function linearAssignment(cost: number[][], limit: number, cols: number):
   const BIG = limit + 1e5;
   const clamp = (c: number) => (c > limit ? BIG : c);
   const transposed = rows > cols;
-  const c = transposed
-    ? cost[0].map((_, j) => cost.map((row) => clamp(row[j])))
-    : cost.map((row) => row.map(clamp));
+  const c = transposed ? cost[0].map((_, j) => cost.map((row) => clamp(row[j]))) : cost.map((row) => row.map(clamp));
   const assign = hungarian(c, c.length, c[0].length);
 
   const matches: [number, number][] = [];

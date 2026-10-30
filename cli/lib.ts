@@ -5,15 +5,67 @@
 // Compute runs in a headless Edge/Chrome (WebGPU) driving analyze.html; planning, caching and
 // reading docs run in Node, so commands with nothing to compute never touch a browser.
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, closeSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  deriveLayers, docPathFor, speakerName, fingerprint, fmtTime, formatDoc, formatLog, isTrackLayer, LAYER_NAME_RE, LAYER_NAMES, mergeOverrides, newDoc, parseDoc, parseKeep, parsePipeline, parseSettings,
-  pipelineContext, plan, parsePlan, planPathFor, REDACT_DEFAULTS, REDACT_KINDS, REDACT_SOUNDS, REDACT_STYLES, redactionLog, search as searchDocs, summarize,
-  toMarkdown, withLayers, addSpeaker, checkEdits, findSpeaker, formatEdits, mergeSpeakers, moveSpeech, nameSpeaker, namedVoices, newEdits, speakersPathFor, suggestSpeakerNames,
-  talkTime, unmergeSpeaker, unmove, withSpeakers,
-  type NamedVoice, type SpeakerEdits, type SpeakerItem, type DocLayers, type KeyframeItem, type Pipeline, type Plan, type RedactKind, type RedactOptions as RedactSettings, type RedactSound, type RedactStyle, type Track, type VideoDoc,
+  addSpeaker,
+  checkEdits,
+  type DocLayers,
+  deriveLayers,
+  docPathFor,
+  findSpeaker,
+  fingerprint,
+  fmtTime,
+  formatDoc,
+  formatEdits,
+  formatLog,
+  isTrackLayer,
+  type KeyframeItem,
+  LAYER_NAME_RE,
+  LAYER_NAMES,
+  mergeOverrides,
+  mergeSpeakers,
+  moveSpeech,
+  type NamedVoice,
+  namedVoices,
+  nameSpeaker,
+  newDoc,
+  newEdits,
+  type Pipeline,
+  type Plan,
+  parseDoc,
+  parseKeep,
+  parsePipeline,
+  parsePlan,
+  parseSettings,
+  pipelineContext,
+  plan,
+  planPathFor,
+  REDACT_DEFAULTS,
+  REDACT_KINDS,
+  REDACT_SOUNDS,
+  REDACT_STYLES,
+  type RedactKind,
+  type RedactOptions as RedactSettings,
+  type RedactSound,
+  type RedactStyle,
+  redactionLog,
+  type SpeakerEdits,
+  type SpeakerItem,
+  search as searchDocs,
+  speakerName,
+  speakersPathFor,
+  suggestSpeakerNames,
+  summarize,
+  type Track,
+  talkTime,
+  toMarkdown,
+  unmergeSpeaker,
+  unmove,
+  type VideoDoc,
+  withLayers,
+  withSpeakers,
 } from '../src/doc/index.ts';
 
 export const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -24,7 +76,12 @@ export const DEFAULT_IMAGE_SIZE = 768;
 /** A mistake in the request (exit code 2 in the CLI); the message says how to fix it. */
 export class UsageError extends Error {}
 
-export interface Progress { pass: string; stage: string; done: number; total: number }
+export interface Progress {
+  pass: string;
+  stage: string;
+  done: number;
+  total: number;
+}
 
 export interface Reporter {
   /** A line for people (stderr in the CLI, a log message under MCP). */
@@ -44,7 +101,10 @@ export interface Browser {
   close(): Promise<void>;
 }
 
-export interface BrowserOptions { browser: string; headed: boolean }
+export interface BrowserOptions {
+  browser: string;
+  headed: boolean;
+}
 
 async function harness() {
   // The harness builds and serves the pages from the repo root.
@@ -61,9 +121,10 @@ export async function serveApp(port = 4317): Promise<string> {
 
 /** Open `url` in the system's default browser. */
 export function openUrl(url: string) {
-  const [cmd, args] =
-    process.platform === 'win32' ? ['cmd', ['/c', 'start', '""', url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
-  spawn(cmd as string, args as string[], { stdio: 'ignore', detached: true, windowsHide: true }).on('error', () => {}).unref();
+  const [cmd, args] = process.platform === 'win32' ? ['cmd', ['/c', 'start', '""', url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
+  spawn(cmd as string, args as string[], { stdio: 'ignore', detached: true, windowsHide: true })
+    .on('error', () => {})
+    .unref();
 }
 
 /** A loaded compute page whose progress callback can be pointed at the current run. */
@@ -374,7 +435,13 @@ async function ensure(ctx: Context, video: string, docPath: string, requested: s
   // (redact --cover vehicles after analyzing with the preset).
   const asSaved = requested.filter((n) => !(n in pc.producers) && existing && isTrackLayer(existing, n));
   if (asSaved.length) ctx.report.log(`note: ${asSaved.join(', ')} used as saved in the doc (pass its --pipeline to recompute)`);
-  const p = await plan(existing, requested.filter((n) => !asSaved.includes(n)), settings, o.force, { ...pc, fingerprint: modelFingerprint });
+  const p = await plan(
+    existing,
+    requested.filter((n) => !asSaved.includes(n)),
+    settings,
+    o.force,
+    { ...pc, fingerprint: modelFingerprint },
+  );
   ctx.report.log(`plan: ${p.layers.map((l) => `${l.name} (${l.status})`).join(', ')}`);
   const missing = missingModels(p);
   if (o.dryRun) return { dryRun: { doc: docPath, plan: p.layers.map((l) => ({ name: l.name, status: l.status })), passes: p.passes, missing } };
@@ -408,10 +475,7 @@ async function ensure(ctx: Context, video: string, docPath: string, requested: s
       files,
       (page, base) => {
         const layers = p.layers.map((l) => (l.model && served.has(l.model.url) ? { ...l, model: { ...l.model, url: `${base}@file/${served.get(l.model.url)}` } } : l));
-        return page.evaluate(
-          ([url, layers, inp]: [string, typeof p.layers, DocLayers]) => window.videodoc.compute(url, layers, inp),
-          [`${base}@file/video`, layers, inputs],
-        );
+        return page.evaluate(([url, layers, inp]: [string, typeof p.layers, DocLayers]) => window.videodoc.compute(url, layers, inp), [`${base}@file/video`, layers, inputs]);
       },
       ctx.report.progress,
       ctx.signal,
@@ -435,8 +499,12 @@ function logLayers(ctx: Context, doc: VideoDoc, p: Plan) {
   ctx.report.log(`\n${doc.source.name}: ${fmtDuration(doc.source.duration)}, ${doc.source.width}x${doc.source.height}, ${doc.source.fps} fps`);
   for (const [name, s] of Object.entries(summary)) {
     if (!(name in status)) continue;
-    const extra = Object.entries(s).filter(([k]) => !['items', 'ms', 'device', 'configHash', 'model'].includes(k)).map(([k, v]) => `${k} ${v}`);
-    ctx.report.log(`  ${name.padEnd(11)} ${status[name].padEnd(8)} ${String(s.items).padStart(6)} items  ${(s.ms / 1000).toFixed(1).padStart(7)} s  ${s.device}${s.model ? `  ${s.model}` : ''}${extra.length ? `  (${extra.join(', ')})` : ''}`);
+    const extra = Object.entries(s)
+      .filter(([k]) => !['items', 'ms', 'device', 'configHash', 'model'].includes(k))
+      .map(([k, v]) => `${k} ${v}`);
+    ctx.report.log(
+      `  ${name.padEnd(11)} ${status[name].padEnd(8)} ${String(s.items).padStart(6)} items  ${(s.ms / 1000).toFixed(1).padStart(7)} s  ${s.device}${s.model ? `  ${s.model}` : ''}${extra.length ? `  (${extra.join(', ')})` : ''}`,
+    );
   }
   return summary;
 }
@@ -499,10 +567,7 @@ async function extractImages(ctx: Context, video: string, keyframes: KeyframeIte
     { video },
     async (page, base) => {
       const t0 = Date.now();
-      const r = await page.evaluate(
-        ([url, times, s]: [string, number[], number]) => window.videodoc.images(url, times, s),
-        [`${base}@file/video`, todo.map((k) => k.t), size],
-      );
+      const r = await page.evaluate(([url, times, s]: [string, number[], number]) => window.videodoc.images(url, times, s), [`${base}@file/video`, todo.map((k) => k.t), size]);
       ms = Date.now() - t0;
       return r;
     },
@@ -619,15 +684,29 @@ export function redactSettings(o: RedactOptions, base: RedactSettings = REDACT_D
   let words = list(o.words) ?? base.words;
   if (o.wordsFile) {
     if (!existsSync(o.wordsFile)) throw new UsageError(`no words file at ${o.wordsFile}`);
-    const lines = readFileSync(o.wordsFile, 'utf8').split(/\r?\n/).map((l) => l.replace(/#.*/, '').trim()).filter(Boolean);
+    const lines = readFileSync(o.wordsFile, 'utf8')
+      .split(/\r?\n/)
+      .map((l) => l.replace(/#.*/, '').trim())
+      .filter(Boolean);
     words = [...(o.words === undefined ? [] : words), ...lines];
   }
   const keepWords = list(o.keepWords) ?? base.keepWords;
   const badKey = keepWords.find((k) => !/^\d+\.\d+$/.test(k));
   if (badKey !== undefined) throw new UsageError(`keepWords takes word keys like 12.3 (from the redaction log), got '${badKey}'`);
   return {
-    style, margin: num(o.margin, base.margin, 'margin', 2), hold: num(o.hold, base.hold, 'hold', 10), keep, keepPlates, keepTracks, cover: cover as RedactKind[],
-    words, profanity: o.profanity ?? base.profanity, sound, lead: num(o.lead, base.lead, 'lead', 5), tail: num(o.tail, base.tail, 'tail', 5), keepWords,
+    style,
+    margin: num(o.margin, base.margin, 'margin', 2),
+    hold: num(o.hold, base.hold, 'hold', 10),
+    keep,
+    keepPlates,
+    keepTracks,
+    cover: cover as RedactKind[],
+    words,
+    profanity: o.profanity ?? base.profanity,
+    sound,
+    lead: num(o.lead, base.lead, 'lead', 5),
+    tail: num(o.tail, base.tail, 'tail', 5),
+    keepWords,
     speakers: list(o.speakers) ?? base.speakers ?? [],
   };
 }
@@ -661,7 +740,8 @@ export async function redact(ctx: Context, videoArg: string, o: RedactOptions = 
     }
   }
   const layers = [...need.cover, ...(need.words.length || need.profanity ? ['transcript'] : []), ...(need.speakers.length ? ['speakers'] : [])];
-  if (!layers.length && !addedAudio.length) throw new UsageError('nothing to redact: cover is none and there are no words or speakers to bleep (pass --words, --words-file, --profanity or --speakers)');
+  if (!layers.length && !addedAudio.length)
+    throw new UsageError('nothing to redact: cover is none and there are no words or speakers to bleep (pass --words, --words-file, --profanity or --speakers)');
   const r = await ensure(ctx, video, docPathFor(video), layers, o);
   if ('dryRun' in r) return r.dryRun;
   // Speakers by the names a person gave them.
@@ -694,23 +774,41 @@ export async function redact(ctx: Context, videoArg: string, o: RedactOptions = 
   if (coversVideo) {
     const kinds = [...new Set(pre.tracks.map((x) => x.layer))];
     const what = `${(kinds.length ? kinds : ['faces']).map((k) => `${n(k)} ${k === 'faces' ? 'face' : k === 'plates' ? 'plate' : k}`).join(' and ')} tracks`;
-    ctx.report.log(`redacting ${what}${t.added ? ` (${t.added} added by hand)` : ''}${t.kept ? `, keeping ${t.kept} visible,` : ''} on ${t.framesWithRegions} of ${doc.source.frames} frames (${settings.style})`);
+    ctx.report.log(
+      `redacting ${what}${t.added ? ` (${t.added} added by hand)` : ''}${t.kept ? `, keeping ${t.kept} visible,` : ''} on ${t.framesWithRegions} of ${doc.source.frames} frames (${settings.style})`,
+    );
   }
   if (pre.audio) {
     const a = pre.audio.totals;
-    const what = [`${a.matches - a.kept} spoken matches`, ...(a.turns ? [`${a.turns} turns of ${settings.speakers.join(', ')}`] : []), ...(a.added ? [`${a.added} spans added by hand`] : [])];
+    const what = [
+      `${a.matches - a.kept} spoken matches`,
+      ...(a.turns ? [`${a.turns} turns of ${settings.speakers.join(', ')}`] : []),
+      ...(a.added ? [`${a.added} spans added by hand`] : []),
+    ];
     ctx.report.log(`${settings.sound === 'bleep' ? 'bleeping' : 'muting'} ${what.join(', ')}${a.kept ? `, leaving ${a.kept} audible` : ''}: ${a.seconds} s of audio`);
     const long = doc.source.duration >= 3600;
-    for (const s of pre.audio.spans.filter((x) => !x.kept).slice(0, 20)) ctx.report.log(`  ${fmtTime(s.t0, long)}  ${s.added ? '(added by hand)' : s.speaker ? `(${s.speaker} speaking, to ${fmtTime(s.t1, long)})` : `"${s.text}"${s.term === s.text ? '' : ` (${s.term})`}`}`);
+    for (const s of pre.audio.spans.filter((x) => !x.kept).slice(0, 20))
+      ctx.report.log(
+        `  ${fmtTime(s.t0, long)}  ${s.added ? '(added by hand)' : s.speaker ? `(${s.speaker} speaking, to ${fmtTime(s.t1, long)})` : `"${s.text}"${s.term === s.text ? '' : ` (${s.term})`}`}`,
+      );
     if (pre.audio.spans.length > 20) ctx.report.log(`  ... (all ${pre.audio.spans.length} in the log)`);
-    if (a.matches === 0 && !a.added && !a.turns && settings.words.length) ctx.report.log('  note: no listed word is in the transcript (check its spelling there: names are often transcribed differently)');
+    if (a.matches === 0 && !a.added && !a.turns && settings.words.length)
+      ctx.report.log('  note: no listed word is in the transcript (check its spelling there: names are often transcribed differently)');
   }
   const part = `${out}.part`;
   writeFileSync(part, '');
   let result: { frames: number; ms: number };
   try {
     // The page gets the doc without the layers it does not need (a transcript can be large).
-    const sent = { ...doc, layers: { faces: doc.layers.faces, plates: doc.layers.plates, scenes: doc.layers.scenes, ...(pre.audio && { transcript: doc.layers.transcript, speakers: doc.layers.speakers }) } };
+    const sent = {
+      ...doc,
+      layers: {
+        faces: doc.layers.faces,
+        plates: doc.layers.plates,
+        scenes: doc.layers.scenes,
+        ...(pre.audio && { transcript: doc.layers.transcript, speakers: doc.layers.speakers }),
+      },
+    };
     result = await ctx.browser.run(
       { video, out: part },
       (page, base) =>
@@ -738,8 +836,17 @@ export async function redact(ctx: Context, videoArg: string, o: RedactOptions = 
   ctx.report.log(`  -> ${out}\n  -> ${logPath}`);
   ctx.report.log(`  note: ${log.caveat}`);
   return {
-    out, log: logPath, doc: r.docPath, ...(usePlan && { review: planPath, warnings }), settings, totals: log.totals, ...(log.audio && { audio: log.audio.totals }),
-    frames: result.frames, ms: result.ms, wallMs: r.wallMs + result.ms, caveat: log.caveat,
+    out,
+    log: logPath,
+    doc: r.docPath,
+    ...(usePlan && { review: planPath, warnings }),
+    settings,
+    totals: log.totals,
+    ...(log.audio && { audio: log.audio.totals }),
+    frames: result.frames,
+    ms: result.ms,
+    wallMs: r.wallMs + result.ms,
+    caveat: log.caveat,
   };
 }
 
@@ -796,13 +903,20 @@ export function search(ctx: Context, query: string, paths: string[], o: SearchOp
     };
   });
   ctx.report.log(`"${query}"${o.speaker !== undefined ? ` said by ${o.speaker}` : ''}: ${hits.length} hits in ${docs.length - noSpeaker.length} transcripts (${ms} ms)`);
-  for (const r of results) ctx.report.log(`  ${r.score.toFixed(2).padStart(6)}  ${basename(r.video)}  ${r.time}  ${r.snippet.length > 160 ? `${r.snippet.slice(0, 157)}...` : r.snippet}`);
+  for (const r of results)
+    ctx.report.log(`  ${r.score.toFixed(2).padStart(6)}  ${basename(r.video)}  ${r.time}  ${r.snippet.length > 160 ? `${r.snippet.slice(0, 157)}...` : r.snippet}`);
   if (notAnalyzed.length) ctx.report.log(`  not analyzed (run videodoc analyze): ${notAnalyzed.join(', ')}`);
   if (noTranscript.length) ctx.report.log(`  no transcript layer: ${noTranscript.join(', ')}`);
   if (noSpeaker.length) ctx.report.log(`  no speaker ${o.speaker} (or no speakers layer): ${noSpeaker.join(', ')}`);
   return {
-    query, ...(o.speaker !== undefined && { speaker: o.speaker }), hits: results, searched: docs.length - noSpeaker.length, ms,
-    ...(notAnalyzed.length && { notAnalyzed }), ...(noTranscript.length && { noTranscript }), ...(noSpeaker.length && { noSpeaker }),
+    query,
+    ...(o.speaker !== undefined && { speaker: o.speaker }),
+    hits: results,
+    searched: docs.length - noSpeaker.length,
+    ms,
+    ...(notAnalyzed.length && { notAnalyzed }),
+    ...(noTranscript.length && { noTranscript }),
+    ...(noSpeaker.length && { noSpeaker }),
   };
 }
 
@@ -936,18 +1050,33 @@ export function speakers(ctx: Context, videoArg: string, o: SpeakersOptions = {}
   const rows = list.map((s) => {
     const sug = suggestions.find((x) => x.id === s.id);
     return {
-      id: s.id, name: speakerName(s), named: !!s.name, seconds: r1(talkTime(s)), share: r1((100 * talkTime(s)) / Math.max(1e-9, total)), turns: s.turns.length,
-      first: fmtTime(s.turns[0][0], long), ...(s.merged && { merged: s.merged }),
+      id: s.id,
+      name: speakerName(s),
+      named: !!s.name,
+      seconds: r1(talkTime(s)),
+      share: r1((100 * talkTime(s)) / Math.max(1e-9, total)),
+      turns: s.turns.length,
+      first: fmtTime(s.turns[0][0], long),
+      ...(s.merged && { merged: s.merged }),
       ...(sug && { suggestion: { name: sug.name, distance: sug.distance, from: sug.video } }),
     };
   });
   ctx.report.log(`${doc.source.name}: ${list.length} speakers${changed ? ` (saved ${existsSync(path) ? path : 'no edits'})` : ''}`);
-  for (const r of rows) ctx.report.log(`  ${String(r.id).padStart(3)}  ${r.name.padEnd(20)} ${String(r.seconds).padStart(7)} s  ${String(r.share).padStart(5)}%  from ${r.first}${r.merged ? `  (merged: ${r.merged.join(', ')})` : ''}${r.suggestion ? `  maybe ${r.suggestion.name}? (voice ${r.suggestion.distance} from ${basename(r.suggestion.from)})` : ''}`);
+  for (const r of rows)
+    ctx.report.log(
+      `  ${String(r.id).padStart(3)}  ${r.name.padEnd(20)} ${String(r.seconds).padStart(7)} s  ${String(r.share).padStart(5)}%  from ${r.first}${r.merged ? `  (merged: ${r.merged.join(', ')})` : ''}${r.suggestion ? `  maybe ${r.suggestion.name}? (voice ${r.suggestion.distance} from ${basename(r.suggestion.from)})` : ''}`,
+    );
   // A speaker merged since a move names the one it joined.
   const id2name = (id: number) => speakerName(list.find((s) => s.id === id || s.merged?.includes(id)) ?? { id });
-  edits.moves.forEach((m, i) => ctx.report.log(`  move ${i}: ${fmtTime(m.t0, long)}-${fmtTime(m.t1, long)} ${m.from !== undefined ? `of ${id2name(m.from)} ` : ''}to ${id2name(m.to)}`));
+  edits.moves.forEach((m, i) =>
+    ctx.report.log(`  move ${i}: ${fmtTime(m.t0, long)}-${fmtTime(m.t1, long)} ${m.from !== undefined ? `of ${id2name(m.from)} ` : ''}to ${id2name(m.to)}`),
+  );
   return {
-    video, doc: docPath, ...(existsSync(path) && { edits: path }), changed, speakers: rows,
+    video,
+    doc: docPath,
+    ...(existsSync(path) && { edits: path }),
+    changed,
+    speakers: rows,
     moves: edits.moves.map((m, index) => ({ index, t0: m.t0, t1: m.t1, ...(m.from !== undefined && { from: id2name(m.from) }), to: id2name(m.to) })),
     ...(loaded.warnings.length && { warnings: loaded.warnings }),
   };
@@ -970,7 +1099,10 @@ export function layers(ctx?: Context, pipeline?: string) {
 export async function check(ctx: Context, browserName: string) {
   const problems: string[] = [];
   const models = Object.fromEntries(
-    ['yunet_face_dyn.onnx', 'silero_vad.onnx', 'yolo_plate_t640.onnx', ...['whisper-base_timestamped', 'whisper-small_timestamped'].map((m) => `onnx-community/${m}`)].map((m) => [m, existsSync(join(ROOT, 'public/models', m))]),
+    ['yunet_face_dyn.onnx', 'silero_vad.onnx', 'yolo_plate_t640.onnx', ...['whisper-base_timestamped', 'whisper-small_timestamped'].map((m) => `onnx-community/${m}`)].map((m) => [
+      m,
+      existsSync(join(ROOT, 'public/models', m)),
+    ]),
   );
   const env: Awaited<ReturnType<Window['videodoc']['check']>> = await ctx.browser.run({}, (page) => page.evaluate(() => window.videodoc.check()), undefined, ctx.signal);
   if (!env.webgpu) problems.push('no WebGPU adapter: faces and scenes need it (try --browser chrome, or update GPU drivers)');
@@ -982,8 +1114,16 @@ export async function check(ctx: Context, browserName: string) {
   const gpu = env.webgpu ? `${env.webgpu.vendor} ${env.webgpu.architecture}${env.webgpu.description ? ` (${env.webgpu.description})` : ''}` : 'none';
   ctx.report.log(`browser   ${browserName}: ${env.userAgent.match(/(Edg|Chrome)\/[\d.]+/g)?.join(' ') ?? env.userAgent}`);
   ctx.report.log(`webgpu    ${gpu}${env.webgpu?.shaderF16 ? ', shader-f16' : ''}`);
-  ctx.report.log(`decode    ${Object.entries(env.decode).map(([k, v]) => `${k} ${v ? 'yes' : 'no'}`).join(', ')}`);
-  ctx.report.log(`models    ${Object.entries(models).map(([k, v]) => `${k.split('/').pop()} ${v ? 'yes' : 'no'}`).join(', ')}`);
+  ctx.report.log(
+    `decode    ${Object.entries(env.decode)
+      .map(([k, v]) => `${k} ${v ? 'yes' : 'no'}`)
+      .join(', ')}`,
+  );
+  ctx.report.log(
+    `models    ${Object.entries(models)
+      .map(([k, v]) => `${k.split('/').pop()} ${v ? 'yes' : 'no'}`)
+      .join(', ')}`,
+  );
   ctx.report.log(problems.length ? problems.map((p) => `problem   ${p}`).join('\n') : 'ok');
   return { ok: !problems.length, browser: browserName, ...env, models, problems };
 }

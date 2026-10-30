@@ -1,5 +1,5 @@
 // Creating, merging, validating and summarizing VideoDocs. Pure TS.
-import { LAYER_NAME_RE, LAYER_NAMES, SCHEMA, TRACK_LAYERS, type DocLayers, type Layer, type SourceInfo, type Track, type VideoDoc } from './schema.ts';
+import { type DocLayers, LAYER_NAME_RE, LAYER_NAMES, type Layer, SCHEMA, type SourceInfo, TRACK_LAYERS, type Track, type VideoDoc } from './schema.ts';
 
 export class DocError extends Error {}
 
@@ -16,14 +16,15 @@ export function withLayers(doc: VideoDoc, layers: DocLayers): VideoDoc {
   // Keep a stable key order so diffs of saved docs stay readable: built-in layers, then a
   // pipeline's by name.
   const ordered: DocLayers = {};
-  const custom = Object.keys(merged).filter((n) => !(LAYER_NAMES as string[]).includes(n)).sort();
+  const custom = Object.keys(merged)
+    .filter((n) => !(LAYER_NAMES as string[]).includes(n))
+    .sort();
   for (const n of [...LAYER_NAMES, ...custom]) if (merged[n]) ordered[n] = merged[n];
   return { ...doc, layers: ordered };
 }
 
 /** Whether the layer `name` holds tracks (faces, plates, a pipeline's track layers). */
-export const isTrackLayer = (doc: VideoDoc, name: string) =>
-  !!doc.layers[name] && ((TRACK_LAYERS as string[]).includes(name) || doc.layers[name]!.producer.kind === 'track');
+export const isTrackLayer = (doc: VideoDoc, name: string) => !!doc.layers[name] && ((TRACK_LAYERS as string[]).includes(name) || doc.layers[name]!.producer.kind === 'track');
 
 /** The doc's track layers, in doc order. */
 export const trackLayers = (doc: VideoDoc) => Object.keys(doc.layers).filter((n) => isTrackLayer(doc, n));
@@ -95,7 +96,20 @@ export function summarize(doc: VideoDoc): Record<string, LayerSummary> {
   if (speakers) {
     const talk = speakers.items.map((s) => s.turns.reduce((n, [a, b]) => n + b - a, 0));
     const named = speakers.items.filter((s) => s.name).length;
-    out.speakers = { ...base(speakers), speakers: speakers.items.length, ...(named && { named }), ...(talk.length && { mostSpeaking: r1((100 * Math.max(...talk)) / Math.max(1e-9, talk.reduce((a, b) => a + b, 0))) }) };
+    out.speakers = {
+      ...base(speakers),
+      speakers: speakers.items.length,
+      ...(named && { named }),
+      ...(talk.length && {
+        mostSpeaking: r1(
+          (100 * Math.max(...talk)) /
+            Math.max(
+              1e-9,
+              talk.reduce((a, b) => a + b, 0),
+            ),
+        ),
+      }),
+    };
   }
   if (scenes) out.scenes = base(scenes);
   if (keyframes) {

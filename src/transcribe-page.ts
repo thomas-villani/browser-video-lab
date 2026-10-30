@@ -6,8 +6,8 @@
 //   &vad=1 (Silero VAD: transcribe speech spans only, and measure coverage from VAD)
 import { decodeAudio } from './runtime/audio';
 import { Transcriber } from './runtime/transcribe';
-import { groupSpans, speechCoverage } from './transcript';
 import { Vad } from './runtime/vad';
+import { groupSpans, speechCoverage } from './transcript';
 
 declare global {
   interface Window {

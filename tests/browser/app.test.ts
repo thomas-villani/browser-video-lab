@@ -87,7 +87,10 @@ test('app: review a crowd, then download the blurred copy and its log', async (t
   await page.waitForFunction(() => document.querySelector('#list li .status')?.textContent?.includes('redacted in'), null, { timeout: 300_000 });
   await page.waitForTimeout(1500);
   const names = downloads.map((d) => d.suggestedFilename() as string);
-  assert.ok(names.some((n) => n.endsWith('.mp4')), `the copy downloaded (${names.join(', ')})`);
+  assert.ok(
+    names.some((n) => n.endsWith('.mp4')),
+    `the copy downloaded (${names.join(', ')})`,
+  );
   const logDl = downloads.find((d) => d.suggestedFilename().endsWith('.redactions.json'));
   assert.ok(logDl, 'the log downloaded');
   const logPath = join(mkdtempSync(join(tmpdir(), 'videodoc-app-')), 'log.json');
@@ -106,13 +109,16 @@ test('app: a preset picked with its model file adds its track layer, which the r
   const video = fresh(path);
   const dir = dirname(video);
   copyFileSync(join(ROOT, 'public/models/yunet_face_dyn.onnx'), join(dir, 'heads.onnx'));
-  writeFileSync(join(dir, 'heads.json'), JSON.stringify({
-    schema: 'videodoc-pipeline/0',
-    name: 'heads',
-    layers: ['faces', 'plates', 'heads'],
-    models: { heads: { url: './heads.onnx', decoder: 'yunet', labels: ['face'], name: 'yunet copy' } },
-    tracks: { heads: { model: 'heads', maxStride: 8, minScore: 0.6, description: 'heads (a YuNet copy)' } },
-  }));
+  writeFileSync(
+    join(dir, 'heads.json'),
+    JSON.stringify({
+      schema: 'videodoc-pipeline/0',
+      name: 'heads',
+      layers: ['faces', 'plates', 'heads'],
+      models: { heads: { url: './heads.onnx', decoder: 'yunet', labels: ['face'], name: 'yunet copy' } },
+      tracks: { heads: { model: 'heads', maxStride: 8, minScore: 0.6, description: 'heads (a YuNet copy)' } },
+    }),
+  );
   const { page, errors } = await open();
   await page.setInputFiles('#preset-file', [join(dir, 'heads.json'), join(dir, 'heads.onnx')]);
   await page.waitForSelector('#preset input[data-track=heads]', { state: 'attached' });
@@ -165,7 +171,10 @@ test('app: who speaks: name, merge and separate speakers, give a paragraph to an
 
   // The second paragraph (Speaker 2's) given to the host.
   assert.equal((await said())[1], 'Speaker 2:');
-  const words = clean(await page.textContent('#read p.said >> nth=1')).split(' ').slice(-4).join(' ');
+  const words = clean(await page.textContent('#read p.said >> nth=1'))
+    .split(' ')
+    .slice(-4)
+    .join(' ');
   await page.click('#read p.said >> nth=1 >> .who');
   await page.selectOption('#read .who-pick', '1');
   await page.waitForSelector('#read .spk-moves li');

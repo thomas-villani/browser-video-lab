@@ -1,6 +1,6 @@
 // Decode a file's audio track to mono PCM at a target rate (16 kHz for speech models).
 import { AudioSampleSink } from 'mediabunny';
-import { openInput, type MediaInput } from './source';
+import { type MediaInput, openInput } from './source';
 
 export interface Pcm {
   samples: Float32Array;

@@ -5,9 +5,9 @@ import { copyFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { analyze, ROOT } from '../../cli/lib.ts';
-import { normWord, redactionLog, REDACT_DEFAULTS, summarize, toMarkdown, type Layer, type Track } from '../../src/doc/index.ts';
 import { der, parseRttm } from '../../src/audio/der.ts';
-import { context, fixture, fresh, identical, loadDoc, LOCAL_FIXTURES, near, notReady, saveBaseline, speed } from './lib.ts';
+import { type Layer, normWord, REDACT_DEFAULTS, redactionLog, summarize, type Track, toMarkdown } from '../../src/doc/index.ts';
+import { context, fixture, fresh, identical, LOCAL_FIXTURES, loadDoc, near, notReady, saveBaseline, speed } from './lib.ts';
 
 const ctx = context();
 after(async () => {
@@ -38,20 +38,31 @@ test('tts-words: speech, and a transcript whose words and word times match the T
   await analyze(ctx, video, { layers: ['speech', 'transcript'] });
   const doc = loadDoc(video);
   // SAPI positions count at 16 kHz while writing 22.05 kHz (tests/fixtures/tts.ps1).
-  const truth = readFileSync(join(ROOT, 'tests/fixtures/tts-words.tsv'), 'utf8').trim().split(/\r?\n/).map((l) => {
-    const [s, w] = l.split('\t');
-    return { t: (Number(s) * 16000) / 22050, w: normWord(w) };
-  });
+  const truth = readFileSync(join(ROOT, 'tests/fixtures/tts-words.tsv'), 'utf8')
+    .trim()
+    .split(/\r?\n/)
+    .map((l) => {
+      const [s, w] = l.split('\t');
+      return { t: (Number(s) * 16000) / 22050, w: normWord(w) };
+    });
   const words = doc.layers.transcript!.items.flatMap((i) => i.words ?? []);
   assert.ok(words.length > 100, `word times: ${words.length} words`);
-  const pairs = align(truth.map((x) => x.w), words.map((w) => normWord(w[2])));
+  const pairs = align(
+    truth.map((x) => x.w),
+    words.map((w) => normWord(w[2])),
+  );
   const err = pairs.map(([i, j]) => words[j][0] - truth[i].t);
   // Covered whole by the redaction defaults (lead 0.4, tail 0.2): from before the true start to
   // the next word's start (0.5 s at most, after pauses).
-  const covered = pairs.filter(([i, j]) => i + 1 < truth.length && words[j][0] - 0.4 <= truth[i].t + 0.03 && words[j][1] + 0.2 >= Math.min(truth[i + 1].t - 0.08, truth[i].t + 0.5)).length;
+  const covered = pairs.filter(
+    ([i, j]) => i + 1 < truth.length && words[j][0] - 0.4 <= truth[i].t + 0.03 && words[j][1] + 0.2 >= Math.min(truth[i + 1].t - 0.08, truth[i].t + 0.5),
+  ).length;
   t.diagnostic(`matched ${pairs.length}/${truth.length} words, start error median ${r3(median(err))} s, covered ${covered}`);
   assert.ok(pairs.length / truth.length > 0.8, 'most words transcribed as spoken');
-  assert.ok(err.every((e) => e > -0.3 && e < 1), 'word starts near the truth');
+  assert.ok(
+    err.every((e) => e > -0.3 && e < 1),
+    'word starts near the truth',
+  );
   near(t, 'tts-words.speech.seconds', summarize(doc).speech.speechSeconds as number, { abs: 1 });
   near(t, 'tts-words.transcript.matched', pairs.length, { abs: 3 });
   near(t, 'tts-words.transcript.startErrorMedian', r3(median(err)), { abs: 0.03 });
@@ -70,7 +81,9 @@ test('tts-dialog: three voices taking turns are three speakers, and the Markdown
   const ref = parseRttm(readFileSync(join(ROOT, 'tests/fixtures/tts-dialog.rttm'), 'utf8'));
   const hyp = speakers.flatMap((s) => s.turns.map(([t0, t1]) => ({ t0, t1, speaker: String(s.id) })));
   const r = der(ref, hyp, [0, doc.source.duration]);
-  t.diagnostic(`${speakers.length} speakers, DER ${(100 * r.der).toFixed(1)}% (missed ${r.missed.toFixed(1)} s, false ${r.falseAlarm.toFixed(1)} s, confused ${r.confusion.toFixed(1)} s), mapping ${JSON.stringify(r.mapping)}`);
+  t.diagnostic(
+    `${speakers.length} speakers, DER ${(100 * r.der).toFixed(1)}% (missed ${r.missed.toFixed(1)} s, false ${r.falseAlarm.toFixed(1)} s, confused ${r.confusion.toFixed(1)} s), mapping ${JSON.stringify(r.mapping)}`,
+  );
   assert.equal(speakers.length, 3);
   assert.equal(new Set(Object.values(r.mapping)).size, 3, 'each voice is its own speaker');
   assert.ok(r.der < 0.15, 'turns match the script');
@@ -80,7 +93,11 @@ test('tts-dialog: three voices taking turns are three speakers, and the Markdown
   assert.match(md, /Speaker 3:\*\* I agree completely/);
   assert.match(md, /Speaker 2:\*\* It really is\./);
   near(t, 'tts-dialog.speakers.der', +(100 * r.der).toFixed(1), { abs: 2 });
-  identical(t, 'tts-dialog.speakers', speakers.map((s) => s.turns));
+  identical(
+    t,
+    'tts-dialog.speakers',
+    speakers.map((s) => s.turns),
+  );
   speed(t, 'tts-dialog.speakers.realtime', +(doc.source.duration / (doc.layers.speakers!.ms / 1000)).toFixed(2));
 });
 
@@ -120,7 +137,7 @@ for (const name of LOCAL_FIXTURES) {
   });
 }
 
-test('rickroll-cuts: a pipeline\'s track layer, on a model file next to the preset, is computed, cached and redactable', async (t) => {
+test("rickroll-cuts: a pipeline's track layer, on a model file next to the preset, is computed, cached and redactable", async (t) => {
   const why = await notReady(ctx);
   if (why) return t.skip(why);
   const path = fixture('rickroll-cuts');
@@ -130,12 +147,15 @@ test('rickroll-cuts: a pipeline\'s track layer, on a model file next to the pres
   const dir = dirname(video);
   copyFileSync(join(ROOT, 'public/models/yunet_face_dyn.onnx'), join(dir, 'heads.onnx'));
   const preset = join(dir, 'heads.json');
-  writeFileSync(preset, JSON.stringify({
-    schema: 'videodoc-pipeline/0',
-    layers: ['heads'],
-    models: { heads: { url: './heads.onnx', decoder: 'yunet', labels: ['face'], name: 'yunet copy' } },
-    tracks: { heads: { model: 'heads', maxStride: 8, minScore: 0.6 } },
-  }));
+  writeFileSync(
+    preset,
+    JSON.stringify({
+      schema: 'videodoc-pipeline/0',
+      layers: ['heads'],
+      models: { heads: { url: './heads.onnx', decoder: 'yunet', labels: ['face'], name: 'yunet copy' } },
+      tracks: { heads: { model: 'heads', maxStride: 8, minScore: 0.6 } },
+    }),
+  );
   await analyze(ctx, video, { pipeline: preset });
   const doc = loadDoc(video);
   const heads = doc.layers.heads as Layer<Track>;
@@ -145,7 +165,10 @@ test('rickroll-cuts: a pipeline\'s track layer, on a model file next to the pres
   near(t, 'rickroll-cuts.heads.tracks', heads.items.length, { rel: 0.05, abs: 2 });
   identical(t, 'rickroll-cuts.heads', heads.items);
   const again = (await analyze(ctx, video, { pipeline: preset })) as { layers: Record<string, { status: string }> };
-  assert.deepEqual(Object.values(again.layers).map((s) => s.status), ['cached', 'cached']);
+  assert.deepEqual(
+    Object.values(again.layers).map((s) => s.status),
+    ['cached', 'cached'],
+  );
   // Redaction covers it when listed.
   const log = redactionLog(doc, { ...REDACT_DEFAULTS, cover: ['heads'] });
   assert.equal(log.totals.tracks, heads.items.length);

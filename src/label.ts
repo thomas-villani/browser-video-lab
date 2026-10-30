@@ -41,7 +41,11 @@ const saved: Record<string, Saved> = await (await fetch('/api/labels')).json();
 const key = (t: Task) => `${t.clip}/${t.frame}`;
 
 let index = Number(new URLSearchParams(location.search).get('start') ?? NaN);
-if (!Number.isFinite(index)) index = Math.max(0, tasks.findIndex((t) => !saved[key(t)]));
+if (!Number.isFinite(index))
+  index = Math.max(
+    0,
+    tasks.findIndex((t) => !saved[key(t)]),
+  );
 let faces: Face[] = [];
 let img = new Image();
 let scale = 1;
@@ -149,7 +153,7 @@ async function save() {
 
 const toImage = (e: MouseEvent) => {
   const r = canvas.getBoundingClientRect();
-  return { x: ((e.clientX - r.left) / r.width) * canvas.width / scale, y: ((e.clientY - r.top) / r.height) * canvas.height / scale };
+  return { x: (((e.clientX - r.left) / r.width) * canvas.width) / scale, y: (((e.clientY - r.top) / r.height) * canvas.height) / scale };
 };
 
 canvas.addEventListener('mousemove', (e) => {

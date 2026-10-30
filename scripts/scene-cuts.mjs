@@ -22,18 +22,15 @@ if (!video) {
   process.exit(2);
 }
 
-const probe = execFileSync('ffprobe', [
-  '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=r_frame_rate', '-of', 'json', video,
-]).toString();
+const probe = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=r_frame_rate', '-of', 'json', video]).toString();
 const [num, den] = JSON.parse(probe).streams[0].r_frame_rate.split('/').map(Number);
 const fps = num / den;
 
 // showinfo logs each selected frame's pts_time to stderr; downscaling keeps this fast.
-const ff = spawnSync(
-  'ffmpeg',
-  ['-hide_banner', '-nostats', '-i', video, '-an', '-vf', `scale=320:-2,select='gt(scene,${a.threshold})',showinfo`, '-f', 'null', '-'],
-  { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 },
-);
+const ff = spawnSync('ffmpeg', ['-hide_banner', '-nostats', '-i', video, '-an', '-vf', `scale=320:-2,select='gt(scene,${a.threshold})',showinfo`, '-f', 'null', '-'], {
+  encoding: 'utf8',
+  maxBuffer: 256 * 1024 * 1024,
+});
 if (ff.status !== 0) {
   console.error(ff.stderr.slice(-2000));
   process.exit(1);

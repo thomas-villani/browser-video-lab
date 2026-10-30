@@ -2,11 +2,27 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  audioCover, audioSpans, checkPlan, findWords, formatLog, formatPlan, mergeTimes, newDoc, newPlan, normWord, redactionLog, REDACT_DEFAULTS, suggestNames, withLayers,
-  type Layer, type TranscriptItem, type Word,
+  audioCover,
+  audioSpans,
+  checkPlan,
+  findWords,
+  formatLog,
+  formatPlan,
+  type Layer,
+  mergeTimes,
+  newDoc,
+  newPlan,
+  normWord,
+  REDACT_DEFAULTS,
+  redactionLog,
+  suggestNames,
+  type TranscriptItem,
+  type Word,
+  withLayers,
 } from '../src/doc/index.ts';
 
-const layer = <T>(items: T[], configHash = 't') => ({ producer: { module: 'm', version: '0', model: 'whisper', configHash, config: {} }, items, coverage: [], createdAt: 'now', ms: 1, device: 'webgpu' }) as unknown as Layer<T>;
+const layer = <T>(items: T[], configHash = 't') =>
+  ({ producer: { module: 'm', version: '0', model: 'whisper', configHash, config: {} }, items, coverage: [], createdAt: 'now', ms: 1, device: 'webgpu' }) as unknown as Layer<T>;
 
 // Words one per 0.5 s from `t`, each 0.4 s long.
 const item = (t: number, text: string): TranscriptItem => {
@@ -19,11 +35,14 @@ const transcript = [
   item(12, 'Call 555-213-4987 about the shipment, Daniel Reyes said.'),
   item(18, 'Spiced tea for the spics? Fucking hell.'),
 ];
-const doc = withLayers(
-  newDoc({ name: 'v.mp4', fingerprint: 'v0:1:x', size: 1, duration: 21, width: 320, height: 240, fps: 25, frames: 525, video: { codec: 'avc1' } }),
-  { transcript: layer(transcript) },
-);
-const find = (...terms: string[]) => findWords(doc, terms.map((term) => ({ term }))).map((m) => [m.key, m.text]);
+const doc = withLayers(newDoc({ name: 'v.mp4', fingerprint: 'v0:1:x', size: 1, duration: 21, width: 320, height: 240, fps: 25, frames: 525, video: { codec: 'avc1' } }), {
+  transcript: layer(transcript),
+});
+const find = (...terms: string[]) =>
+  findWords(
+    doc,
+    terms.map((term) => ({ term })),
+  ).map((m) => [m.key, m.text]);
 
 test('normWord: case, accents, quotes and punctuation', () => {
   assert.equal(normWord('Okafor’s,'), "okafor's");
@@ -34,7 +53,10 @@ test('normWord: case, accents, quotes and punctuation', () => {
 
 test('findWords: inflections, phrases, hyphenated numbers, wildcards, exact quotes', () => {
   // A name matches its possessive; matches come in time order.
-  assert.deepEqual(find('Okafor'), [['0.4', 'Okafor.'], ['1.0', "Okafor's"]]);
+  assert.deepEqual(find('Okafor'), [
+    ['0.4', 'Okafor.'],
+    ['1.0', "Okafor's"],
+  ]);
   assert.deepEqual(find('screw'), [['1.3', 'screwed']]);
   // A phrase matches consecutive words; a hyphenated word is several tokens.
   assert.deepEqual(find('Daniel Reyes'), [['2.5', 'Daniel Reyes']]);
@@ -45,11 +67,17 @@ test('findWords: inflections, phrases, hyphenated numbers, wildcards, exact quot
   assert.deepEqual(find('*shit*'), [['1.7', 'bullshit']]);
   assert.deepEqual(find('fuck*'), [['3.5', 'Fucking']]);
   // A plain word inflects (spic -> spiced), a quoted one matches only itself.
-  assert.deepEqual(find('spic'), [['3.0', 'Spiced'], ['3.4', 'spics?']]);
+  assert.deepEqual(find('spic'), [
+    ['3.0', 'Spiced'],
+    ['3.4', 'spics?'],
+  ]);
   assert.deepEqual(find('"spic"'), []);
   assert.deepEqual(find('"spics"'), [['3.4', 'spics?']]);
   // A word in two lists is one match (the first term listed wins).
-  assert.deepEqual(findWords(doc, [{ term: 'okafor' }, { term: 'Okafor', label: 'x' }]).map((m) => m.term), ['okafor', 'okafor']);
+  assert.deepEqual(
+    findWords(doc, [{ term: 'okafor' }, { term: 'Okafor', label: 'x' }]).map((m) => m.term),
+    ['okafor', 'okafor'],
+  );
   assert.deepEqual(find('nothing here'), []);
 });
 
@@ -67,8 +95,22 @@ test('audioSpans: lead and tail, clipped; kept matches listed but not covered; s
       [20.5, 21, 'hand', false],
     ],
   );
-  assert.deepEqual(audioCover(spans), [[2.6, 3.6], [8.1, 9.1], [19.6, 21]]);
-  assert.deepEqual(mergeTimes([[3, 4], [1, 2], [2, 2.5]]), [[1, 2.5], [3, 4]]);
+  assert.deepEqual(audioCover(spans), [
+    [2.6, 3.6],
+    [8.1, 9.1],
+    [19.6, 21],
+  ]);
+  assert.deepEqual(
+    mergeTimes([
+      [3, 4],
+      [1, 2],
+      [2, 2.5],
+    ]),
+    [
+      [1, 2.5],
+      [3, 4],
+    ],
+  );
 });
 
 test('audioSpans: needs word timestamps', () => {
@@ -109,7 +151,11 @@ test('plan: audio settings round-trip; kept words are dropped when the transcrip
 
 test('findWords: a match inside a longer one is dropped; overlapping ones are both kept', () => {
   const d = withLayers(newDoc(doc.source), { transcript: layer([item(0, 'you son of a bitch, Daniel Reyes Smith')]) });
-  const f = (...terms: string[]) => findWords(d, terms.map((term) => ({ term }))).map((m) => m.text);
+  const f = (...terms: string[]) =>
+    findWords(
+      d,
+      terms.map((term) => ({ term })),
+    ).map((m) => m.text);
   assert.deepEqual(f('bitch*', 'son of a bitch'), ['son of a bitch,']);
   assert.deepEqual(f('Daniel Reyes', 'Reyes Smith'), ['Daniel Reyes', 'Reyes Smith']);
 });
@@ -125,5 +171,8 @@ test('suggestNames: mid-sentence capitals never written in lowercase', () => {
   // Dixie starts a sentence the second time (once is not enough); Police is also written in
   // lowercase; Monday is never a name; Fairfield comes up once.
   assert.deepEqual(suggestNames(d), [{ word: 'Patel', count: 3 }]);
-  assert.deepEqual(suggestNames(d, 1).map((s) => s.word), ['Patel', 'Dixie', 'Fairfield']);
+  assert.deepEqual(
+    suggestNames(d, 1).map((s) => s.word),
+    ['Patel', 'Dixie', 'Fairfield'],
+  );
 });

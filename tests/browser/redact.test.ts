@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { analyze, markdown, redact, ROOT, speakers } from '../../cli/lib.ts';
+import { analyze, markdown, ROOT, redact, speakers } from '../../cli/lib.ts';
 import { parseRttm } from '../../src/audio/der.ts';
 import { summarize } from '../../src/doc/index.ts';
 import { context, fixture, fresh, loadDoc, near, notReady, saveBaseline, speed } from './lib.ts';
@@ -92,7 +92,10 @@ test('tts-words: bleeped words carry the tone over the logged spans and nowhere 
   if (why) return t.skip(why);
   const video = fresh(fixture('tts-words')!);
   const r = (await redact(ctx, video, { cover: 'none', words: 'Ackover,Daniel Reyes,Lindquist', profanity: true })) as {
-    out: string; log: string; frames: number; audio: { matches: number; seconds: number };
+    out: string;
+    log: string;
+    frames: number;
+    audio: { matches: number; seconds: number };
   };
   assert.equal(r.frames, 0, 'video copied, not re-encoded');
   const log = JSON.parse(readFileSync(r.log, 'utf8')) as { audio: { spans: { t0: number; t1: number; kept: boolean; text: string }[] } };
@@ -143,7 +146,9 @@ test('tts-dialog: a speaker named in the speakers file is bleeped over their tur
   const ref = parseRttm(readFileSync(join(ROOT, 'tests/fixtures/tts-dialog.rttm'), 'utf8'));
   const overlap = (a: number, b: number) => spans.reduce((n, s) => n + Math.max(0, Math.min(b, s.t1) - Math.max(a, s.t0)), 0);
   const voices = [...new Set(ref.map((x) => x.speaker))];
-  const cal = voices.sort((x, y) => ref.filter((z) => z.speaker === y).reduce((n, z) => n + overlap(z.t0, z.t1), 0) - ref.filter((z) => z.speaker === x).reduce((n, z) => n + overlap(z.t0, z.t1), 0))[0];
+  const cal = voices.sort(
+    (x, y) => ref.filter((z) => z.speaker === y).reduce((n, z) => n + overlap(z.t0, z.t1), 0) - ref.filter((z) => z.speaker === x).reduce((n, z) => n + overlap(z.t0, z.t1), 0),
+  )[0];
   const turns = ref.filter((x) => x.speaker === cal);
   const said = turns.reduce((n, x) => n + x.t1 - x.t0, 0);
   const toneIn = turns.reduce((n, x) => n + tone.slice(at(x.t0), at(x.t1)).filter(Boolean).length / 100, 0);

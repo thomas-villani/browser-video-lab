@@ -3,13 +3,23 @@
 // pass through untouched. Audio is copied as-is when MP4 can hold it, or, with words to bleep
 // (audioSpans), decoded, rewritten over those spans and encoded again. With no layer to
 // cover, the video is copied and only the audio changes.
-import { AudioSample, BufferTarget, Conversion, Mp4OutputFormat, Output, Quality, QUALITY_HIGH, StreamTarget, type StreamTargetChunk, type VideoSample } from 'mediabunny';
-import {
-  audioCover, audioSpans, covered, coversAudio, cursorFor, REDACT_DEFAULTS,
-  type Box, type RedactOptions, type RedactSound, type RedactStyle, type Track, type VideoDoc,
-} from './doc/index.ts';
+import { AudioSample, BufferTarget, Conversion, Mp4OutputFormat, Output, QUALITY_HIGH, Quality, StreamTarget, type StreamTargetChunk, type VideoSample } from 'mediabunny';
 import { fingerprintOf, type Progress } from './analyze';
-import { openInput, type MediaInput } from './runtime/source';
+import {
+  audioCover,
+  audioSpans,
+  type Box,
+  covered,
+  coversAudio,
+  cursorFor,
+  REDACT_DEFAULTS,
+  type RedactOptions,
+  type RedactSound,
+  type RedactStyle,
+  type Track,
+  type VideoDoc,
+} from './doc/index.ts';
+import { type MediaInput, openInput } from './runtime/source';
 
 export interface RedactRun extends Partial<RedactOptions> {
   /** Faces added by hand in a review (RedactPlan.added). */
@@ -65,19 +75,19 @@ export async function redact(input: MediaInput, doc: VideoDoc, stream?: Writable
     tracks: 'primary',
     video: video
       ? {
-        codec: 'avc',
-        quality,
-        forceTranscode: true,
-        process: (sample: VideoSample) => {
-          const regions = cursor.at(frame++);
-          if (!regions.length) return sample;
-          sample.draw(ctx, 0, 0, width, height);
-          cover(regions);
-          return canvas;
-        },
-        processedWidth: width,
-        processedHeight: height,
-      }
+          codec: 'avc',
+          quality,
+          forceTranscode: true,
+          process: (sample: VideoSample) => {
+            const regions = cursor.at(frame++);
+            if (!regions.length) return sample;
+            sample.draw(ctx, 0, 0, width, height);
+            cover(regions);
+            return canvas;
+          },
+          processedWidth: width,
+          processedHeight: height,
+        }
       : undefined,
     audio: spans.length ? { bitrate: QUALITY_HIGH, forceTranscode: true, process: soundOver(spans, opts.sound) } : undefined,
   });
@@ -86,7 +96,11 @@ export async function redact(input: MediaInput, doc: VideoDoc, stream?: Writable
     throw new Error(`cannot write this video as MP4 here (${why})`);
   }
   conversion.onProgress = (p) =>
-    onProgress?.(video ? { pass: 'frames', stage: 'redacting', done: frame, total: Math.max(frame, doc.source.frames) } : { pass: 'audio', stage: 'redacting audio', done: Math.round(p * 100), total: 100 });
+    onProgress?.(
+      video
+        ? { pass: 'frames', stage: 'redacting', done: frame, total: Math.max(frame, doc.source.frames) }
+        : { pass: 'audio', stage: 'redacting audio', done: Math.round(p * 100), total: 100 },
+    );
   const onAbort = () => void conversion.cancel();
   signal?.addEventListener('abort', onAbort, { once: true });
   try {

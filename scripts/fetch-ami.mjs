@@ -44,7 +44,28 @@ if (import.meta.filename === resolve(process.argv[1] ?? '')) {
     if (!existsSync(`${base}.mp4`)) {
       await get(`${MIRROR}/${m}/audio/${m}.Mix-Headset.wav`, wav);
       console.error(`encoding ${m}.mp4...`);
-      execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=gray:s=320x180:r=5', '-i', wav, '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', `${base}.mp4`]);
+      execFileSync('ffmpeg', [
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-y',
+        '-f',
+        'lavfi',
+        '-i',
+        'color=gray:s=320x180:r=5',
+        '-i',
+        wav,
+        '-shortest',
+        '-c:v',
+        'libx264',
+        '-pix_fmt',
+        'yuv420p',
+        '-c:a',
+        'aac',
+        '-b:a',
+        '128k',
+        `${base}.mp4`,
+      ]);
       rmSync(wav);
     }
     const [, , start, end] = readFileSync(`${base}.uem`, 'utf8').trim().split(/\s+/);

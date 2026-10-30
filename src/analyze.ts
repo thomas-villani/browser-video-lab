@@ -3,20 +3,41 @@
 // only. Planning, merging and pure layers live in src/doc, so the same code serves the JS API
 // (analyze below) and the CLI (which plans in Node).
 import { CanvasSink } from 'mediabunny';
+import { diarize } from './audio/diarize.ts';
 import {
-  deriveLayers, fingerprint, mergeOverrides, newDoc, pipelineContext, plan, VERSION, withLayers, linkTracks, DEFAULT_TRACKS,
-  type Box, type DocLayers, type Layer, type Layers, type Overrides, type Pipeline, type PlannedLayer, type PlannedModel, type SpeakerItem, type SpeechItem, type TranscriptItem, type VideoDoc, type Word,
+  type Box,
+  DEFAULT_TRACKS,
+  type DocLayers,
+  deriveLayers,
+  fingerprint,
+  type Layer,
+  type Layers,
+  linkTracks,
+  mergeOverrides,
+  newDoc,
+  type Overrides,
+  type Pipeline,
+  type PlannedLayer,
+  type PlannedModel,
+  pipelineContext,
+  plan,
+  type SpeakerItem,
+  type SpeechItem,
+  type TranscriptItem,
+  VERSION,
+  type VideoDoc,
+  type Word,
+  withLayers,
 } from './doc/index.ts';
-import { modelSpec, specFor, type ModelSpec } from './models';
+import { type ModelSpec, modelSpec, specFor } from './models';
 import { asset } from './runtime/asset';
 import { decodeAudio } from './runtime/audio';
-import { diarize } from './audio/diarize.ts';
-import { Diarizer } from './runtime/diarize';
 import { Detector } from './runtime/detector';
+import { Diarizer } from './runtime/diarize';
 import { sceneStream } from './runtime/scenes';
-import { openInput, probe, VideoSource, type MediaInput, type Probe } from './runtime/source';
-import { multiStream, type Head } from './runtime/stream';
-import { Transcriber, type Segment } from './runtime/transcribe';
+import { type MediaInput, openInput, type Probe, probe, VideoSource } from './runtime/source';
+import { type Head, multiStream } from './runtime/stream';
+import { type Segment, Transcriber } from './runtime/transcribe';
 import { Vad } from './runtime/vad';
 import { groupSpans } from './transcript';
 
@@ -82,7 +103,8 @@ export async function computeLayers(input: MediaInput, planned: PlannedLayer[], 
     // No audio track (screen recordings, muted exports): nothing is said, so both layers are empty.
     const all: [number, number][] = [[0, info.duration]];
     if (want.has('speech')) layers.speech = layer('speech', [], 0, 'wasm', all, 'silero_vad v5');
-    if (want.has('transcript')) layers.transcript = layer('transcript', [], 0, want.get('transcript')!.config.device as 'webgpu' | 'wasm', all, want.get('transcript')!.config.model as string);
+    if (want.has('transcript'))
+      layers.transcript = layer('transcript', [], 0, want.get('transcript')!.config.device as 'webgpu' | 'wasm', all, want.get('transcript')!.config.model as string);
     if (want.has('speakers')) layers.speakers = layer('speakers', [], 0, want.get('speakers')!.config.device as 'webgpu' | 'wasm', all, SPEAKER_MODELS);
   } else if (audioLayers.length) {
     const t0 = performance.now();
@@ -125,7 +147,15 @@ export async function computeLayers(input: MediaInput, planned: PlannedLayer[], 
     if (want.has('speakers')) {
       if (!speech) throw new Error('speakers needs the speech layer');
       const ts = performance.now();
-      const c = want.get('speakers')!.config as { segmentation: string; embedding: string; step: number; threshold: number; minClusterSize: number; maxSpeakers: number; device: 'webgpu' | 'wasm' };
+      const c = want.get('speakers')!.config as {
+        segmentation: string;
+        embedding: string;
+        step: number;
+        threshold: number;
+        minClusterSize: number;
+        maxSpeakers: number;
+        device: 'webgpu' | 'wasm';
+      };
       let items: SpeakerItem[] = [];
       if (speech.length) {
         step('loading speaker models');
@@ -164,22 +194,40 @@ export async function computeLayers(input: MediaInput, planned: PlannedLayer[], 
         const spec = specOf(l.model!);
         if (name === 'faces') {
           const c = l.config as {
-            longSide: number; maxStride: number; minIou: number; minScore: number; refine: boolean; tile: string; every: number; trigger: number; small: number;
+            longSide: number;
+            maxStride: number;
+            minIou: number;
+            minScore: number;
+            refine: boolean;
+            tile: string;
+            every: number;
+            trigger: number;
+            small: number;
           };
           const [tileW, tileH] = c.tile.split('x').map(Number);
           heads.push({
             detector: await Detector.create({ model: spec, depth: 2, score: Math.min(c.minScore, c.refine ? c.trigger : 1) }),
-            maxStride: c.maxStride, minIou: c.minIou, minScore: c.minScore,
+            maxStride: c.maxStride,
+            minIou: c.minIou,
+            minScore: c.minScore,
             detect: c.longSide ? { longSide: c.longSide } : undefined,
             refine: c.refine ? { tileW, tileH, overlap: 32, trigger: c.trigger, grow: 0, every: c.every, small: c.small } : undefined,
           });
         } else {
           // Plates and a pipeline's track layers.
           const c = l.config as { maxStride: number; minIou: number; minScore: number; lowScore: number; labels?: string };
-          const labels = c.labels ? c.labels.split(',').map((x) => x.trim()).filter(Boolean) : undefined;
+          const labels = c.labels
+            ? c.labels
+                .split(',')
+                .map((x) => x.trim())
+                .filter(Boolean)
+            : undefined;
           heads.push({
             detector: await Detector.create({ model: spec, depth: 2, score: Math.min(c.minScore, c.lowScore), labels }),
-            maxStride: c.maxStride, minIou: c.minIou, minScore: c.minScore, lowScore: c.lowScore,
+            maxStride: c.maxStride,
+            minIou: c.minIou,
+            minScore: c.minScore,
+            lowScore: c.lowScore,
           });
         }
       }

@@ -26,7 +26,11 @@ if (!scores) {
   console.error(`${a.pred} has no sceneScores (run the pipeline with --dump)`);
   process.exit(2);
 }
-const ref = readFileSync(a.ref, 'utf8').split(/\s+/).filter(Boolean).map(Number).filter((c) => c > 0);
+const ref = readFileSync(a.ref, 'utf8')
+  .split(/\s+/)
+  .filter(Boolean)
+  .map(Number)
+  .filter((c) => c > 0);
 const tol = Number(a.tolerance);
 
 const rows = [];

@@ -5,8 +5,8 @@
 // (`**[01:23] Speaker 2:**`, or the name given, in a doc as edited: withSpeakers) and break where
 // the speaker changes. Pure TS.
 import { silentGaps } from './keyframes.ts';
-import { speakerName, whoSaid } from './speakers.ts';
 import type { KeyframeItem, SceneItem, Track, VideoDoc } from './schema.ts';
+import { speakerName, whoSaid } from './speakers.ts';
 
 export interface MarkdownOptions {
   /** Link to a keyframe's image, relative to where the Markdown will live; undefined = none.
@@ -61,12 +61,12 @@ export function toMarkdown(doc: VideoDoc, opts: MarkdownOptions = {}): string {
   const ts = (t: number) => fmtTime(t, long);
   const pause = opts.pause ?? 2;
   const silence = opts.silence ?? (keyframes?.producer.config.silence as number | undefined) ?? 4;
-  const scenes: SceneItem[] = layers.scenes?.items.length
-    ? layers.scenes.items
-    : [{ t0: 0, t1: source.duration, f0: 0, f1: source.frames - 1, score: 0 }];
+  const scenes: SceneItem[] = layers.scenes?.items.length ? layers.scenes.items : [{ t0: 0, t1: source.duration, f0: 0, f1: source.frames - 1, score: 0 }];
 
   const events: Event[] = [];
-  const said = speakers ? whoSaid(transcript?.items ?? [], speakers.items) : (transcript?.items ?? []).map((s) => ({ t0: s.t0, t1: s.t1, text: s.text.trim(), speaker: undefined }));
+  const said = speakers
+    ? whoSaid(transcript?.items ?? [], speakers.items)
+    : (transcript?.items ?? []).map((s) => ({ t0: s.t0, t1: s.t1, text: s.text.trim(), speaker: undefined }));
   for (const s of said) events.push({ t: s.t0, kind: 'text', t1: s.t1, text: s.text, speaker: s.speaker });
   keyframes?.items.forEach((k, i) => events.push({ t: k.t, kind: 'image', k, i }));
   if (speech?.items.length) for (const [t, t1] of silentGaps(speech.items, source.duration, silence)) events.push({ t, kind: 'silence', t1 });
@@ -108,7 +108,11 @@ export function toMarkdown(doc: VideoDoc, opts: MarkdownOptions = {}): string {
     let waiting: Extract<Event, { kind: 'image' }>[] = [];
     const flush = () => {
       if (para) opts.paragraph?.({ t0: para.t, t1: para.t1, speaker: para.speaker });
-      if (para) out.push('', `**[${ts(para.t)}]${para.speaker !== undefined ? ` ${speakerName(speakers!.items.find((s) => s.id === para!.speaker) ?? { id: para.speaker })}:` : ''}** ${para.text.join(' ')}`);
+      if (para)
+        out.push(
+          '',
+          `**[${ts(para.t)}]${para.speaker !== undefined ? ` ${speakerName(speakers!.items.find((s) => s.id === para!.speaker) ?? { id: para.speaker })}:` : ''}** ${para.text.join(' ')}`,
+        );
       para = undefined;
       for (const w of waiting) {
         const src = opts.image?.(w.k, w.i);

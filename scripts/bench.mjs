@@ -53,7 +53,11 @@ const { values: a } = parseArgs({
 
 // Matrix knobs: each accepts a comma-separated list; runs are the cartesian product.
 const KNOBS = ['model', 'path', 'ep', 'stride', 'outloc', 'capture', 'depth', 'longside'];
-const list = (s) => s.split(',').map((x) => x.trim()).filter(Boolean);
+const list = (s) =>
+  s
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
 let combos = [{}];
 // An empty knob (e.g. --longside unset) is left out of the config entirely.
 for (const k of KNOBS) if (list(a[k]).length) combos = combos.flatMap((c) => list(a[k]).map((v) => ({ ...c, [k]: v })));
@@ -65,9 +69,7 @@ for (const c of combos) {
   // GPU-only knobs don't apply to the CPU-input paths.
   if (c.path !== 'gpu' && (c.outloc !== 'cpu' || c.capture !== '0')) continue;
   const name =
-    c.path === 'decode'
-      ? 'decode'
-      : `${c.model}-${c.ep}-${c.path}-s${c.stride}-o${c.outloc}-d${c.depth}${c.capture === '1' ? '-cap' : ''}${c.longside ? `-l${c.longside}` : ''}`;
+    c.path === 'decode' ? 'decode' : `${c.model}-${c.ep}-${c.path}-s${c.stride}-o${c.outloc}-d${c.depth}${c.capture === '1' ? '-cap' : ''}${c.longside ? `-l${c.longside}` : ''}`;
   // Decode-only ignores the other knobs: run it once.
   if (seen.has(name)) continue;
   seen.add(name);

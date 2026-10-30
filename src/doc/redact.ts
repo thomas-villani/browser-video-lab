@@ -4,7 +4,7 @@
 // browser half (src/redact.ts) decodes, draws over these regions, rewrites the audio and
 // encodes. Node computes the log without decoding anything.
 import { tracksOf } from './doc.ts';
-import { TRACK_LAYERS, type Box, type Track, type VideoDoc } from './schema.ts';
+import { type Box, TRACK_LAYERS, type Track, type VideoDoc } from './schema.ts';
 import { findSpeaker, speakerName } from './speakers.ts';
 import { trackBox } from './tracks.ts';
 import { findWords, mergeTimes, PROFANITY, type WordMatch } from './words.ts';
@@ -57,12 +57,27 @@ export interface RedactOptions {
 export const SPEAKER_PAD = 0.25;
 
 export const REDACT_DEFAULTS: RedactOptions = {
-  style: 'blur', margin: 0.15, hold: 0.3, keep: [], keepPlates: [], keepTracks: {}, cover: ['faces', 'plates'],
-  words: [], profanity: false, sound: 'bleep', lead: 0.4, tail: 0.2, keepWords: [], speakers: [],
+  style: 'blur',
+  margin: 0.15,
+  hold: 0.3,
+  keep: [],
+  keepPlates: [],
+  keepTracks: {},
+  cover: ['faces', 'plates'],
+  words: [],
+  profanity: false,
+  sound: 'bleep',
+  lead: 0.4,
+  tail: 0.2,
+  keepWords: [],
+  speakers: [],
 };
 
 /** A track to cover and the layer it comes from (hand-drawn tracks count as faces). */
-export interface CoverTrack { track: Track; kind: RedactKind }
+export interface CoverTrack {
+  track: Track;
+  kind: RedactKind;
+}
 
 export interface CursorOptions {
   margin: number;
@@ -76,7 +91,12 @@ export interface CursorOptions {
 
 /** A region to cover on one frame: the track it comes from (negative ids: added by hand) and its
  *  layer, its box grown by the margin, and whether the track is only held there (before or after it). */
-export interface Region { id: number; kind: RedactKind; box: Box; held: boolean }
+export interface Region {
+  id: number;
+  kind: RedactKind;
+  box: Box;
+  held: boolean;
+}
 
 /**
  * The regions to cover, frame by frame. Built for frames in increasing order (decode order):
@@ -318,7 +338,11 @@ export function redactionLog(doc: VideoDoc, o: RedactOptions, output?: Redaction
     const seconds = audioCover(spans).reduce((n, [a, b]) => n + b - a, 0);
     const matches = spans.filter((x) => x.key);
     const turns = spans.filter((x) => x.speaker).length;
-    audio = { sound: o.sound, totals: { matches: matches.length, kept: matches.filter((x) => x.kept).length, added: addedAudio.length, ...(turns && { turns }), seconds: Math.round(seconds * 100) / 100 }, spans };
+    audio = {
+      sound: o.sound,
+      totals: { matches: matches.length, kept: matches.filter((x) => x.kept).length, added: addedAudio.length, ...(turns && { turns }), seconds: Math.round(seconds * 100) / 100 },
+      spans,
+    };
   }
   const s = doc.source;
   return {
@@ -328,7 +352,11 @@ export function redactionLog(doc: VideoDoc, o: RedactOptions, output?: Redaction
     detectors,
     options: o,
     totals: { tracks: tracks.length, redacted: tracks.length - kept, kept, added: added.length, plates, framesWithRegions, regions, maxPerFrame },
-    caveat: [...(kinds.length || added.length || !audio ? [REDACTION_CAVEAT] : []), ...(audio?.spans.some((x) => !x.speaker) ? [AUDIO_CAVEAT] : []), ...(audio?.totals.turns ? [SPEAKER_CAVEAT] : [])].join(' '),
+    caveat: [
+      ...(kinds.length || added.length || !audio ? [REDACTION_CAVEAT] : []),
+      ...(audio?.spans.some((x) => !x.speaker) ? [AUDIO_CAVEAT] : []),
+      ...(audio?.totals.turns ? [SPEAKER_CAVEAT] : []),
+    ].join(' '),
     tracks,
     ...(audio && { audio }),
   };
@@ -387,10 +415,24 @@ export function newPlan(doc: VideoDoc, options: RedactOptions = REDACT_DEFAULTS)
   const tracks = Object.fromEntries(custom.map((k) => [k, hash(k)!]));
   const keepTracks = Object.fromEntries(Object.entries(options.keepTracks ?? {}).map(([k, ids]) => [k, [...ids]]));
   return {
-    schema: 'videodoc-redact/0', source: { name: doc.source.name, fingerprint: doc.source.fingerprint }, ...(faces && { faces }), ...(plates && { plates }), ...(transcript && { transcript }),
+    schema: 'videodoc-redact/0',
+    source: { name: doc.source.name, fingerprint: doc.source.fingerprint },
+    ...(faces && { faces }),
+    ...(plates && { plates }),
+    ...(transcript && { transcript }),
     ...(custom.length && { tracks }),
-    options: { ...options, keep: [...options.keep], keepPlates: [...options.keepPlates], keepTracks, cover: [...options.cover], words: [...options.words], keepWords: [...options.keepWords], speakers: [...(options.speakers ?? [])] },
-    added: [], addedAudio: [],
+    options: {
+      ...options,
+      keep: [...options.keep],
+      keepPlates: [...options.keepPlates],
+      keepTracks,
+      cover: [...options.cover],
+      words: [...options.words],
+      keepWords: [...options.keepWords],
+      speakers: [...(options.speakers ?? [])],
+    },
+    added: [],
+    addedAudio: [],
   };
 }
 

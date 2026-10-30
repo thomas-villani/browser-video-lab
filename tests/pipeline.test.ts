@@ -3,8 +3,30 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  checkPipeline, checkPlan, coverTracks, decode, DocError, formatDoc, MODELS, newDoc, newPlan, parseDoc, PIPELINE_SCHEMA, pipelineContext, plan, PlanError,
-  redactionLog, REDACT_DEFAULTS, resolveModel, summarize, trackLayers, withLayers, type InputGeometry, type Layer, type Pipeline, type Track,
+  checkPipeline,
+  checkPlan,
+  coverTracks,
+  DocError,
+  decode,
+  formatDoc,
+  type InputGeometry,
+  type Layer,
+  MODELS,
+  newDoc,
+  newPlan,
+  PIPELINE_SCHEMA,
+  type Pipeline,
+  PlanError,
+  parseDoc,
+  pipelineContext,
+  plan,
+  REDACT_DEFAULTS,
+  redactionLog,
+  resolveModel,
+  summarize,
+  type Track,
+  trackLayers,
+  withLayers,
 } from '../src/doc/index.ts';
 
 const r2 = (v: number) => Math.round(v * 100) / 100;
@@ -63,7 +85,10 @@ const vehicles: Pipeline = {
 test('pipeline: track layers plan after the built-in ones, with their model; settings typed and checked', async () => {
   const pc = pipelineContext(checkPipeline(vehicles));
   const p = await plan(undefined, vehicles.layers, pc.settings, false, pc);
-  assert.deepEqual(p.layers.map((l) => l.name), ['scenes', 'faces', 'vehicles']);
+  assert.deepEqual(
+    p.layers.map((l) => l.name),
+    ['scenes', 'faces', 'vehicles'],
+  );
   assert.deepEqual(p.passes, { frames: ['scenes', 'faces', 'vehicles'] });
   const v = p.layers.find((l) => l.name === 'vehicles')!;
   assert.equal(v.kind, 'track');
@@ -73,7 +98,11 @@ test('pipeline: track layers plan after the built-in ones, with their model; set
   assert.equal(p.layers.find((l) => l.name === 'faces')!.config.every, 4);
   assert.equal(p.layers.find((l) => l.name === 'faces')!.model!.id, 'yunet');
 
-  const bad = (over: Partial<Pipeline>, re: RegExp) => assert.throws(() => checkPipeline({ ...vehicles, ...over }), (e) => e instanceof PlanError && re.test(e.message));
+  const bad = (over: Partial<Pipeline>, re: RegExp) =>
+    assert.throws(
+      () => checkPipeline({ ...vehicles, ...over }),
+      (e) => e instanceof PlanError && re.test(e.message),
+    );
   bad({ tracks: { faces: { model: 'rfdetr' } } }, /built-in layer/);
   bad({ tracks: { 'Bad-Name': { model: 'rfdetr' } } }, /lowercase/);
   bad({ tracks: { vehicles: { model: 'nope' } } }, /unknown model 'nope'/);
@@ -84,12 +113,18 @@ test('pipeline: track layers plan after the built-in ones, with their model; set
   bad({ models: { mine: { url: 'm.onnx', decoder: 'ssd' as never } } }, /decoder 'ssd'/);
   bad({ schema: 'videodoc-pipeline/9' as never }, /schema/);
   // A pipeline's own model, named by a track layer.
-  const own = checkPipeline({ ...vehicles, settings: {}, models: { logos: { url: './logos.onnx', decoder: 'yolo', labels: ['logo'] } }, tracks: { logos: { model: 'logos' } }, layers: ['logos'] });
+  const own = checkPipeline({
+    ...vehicles,
+    settings: {},
+    models: { logos: { url: './logos.onnx', decoder: 'yolo', labels: ['logo'] } },
+    tracks: { logos: { model: 'logos' } },
+    layers: ['logos'],
+  });
   const q = await plan(undefined, own.layers, {}, false, pipelineContext(own));
   assert.equal(q.layers.at(-1)!.model!.url, './logos.onnx');
 });
 
-test('planner: a track layer\'s hash follows its model file (fingerprint) and description, not where the file is', async () => {
+test("planner: a track layer's hash follows its model file (fingerprint) and description, not where the file is", async () => {
   const hash = async (fp: string | undefined, url = '/models/rfdetr_nano.onnx', labels = 'car,truck,bus') => {
     const pc = pipelineContext({ ...vehicles, tracks: { vehicles: { model: 'rfdetr', labels } } });
     const p = await plan(undefined, ['vehicles'], {}, false, { ...pc, models: { rfdetr: { ...MODELS.rfdetr, url } }, fingerprint: async () => fp });
@@ -104,9 +139,18 @@ test('planner: a track layer\'s hash follows its model file (fingerprint) and de
   assert.notEqual((await hash(undefined)).vehicles, (await hash(undefined, '/elsewhere/rfdetr_nano.onnx')).vehicles);
 });
 
-const layer = <T>(items: T[], extra = {}) => ({ producer: { module: 'm', version: '0', configHash: 'h', config: {}, ...extra }, items, coverage: [], createdAt: 'now', ms: 1, device: 'webgpu' }) as unknown as Layer<T>;
+const layer = <T>(items: T[], extra = {}) =>
+  ({ producer: { module: 'm', version: '0', configHash: 'h', config: {}, ...extra }, items, coverage: [], createdAt: 'now', ms: 1, device: 'webgpu' }) as unknown as Layer<T>;
 const cars: Track[] = [
-  { id: 1, f0: 0, f1: 9, samples: [[0, 10, 10, 50, 30], [9, 20, 10, 50, 30]] },
+  {
+    id: 1,
+    f0: 0,
+    f1: 9,
+    samples: [
+      [0, 10, 10, 50, 30],
+      [9, 20, 10, 50, 30],
+    ],
+  },
   { id: 2, f0: 5, f1: 14, samples: [[5, 200, 100, 40, 30]] },
 ];
 const face: Track[] = [{ id: 1, f0: 0, f1: 4, samples: [[0, 100, 20, 20, 20]] }];
@@ -117,7 +161,7 @@ const doc = withLayers(base, {
   scenes: layer([{ t0: 0, t1: 1, f0: 0, f1: 24, score: 0 }]),
 });
 
-test('doc: a pipeline\'s track layers are kept after the built-in ones, saved, read back and summarized', () => {
+test("doc: a pipeline's track layers are kept after the built-in ones, saved, read back and summarized", () => {
   assert.deepEqual(Object.keys(doc.layers), ['scenes', 'faces', 'vehicles']);
   assert.deepEqual(trackLayers(doc), ['faces', 'vehicles']);
   const back = parseDoc(formatDoc(doc));
@@ -125,17 +169,33 @@ test('doc: a pipeline\'s track layers are kept after the built-in ones, saved, r
   assert.equal(summarize(back).vehicles.trackFrames, 20);
   // A layer the code knows nothing about is still refused.
   const odd = formatDoc(withLayers(base, { captions2: layer([]) }));
-  assert.throws(() => parseDoc(odd), (e) => e instanceof DocError && /unknown layer 'captions2'/.test(e.message));
+  assert.throws(
+    () => parseDoc(odd),
+    (e) => e instanceof DocError && /unknown layer 'captions2'/.test(e.message),
+  );
 });
 
-test('redaction covers a pipeline\'s track layer, keeps its kept ids, and logs it by layer', () => {
+test("redaction covers a pipeline's track layer, keeps its kept ids, and logs it by layer", () => {
   const o = { ...REDACT_DEFAULTS, cover: ['faces', 'vehicles'], keepTracks: { vehicles: [2] } };
-  assert.deepEqual(coverTracks(doc, o).map((c) => `${c.kind}:${c.track.id}`), ['faces:1', 'vehicles:1']);
+  assert.deepEqual(
+    coverTracks(doc, o).map((c) => `${c.kind}:${c.track.id}`),
+    ['faces:1', 'vehicles:1'],
+  );
   const log = redactionLog(doc, o);
   assert.deepEqual(Object.keys(log.detectors), ['faces', 'vehicles']);
-  assert.deepEqual(log.tracks.map((t) => [t.layer, t.id, t.kept]), [['faces', 1, false], ['vehicles', 1, false], ['vehicles', 2, true]]);
+  assert.deepEqual(
+    log.tracks.map((t) => [t.layer, t.id, t.kept]),
+    [
+      ['faces', 1, false],
+      ['vehicles', 1, false],
+      ['vehicles', 2, true],
+    ],
+  );
   // Not covered unless listed.
-  assert.deepEqual(coverTracks(doc, REDACT_DEFAULTS).map((c) => c.kind), ['faces']);
+  assert.deepEqual(
+    coverTracks(doc, REDACT_DEFAULTS).map((c) => c.kind),
+    ['faces'],
+  );
 
   // A review's kept ids name the tracks of the layer it saw: found again, they are dropped.
   const saved = newPlan(doc, o);

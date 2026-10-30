@@ -17,7 +17,10 @@ export const marks = (s: string) => esc(s).replace(/\*\*(.+?)\*\*/g, '<mark>$1</
  */
 export function markdownToHtml(md: string, image: (frame: number) => string | undefined, mark: (text: string) => string = (t) => t): string {
   const out: string[] = [];
-  const blocks = md.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
+  const blocks = md
+    .split(/\n{2,}/)
+    .map((b) => b.trim())
+    .filter(Boolean);
   for (const [i, b] of blocks.entries()) {
     let m: RegExpExecArray | null;
     if ((m = /^# (.+)$/.exec(b))) {
@@ -35,7 +38,9 @@ export function markdownToHtml(md: string, image: (frame: number) => string | un
       out.push(`<p class="said" data-t="${secs(m[1])}"><button class="ts" data-t="${secs(m[1])}">${m[1]}</button>${who} ${marks(mark(m[3]))}</p>`);
     } else if ((m = /^!\[([\d:]+)\]\(kf:(\d+)\)$/.exec(b))) {
       const src = image(Number(m[2]));
-      out.push(`<figure class="kf" data-t="${secs(m[1])}" data-frame="${m[2]}">${src ? `<img src="${src}" alt="frame at ${m[1]}">` : '<div class="pending"></div>'}<figcaption>${m[1]}</figcaption></figure>`);
+      out.push(
+        `<figure class="kf" data-t="${secs(m[1])}" data-frame="${m[2]}">${src ? `<img src="${src}" alt="frame at ${m[1]}">` : '<div class="pending"></div>'}<figcaption>${m[1]}</figcaption></figure>`,
+      );
     } else if ((m = /^\*\((.+)\)\*$/.exec(b))) {
       const t = /(\d+(?::\d\d){1,2})–/.exec(m[1]);
       out.push(`<p class="note"${t ? ` data-t="${secs(t[1])}"` : ''}>${esc(m[1])}</p>`);
@@ -94,9 +99,15 @@ export function analysisSteps(want: string[], has: Set<string>, tracks: string[]
 /** Which of `steps` a progress report from analyze() belongs to (-1: before the first). */
 export function stepOf(p: { pass: string; stage: string }, steps: string[]): number {
   const name =
-    p.pass === 'frames' ? (steps.find((s) => s.startsWith('Finding ')) ?? '')
-    : p.pass === 'audio' ? (/speaker/.test(p.stage) ? 'Finding speakers' : /^(loading|transcrib)/.test(p.stage) ? 'Transcribing' : 'Listening')
-    : '';
+    p.pass === 'frames'
+      ? (steps.find((s) => s.startsWith('Finding ')) ?? '')
+      : p.pass === 'audio'
+        ? /speaker/.test(p.stage)
+          ? 'Finding speakers'
+          : /^(loading|transcrib)/.test(p.stage)
+            ? 'Transcribing'
+            : 'Listening'
+        : '';
   return steps.indexOf(name);
 }
 
@@ -107,12 +118,13 @@ export function stepOf(p: { pass: string; stage: string }, steps: string[]): num
 export function suggestions(texts: string[][], n = 4): string[] {
   const per = texts.map((segs) => {
     const count = new Map<string, number>();
-    for (const s of segs)
-      for (const m of s.matchAll(/(?<=[a-z,;] )([A-Z][a-z]{3,})/g)) count.set(m[1], (count.get(m[1]) ?? 0) + 1);
-    return [...count].filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1]).map(([w]) => w);
+    for (const s of segs) for (const m of s.matchAll(/(?<=[a-z,;] )([A-Z][a-z]{3,})/g)) count.set(m[1], (count.get(m[1]) ?? 0) + 1);
+    return [...count]
+      .filter(([, c]) => c >= 2)
+      .sort((a, b) => b[1] - a[1])
+      .map(([w]) => w);
   });
   const out: string[] = [];
-  for (let i = 0; out.length < n && per.some((p) => p.length > i); i++)
-    for (const p of per) if (p[i] && !out.includes(p[i]) && out.length < n) out.push(p[i]);
+  for (let i = 0; out.length < n && per.some((p) => p.length > i); i++) for (const p of per) if (p[i] && !out.includes(p[i]) && out.length < n) out.push(p[i]);
   return out;
 }

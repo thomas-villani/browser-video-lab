@@ -68,17 +68,17 @@ export interface KalmanState {
 /** Measurement = [cx, cy, aspect (w/h), h]. */
 export function initiate(z: Vec): KalmanState {
   const h = z[3];
-  const std = [
-    2 * STD_POS * h, 2 * STD_POS * h, 1e-2, 2 * STD_POS * h,
-    10 * STD_VEL * h, 10 * STD_VEL * h, 1e-5, 10 * STD_VEL * h,
-  ];
+  const std = [2 * STD_POS * h, 2 * STD_POS * h, 1e-2, 2 * STD_POS * h, 10 * STD_VEL * h, 10 * STD_VEL * h, 1e-5, 10 * STD_VEL * h];
   return { mean: [...z, 0, 0, 0, 0], cov: diag(std.map((s) => s * s)) };
 }
 
 export function predict(s: KalmanState): KalmanState {
   const h = s.mean[3];
   const std = [STD_POS * h, STD_POS * h, 1e-2, STD_POS * h, STD_VEL * h, STD_VEL * h, 1e-5, STD_VEL * h];
-  const mean = matmul(F, s.mean.map((v) => [v])).map((r) => r[0]);
+  const mean = matmul(
+    F,
+    s.mean.map((v) => [v]),
+  ).map((r) => r[0]);
   const cov = matmul(matmul(F, s.cov), FT);
   std.forEach((v, i) => (cov[i][i] += v * v));
   return { mean, cov };

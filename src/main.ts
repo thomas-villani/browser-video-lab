@@ -5,9 +5,10 @@
 //   ?model=yunet|rfdetr|rfdetr16  &ep=webgpu|wasm  &path=gpu|cpu|decode
 //   &frames=300  &stride=1  &video=/media/pan1080.mp4  &outloc=cpu|gpu|batch  &capture=0|1  &depth=1
 //   &longside=640 (dynamic-size models: input scaled to this long side, e.g. 640x384 for 16:9)
-import * as ort from 'onnxruntime-web/webgpu';
+
 import { ALL_FORMATS, Input, UrlSource, VideoSampleSink } from 'mediabunny';
-import { MODELS, geometryFor, type Detection } from './models';
+import * as ort from 'onnxruntime-web/webgpu';
+import { type Detection, geometryFor, MODELS } from './models';
 import { CpuPreprocessor, GpuPreprocessor, type Preprocessor } from './preprocess';
 import { BatchedReadback, readEach } from './readback';
 

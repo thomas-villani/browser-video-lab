@@ -36,7 +36,9 @@ function audible(pcm) {
 const parts = [];
 const rttm = [];
 let t = GAP;
-for (const f of readdirSync(dir).filter((f) => /^\d\d-.+\.wav$/.test(f)).sort()) {
+for (const f of readdirSync(dir)
+  .filter((f) => /^\d\d-.+\.wav$/.test(f))
+  .sort()) {
   // Each turn as 16 kHz mono 16-bit PCM.
   const pcm = ffmpeg(['-i', join(dir, f), '-f', 's16le', '-ac', '1', '-ar', String(RATE), '-']);
   const seconds = pcm.length / 2 / RATE;
@@ -47,7 +49,30 @@ for (const f of readdirSync(dir).filter((f) => /^\d\d-.+\.wav$/.test(f)).sort())
 parts.push(Buffer.alloc(Math.round(GAP * RATE) * 2));
 const raw = join(dir, 'dialog.raw');
 writeFileSync(raw, Buffer.concat(parts));
-ffmpeg(['-f', 'lavfi', '-i', 'color=gray:s=640x360:r=25', '-f', 's16le', '-ar', String(RATE), '-ac', '1', '-i', raw, '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '96k', 'tests/fixtures/tts-dialog.mp4']);
+ffmpeg([
+  '-f',
+  'lavfi',
+  '-i',
+  'color=gray:s=640x360:r=25',
+  '-f',
+  's16le',
+  '-ar',
+  String(RATE),
+  '-ac',
+  '1',
+  '-i',
+  raw,
+  '-shortest',
+  '-c:v',
+  'libx264',
+  '-pix_fmt',
+  'yuv420p',
+  '-c:a',
+  'aac',
+  '-b:a',
+  '96k',
+  'tests/fixtures/tts-dialog.mp4',
+]);
 rmSync(raw);
 writeFileSync('tests/fixtures/tts-dialog.rttm', `${rttm.join('\n')}\n`);
 console.log(JSON.stringify({ turns: rttm.length, seconds: +t.toFixed(1), bytes: readFileSync('tests/fixtures/tts-dialog.mp4').length }));

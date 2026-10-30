@@ -42,7 +42,11 @@ if (!a.video) {
   console.error('usage: npm run transcribe -- --video /media/<clip>.mp4 [--model <repo>,...] [--seconds 120]');
   process.exit(2);
 }
-const list = (s) => s.split(',').map((x) => x.trim()).filter(Boolean);
+const list = (s) =>
+  s
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
 const clip = basename(a.video, extname(a.video));
 
 const rows = [];

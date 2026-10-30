@@ -51,11 +51,19 @@ export interface Layer<T> {
 }
 
 /** VAD speech span. */
-export interface SpeechItem { t0: number; t1: number }
+export interface SpeechItem {
+  t0: number;
+  t1: number;
+}
 /** A spoken word: start and end in seconds, and the text as transcribed (with punctuation). */
 export type Word = [t0: number, t1: number, text: string];
 /** A transcript segment; `words` when the model gave word timestamps (transcript.words). */
-export interface TranscriptItem { t0: number; t1: number; text: string; words?: Word[] }
+export interface TranscriptItem {
+  t0: number;
+  t1: number;
+  text: string;
+  words?: Word[];
+}
 /**
  * A speaker (diarization: who speaks when). Ids are per video, numbered in order of first
  * appearance. `turns` are when the speaker talks, in seconds (they may overlap other
@@ -64,18 +72,40 @@ export interface TranscriptItem { t0: number; t1: number; text: string; words?: 
  * edits (<video>.speakers.json) give `name`, and `merged` lists the speakers merged into this
  * one, in the doc as edited (withSpeakers in speakers.ts).
  */
-export interface SpeakerItem { id: number; turns: [t0: number, t1: number][]; voice: number[]; name?: string; merged?: number[] }
+export interface SpeakerItem {
+  id: number;
+  turns: [t0: number, t1: number][];
+  voice: number[];
+  name?: string;
+  merged?: number[];
+}
 /** A shot: frames [f0, f1] inclusive; `score` is the cut score that started it (0 for the first). */
-export interface SceneItem { t0: number; t1: number; f0: number; f1: number; score: number }
+export interface SceneItem {
+  t0: number;
+  t1: number;
+  f0: number;
+  f1: number;
+  score: number;
+}
 /** A frame worth looking at: the start of a shot, the middle of a silent gap, or a fill-in
  *  so long shots are covered. `scene` indexes the scenes layer. */
-export interface KeyframeItem { t: number; frame: number; scene: number; why: 'scene' | 'silence' | 'coverage' }
+export interface KeyframeItem {
+  t: number;
+  frame: number;
+  scene: number;
+  why: 'scene' | 'silence' | 'coverage';
+}
 
 /**
  * A tracked object over frames [f0, f1]. `samples` are [frame, x, y, w, h] in source pixels;
  * boxes between samples are linearly interpolated (see boxesAt in tracks.ts).
  */
-export interface Track { id: number; f0: number; f1: number; samples: number[][] }
+export interface Track {
+  id: number;
+  f0: number;
+  f1: number;
+  samples: number[][];
+}
 
 export interface Layers {
   speech: Layer<SpeechItem>;

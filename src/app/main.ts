@@ -3,16 +3,54 @@
 // is uploaded: analysis runs here on WebGPU, docs are saved next to the videos or kept in memory.
 // Faces and license plates can be reviewed over the player (review.ts) and blurred into a copy.
 // A pipeline preset (presets.ts) adds its track layers and settings to what is analyzed.
-import {
-  addSpeaker, coversAudio, formatLog, highlight, mergeSpeakers, moveSpeech, nameSpeaker, namedVoices, newEdits, PIPELINE_SCHEMA, pipelineContext, REDACT_DEFAULTS, redactionLog, resolve, search,
-  speakerName, suggestSpeakerNames, talkTime, toMarkdown, unmergeSpeaker, unmove, withSpeakers, type Pipeline, type SpeakerEdits, type SpeakerItem,
-} from '../doc/index.ts';
+
 import { analyze, frameImages } from '../analyze';
+import {
+  addSpeaker,
+  coversAudio,
+  formatLog,
+  highlight,
+  mergeSpeakers,
+  moveSpeech,
+  namedVoices,
+  nameSpeaker,
+  newEdits,
+  PIPELINE_SCHEMA,
+  type Pipeline,
+  pipelineContext,
+  REDACT_DEFAULTS,
+  redactionLog,
+  resolve,
+  type SpeakerEdits,
+  type SpeakerItem,
+  search,
+  speakerName,
+  suggestSpeakerNames,
+  talkTime,
+  toMarkdown,
+  unmergeSpeaker,
+  unmove,
+  withSpeakers,
+} from '../doc/index.ts';
 import { redact } from '../redact';
 import {
-  canOpenFolders, download, downloadDoc, fromFiles, loadPlan, loadSavedImages, openFolder, probeDuration, redactTarget, saveDoc, savePlan, saveSpeakerEdits, speakerEdits, storeImages, type Entry,
+  canOpenFolders,
+  download,
+  downloadDoc,
+  type Entry,
+  fromFiles,
+  loadPlan,
+  loadSavedImages,
+  openFolder,
+  probeDuration,
+  redactTarget,
+  saveDoc,
+  savePlan,
+  saveSpeakerEdits,
+  speakerEdits,
+  storeImages,
 } from './library';
-import { decoderOf, dropPreset, folderPreset, pickedPreset, PRESET_FILE, type Preset } from './presets';
+import { decoderOf, dropPreset, folderPreset, PRESET_FILE, type Preset, pickedPreset } from './presets';
 import { analysisSteps, esc, estimate, list, markdownToHtml, marks, stepOf, suggestions, trackCost } from './render';
 import { Review } from './review';
 import './style.css';
@@ -107,8 +145,7 @@ function analyzeAll() {
   const todo = state.entries.filter((e) => e.status === 'new' || e.status === 'error');
   todo.forEach(enqueue);
   closeTodo?.();
-  if (todo.length > 1)
-    toast(`Analyzing ${plural(todo.length, 'video')}, one at a time: follow along in the list. You can read and search the others meanwhile.`);
+  if (todo.length > 1) toast(`Analyzing ${plural(todo.length, 'video')}, one at a time: follow along in the list. You can read and search the others meanwhile.`);
 }
 
 function enqueue(e: Entry) {
@@ -159,7 +196,11 @@ async function runQueue() {
         if (e.reviewAfter) {
           const found = e.wantWords ? 'Word times found' : 'Faces and plates found';
           if (state.selected !== e) toast(`${found} in <b>${esc(e.name)}</b>.${more}`, { action: 'Review them', onAction: () => void openReview(e), ms: 0 });
-        } else toast(`<b>${esc(e.name)}</b> is ready to read${said ? ' and search' : said === 0 ? ' (no speech found, so nothing to search)' : ''}.${more}`, state.selected === e ? {} : { action: 'Open', onAction: () => void showEntry(e) });
+        } else
+          toast(
+            `<b>${esc(e.name)}</b> is ready to read${said ? ' and search' : said === 0 ? ' (no speech found, so nothing to search)' : ''}.${more}`,
+            state.selected === e ? {} : { action: 'Open', onAction: () => void showEntry(e) },
+          );
       }
     } catch (err) {
       if (ctl.signal.aborted) {
@@ -221,7 +262,9 @@ async function startRedact(e: Entry) {
   const kept = (e.plan?.options.keep.length ?? 0) + (e.plan?.options.keepPlates.length ?? 0);
   const what = kept ? `faces and plates covered except the ${plural(kept, 'one')} you left visible` : 'every face and plate covered';
   const o = e.plan?.options ?? REDACT_DEFAULTS;
-  const sound = coversAudio(o, e.plan?.addedAudio) ? `the ${o.speakers.length ? 'speakers and words' : 'words'} you listed ${o.sound === 'bleep' ? 'bleeped' : 'silenced'}` : 'sound kept';
+  const sound = coversAudio(o, e.plan?.addedAudio)
+    ? `the ${o.speakers.length ? 'speakers and words' : 'words'} you listed ${o.sound === 'bleep' ? 'bleeped' : 'silenced'}`
+    : 'sound kept';
   toast(`Making <b>${esc(to.name)}</b>: ${what}, ${sound}.${faces} Progress shows in the list.`);
 }
 
@@ -251,7 +294,9 @@ async function redactEntry(e: Entry, onProgress: (p: { pass: string; stage: stri
   } else download(`${to.name}.redactions.json`, log, 'application/json');
   const where = e.dir ? ' next to the video' : '';
   const watch = to.file ? { action: 'Watch it', onAction: async () => playFile(await to.file!.getFile()) } : {};
-  const check = r.audioSeconds ? 'Detection misses some faces and plates, and transcription some words: watch and listen to it before you share it.' : 'Detection misses some faces and plates: watch it before you share it.';
+  const check = r.audioSeconds
+    ? 'Detection misses some faces and plates, and transcription some words: watch and listen to it before you share it.'
+    : 'Detection misses some faces and plates: watch it before you share it.';
   toast(`Saved <b>${esc(to.name)}</b>${where}, with its redaction log. ${check}`, { ms: 0, ...watch });
 }
 
@@ -287,7 +332,9 @@ async function openReview(e: Entry) {
     e.reviewAfter = true;
     e.status = 'new';
     enqueue(e);
-    toast(`Finding the ${e.doc?.layers.faces ? 'plates' : 'faces and plates'} in <b>${esc(e.name)}</b> first (about as long as the video, or longer for crowds). The review opens when they are found.`);
+    toast(
+      `Finding the ${e.doc?.layers.faces ? 'plates' : 'faces and plates'} in <b>${esc(e.name)}</b> first (about as long as the video, or longer for crowds). The review opens when they are found.`,
+    );
     return;
   }
   for (const w of await loadPlan(e)) toast(esc(w), { ms: 0 });
@@ -317,7 +364,9 @@ function playFile(f: File) {
   video().src = state.videoUrl;
   video().dataset.id = 'file';
   $('#read-status').textContent = `playing ${f.name}`;
-  void video().play().catch(() => {});
+  void video()
+    .play()
+    .catch(() => {});
 }
 
 // ---- video list ----
@@ -339,18 +388,30 @@ const ahead = (e: Entry) => queue.indexOf(e) + 1;
 
 function entryHtml(e: Entry): string {
   const d = e.doc;
-  const chips = d ? Object.keys(d.layers).map((n) => `<span class="chip">${n}</span>`).join('') : '';
+  const chips = d
+    ? Object.keys(d.layers)
+        .map((n) => `<span class="chip">${n}</span>`)
+        .join('')
+    : '';
   const meta = d ? `${fmt(d.source.duration)} · ${d.source.height}p` : e.duration ? fmt(e.duration) : '';
   const status =
-    e.status === 'analyzing' ? stepsHtml(e)
-    : e.status === 'queued' ? `<span class="busy">queued · ${plural(ahead(e), 'video')} ahead</span>`
-    : e.status === 'error' ? `<span class="err" title="${esc(e.error ?? '')}">failed: ${esc(e.error ?? '')}</span>`
-    : e.status === 'new' ? `<span class="muted">not analyzed yet${e.duration ? ` · takes ${timeFor(e.duration)}` : ''}</span>`
-    : e.progress ? `<span class="muted">${esc(e.progress)}</span>` : '';
+    e.status === 'analyzing'
+      ? stepsHtml(e)
+      : e.status === 'queued'
+        ? `<span class="busy">queued · ${plural(ahead(e), 'video')} ahead</span>`
+        : e.status === 'error'
+          ? `<span class="err" title="${esc(e.error ?? '')}">failed: ${esc(e.error ?? '')}</span>`
+          : e.status === 'new'
+            ? `<span class="muted">not analyzed yet${e.duration ? ` · takes ${timeFor(e.duration)}` : ''}</span>`
+            : e.progress
+              ? `<span class="muted">${esc(e.progress)}</span>`
+              : '';
   const action =
-    e.status === 'new' || e.status === 'error' ? `<button class="analyze primary">${e.status === 'error' ? 'Retry' : 'Analyze'}</button>`
-    : e.status === 'queued' || e.status === 'analyzing' ? `<button class="cancel" title="${e.status === 'queued' ? 'Take it off the queue' : 'Stop now; nothing half-done is kept'}">Cancel</button>`
-    : '';
+    e.status === 'new' || e.status === 'error'
+      ? `<button class="analyze primary">${e.status === 'error' ? 'Retry' : 'Analyze'}</button>`
+      : e.status === 'queued' || e.status === 'analyzing'
+        ? `<button class="cancel" title="${e.status === 'queued' ? 'Take it off the queue' : 'Stop now; nothing half-done is kept'}">Cancel</button>`
+        : '';
   return `<li data-id="${e.id}" class="${state.selected === e ? 'sel' : ''} ${e.status}">
     <div class="row"><span class="name" title="${esc(e.path)}">${esc(e.path)}</span>${action}</div>
     <div class="meta">${meta} ${chips}</div>${status ? `<div class="status">${status}</div>` : ''}</li>`;
@@ -386,7 +447,9 @@ function updateSearchHints() {
   state.suggest = suggestions(searchable.map((e) => e.doc!.layers.transcript!.items.map((i) => i.text)));
   $<HTMLInputElement>('#q').placeholder = searchable.length
     ? `Search what's said in ${plural(searchable.length, 'video')}${state.suggest.length ? `, e.g. ${state.suggest[0]}` : ''}  ( / )`
-    : state.entries.length ? "Analyze a video to search what's said in it" : "Add videos, then search what's said in them";
+    : state.entries.length
+      ? "Analyze a video to search what's said in it"
+      : "Add videos, then search what's said in them";
 }
 
 // ---- reading view ----
@@ -418,8 +481,14 @@ async function showEntry(e: Entry, at?: number, marked: string[] = []) {
   const faces = !!e.doc?.layers.faces;
   $('#doc-actions').innerHTML = e.doc
     ? `<button id="copy-md">Copy Markdown</button><button id="dl-doc">Download doc</button>${ready ? '<button id="reanalyze" title="Compute the layers ticked above that are missing">Add layers</button>' : ''}${
-        ready && (faces || state.gpu !== false) ? `<button id="review-faces" title="See what gets blurred over the video; leave faces or plates visible, cover missed ones">Review faces and plates</button>` : ''}${
-        ready && state.gpu !== false ? `<button id="redact" title="Save a copy with faces and plates blurred (sound kept) and a redaction log${e.plan ? ', as reviewed' : ''}">Blur faces and plates…</button>` : ''}`
+        ready && (faces || state.gpu !== false)
+          ? `<button id="review-faces" title="See what gets blurred over the video; leave faces or plates visible, cover missed ones">Review faces and plates</button>`
+          : ''
+      }${
+        ready && state.gpu !== false
+          ? `<button id="redact" title="Save a copy with faces and plates blurred (sound kept) and a redaction log${e.plan ? ', as reviewed' : ''}">Blur faces and plates…</button>`
+          : ''
+      }`
     : '';
   $('#tip').hidden = !e.doc || tipSeen();
   $('#read-status').textContent = '';
@@ -437,7 +506,14 @@ async function showEntry(e: Entry, at?: number, marked: string[] = []) {
       };
       status(`extracting ${missing.length} keyframes…`);
       try {
-        await storeImages(e, missing, await frameImages(file, missing.map((k) => k.t)));
+        await storeImages(
+          e,
+          missing,
+          await frameImages(
+            file,
+            missing.map((k) => k.t),
+          ),
+        );
       } catch (err) {
         console.warn(err);
       }
@@ -452,10 +528,13 @@ async function showEntry(e: Entry, at?: number, marked: string[] = []) {
 function renderPending(e: Entry) {
   const time = e.duration ? ` It takes ${timeFor(e.duration)} here.` : '';
   const body =
-    e.status === 'analyzing' ? `<p>Analyzing in this browser:</p><p class="big-steps">${stepsHtml(e)}</p><p class="muted">You can read and search other videos meanwhile.</p><p><button class="cancel-this">Cancel</button></p>`
-    : e.status === 'queued' ? `<p>Queued: ${plural(ahead(e), 'video')} ahead of it. Videos are analyzed one at a time.</p><p><button class="cancel-this">Cancel</button></p>`
-    : state.gpu === false ? '<p>Not analyzed yet, and this browser has no WebGPU to analyze it. Use Chrome or Edge, or the <code>videodoc</code> CLI.</p>'
-    : `${e.status === 'error' ? `<p class="err">Analysis failed: ${esc(e.error ?? '')}</p>` : ''}
+    e.status === 'analyzing'
+      ? `<p>Analyzing in this browser:</p><p class="big-steps">${stepsHtml(e)}</p><p class="muted">You can read and search other videos meanwhile.</p><p><button class="cancel-this">Cancel</button></p>`
+      : e.status === 'queued'
+        ? `<p>Queued: ${plural(ahead(e), 'video')} ahead of it. Videos are analyzed one at a time.</p><p><button class="cancel-this">Cancel</button></p>`
+        : state.gpu === false
+          ? '<p>Not analyzed yet, and this browser has no WebGPU to analyze it. Use Chrome or Edge, or the <code>videodoc</code> CLI.</p>'
+          : `${e.status === 'error' ? `<p class="err">Analysis failed: ${esc(e.error ?? '')}</p>` : ''}
        <p>Not analyzed yet. Analysis transcribes what's said, finds the shots and picks a picture for each, in this browser.${time}</p>
        <p><button class="analyze-this primary">${e.status === 'error' ? 'Try again' : 'Analyze this video'}</button></p>`;
   $('#read').innerHTML = `<h1>${esc(e.name)}</h1>${body}`;
@@ -485,7 +564,11 @@ function renderRead(e: Entry) {
 // ---- speakers: names, merges and moves (<video>.speakers.json) ----
 
 /** e's doc with the speakers as named and corrected. */
-const view = (e: Entry) => withSpeakers(e.doc!, speakerEdits(e, (w) => toast(esc(w), { ms: 0 })));
+const view = (e: Entry) =>
+  withSpeakers(
+    e.doc!,
+    speakerEdits(e, (w) => toast(esc(w), { ms: 0 })),
+  );
 
 /** Paragraphs of the reading view, in order (toMarkdown's): their times and speaker. */
 let paragraphs: { t0: number; t1: number; speaker?: number }[] = [];
@@ -499,13 +582,18 @@ function speakersPanel(e: Entry): string {
   if (!list.length) return '<section class="speakers"><p class="muted">No one was found speaking.</p></section>';
   const edits = speakerEdits(e);
   const total = list.reduce((n, s) => n + talkTime(s), 0);
-  const known = state.entries.filter((x) => x !== e).flatMap((x) => {
-    const ed = speakerEdits(x);
-    return ed ? namedVoices(ed, x.path) : [];
-  });
+  const known = state.entries
+    .filter((x) => x !== e)
+    .flatMap((x) => {
+      const ed = speakerEdits(x);
+      return ed ? namedVoices(ed, x.path) : [];
+    });
   const suggested = suggestSpeakerNames(list, known);
   const rows = list.map((s) => {
-    const others = list.filter((o) => o.id !== s.id).map((o) => `<option value="${o.id}">${esc(speakerName(o))}</option>`).join('');
+    const others = list
+      .filter((o) => o.id !== s.id)
+      .map((o) => `<option value="${o.id}">${esc(speakerName(o))}</option>`)
+      .join('');
     const sug = suggested.find((x) => x.id === s.id);
     return `<li data-id="${s.id}">
       <input class="spk-name" data-id="${s.id}" value="${esc(s.name ?? '')}" placeholder="Speaker ${s.id}" aria-label="Name of speaker ${s.id}" spellcheck="false">
@@ -517,7 +605,12 @@ function speakersPanel(e: Entry): string {
     </li>`;
   });
   const name = (id: number) => esc(speakerName(list.find((s) => s.id === id || s.merged?.includes(id)) ?? { id }));
-  const moves = (edits?.moves ?? []).map((m, i) => `<li>${fmt(m.t0)}–${fmt(m.t1)} ${m.from !== undefined ? `of ${name(m.from)} ` : ''}given to ${name(m.to)} <button class="spk-unmove" data-i="${i}">Undo</button></li>`).join('');
+  const moves = (edits?.moves ?? [])
+    .map(
+      (m, i) =>
+        `<li>${fmt(m.t0)}–${fmt(m.t1)} ${m.from !== undefined ? `of ${name(m.from)} ` : ''}given to ${name(m.to)} <button class="spk-unmove" data-i="${i}">Undo</button></li>`,
+    )
+    .join('');
   return `<section class="speakers"><div class="spk-head"><b>Speakers</b> <span class="muted">found automatically: names follow the voices when the video is analyzed again. Click a speaker's name in the text to give that paragraph to someone else.</span></div>
     <ul class="spk-list">${rows.join('')}</ul>${moves ? `<ul class="spk-moves">${moves}</ul>` : ''}</section>`;
 }
@@ -534,7 +627,11 @@ async function editSpeakers(e: Entry, f: (edits: SpeakerEdits, items: SpeakerIte
   const saved = await saveSpeakerEdits(e, next).catch((err) => (console.warn(err), false));
   if (!saved && !speakersTold) {
     speakersTold = true;
-    toast(e.dir ? 'The speaker names could not be saved next to the video.' : 'Speaker names are kept in this tab until you close it. Open the folder (rather than dropping files) to save them next to the video.');
+    toast(
+      e.dir
+        ? 'The speaker names could not be saved next to the video.'
+        : 'Speaker names are kept in this tab until you close it. Open the folder (rather than dropping files) to save them next to the video.',
+    );
   }
   renderRead(e);
 }
@@ -571,9 +668,10 @@ function listen(e: Entry, id: number) {
   const now = video().currentTime;
   const next = s.turns.find(([a]) => a > now + 0.5) ?? s.turns[0];
   seek(next[0], true);
-  void video().play().catch(() => {});
+  void video()
+    .play()
+    .catch(() => {});
 }
-
 
 /** Put newly available keyframe images into the reading view without re-rendering it. */
 function fillImages(e: Entry) {
@@ -619,7 +717,9 @@ function renderResults() {
   const names = [...new Set(docs.flatMap((d) => (d.layers.speakers?.items ?? []).flatMap((s) => (s.name ? [s.name] : []))))].sort((a, b) => a.localeCompare(b));
   if (!names.includes(state.saidBy)) state.saidBy = '';
   const hits = search(docs, state.query, { top: 30, ...(state.saidBy && { speaker: state.saidBy }) });
-  const saidBy = names.length ? `<label class="said-by">Said by <select id="said-by"><option value="">anyone</option>${names.map((n) => `<option${n === state.saidBy ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select></label>` : '';
+  const saidBy = names.length
+    ? `<label class="said-by">Said by <select id="said-by"><option value="">anyone</option>${names.map((n) => `<option${n === state.saidBy ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select></label>`
+    : '';
   const box = $('#results');
   box.hidden = false;
   $('#viewer').hidden = true;
@@ -627,12 +727,14 @@ function renderResults() {
   const skipped = state.entries.length - searchable.length;
   const head = hits.length
     ? `<p class="muted">${plural(hits.length, 'passage')} in ${plural(searchable.length, 'video')}${skipped ? ` · ${plural(skipped, 'video')} not searchable yet (analyze with “What's said” on)` : ''}</p>`
-    : searchable.length ? ''
-    : `<p>Nothing to search yet: ${state.entries.length ? 'analyze a video first (with “What’s said” on).' : 'add videos and analyze them first.'}</p>`;
+    : searchable.length
+      ? ''
+      : `<p>Nothing to search yet: ${state.entries.length ? 'analyze a video first (with “What’s said” on).' : 'add videos and analyze them first.'}</p>`;
   const tryThese = state.suggest.filter((s) => s.toLowerCase() !== state.query.toLowerCase());
-  const none = searchable.length && !hits.length
-    ? `<p>No matches in ${plural(searchable.length, 'video')}.${tryThese.length ? ` Try: ${tryThese.map((s) => `<button class="suggest">${esc(s)}</button>`).join(' ')}` : ''}</p>`
-    : '';
+  const none =
+    searchable.length && !hits.length
+      ? `<p>No matches in ${plural(searchable.length, 'video')}.${tryThese.length ? ` Try: ${tryThese.map((s) => `<button class="suggest">${esc(s)}</button>`).join(' ')}` : ''}</p>`
+      : '';
   box.innerHTML =
     saidBy +
     head +
@@ -646,7 +748,7 @@ function renderResults() {
         const ts = (t: number) => (long ? `${Math.floor(t / 3600)}:${fmt(t % 3600).padStart(5, '0')}` : fmt(t));
         return `<li class="hit" data-id="${e.id}" data-t="${h.at}" data-terms="${esc(h.matched.join(' '))}">
           ${img ? `<img src="${img}" alt="">` : '<div class="thumb"></div>'}
-          <div><div class="where"><b>${esc(e.path)}</b> · ${ts(h.t0)}–${ts(h.t1)}${h.speaker !== undefined ? ` · ${esc(h.speaker)}` : ""}</div><div class="snip">${marks(h.snippet)}</div></div></li>`;
+          <div><div class="where"><b>${esc(e.path)}</b> · ${ts(h.t0)}–${ts(h.t1)}${h.speaker !== undefined ? ` · ${esc(h.speaker)}` : ''}</div><div class="snip">${marks(h.snippet)}</div></div></li>`;
       })
       .join('');
 }
@@ -793,7 +895,9 @@ async function savePreset() {
   const text = `${JSON.stringify(currentPipeline(), null, 2)}\n`;
   if (!state.root) {
     download(PRESET_FILE, text, 'application/json');
-    return void toast(`Downloaded <b>${PRESET_FILE}</b>. Put it at the top of a folder to use it for every video there, or pass it to the CLI (<code>videodoc analyze --pipeline</code>).`);
+    return void toast(
+      `Downloaded <b>${PRESET_FILE}</b>. Put it at the top of a folder to use it for every video there, or pass it to the CLI (<code>videodoc analyze --pipeline</code>).`,
+    );
   }
   try {
     const w = await (await state.root.getFileHandle(PRESET_FILE, { create: true })).createWritable();
@@ -957,7 +1061,8 @@ async function checkGpu() {
   $('#gpu').className = adapter ? 'ok' : 'warn';
   if (!adapter) {
     $('#banner').hidden = false;
-    $('#banner').textContent = 'WebGPU is unavailable in this browser, so videos cannot be analyzed here (use Chrome or Edge 113+). Reading and searching existing docs still works.';
+    $('#banner').textContent =
+      'WebGPU is unavailable in this browser, so videos cannot be analyzed here (use Chrome or Edge 113+). Reading and searching existing docs still works.';
   }
 }
 

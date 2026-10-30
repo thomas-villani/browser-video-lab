@@ -9,12 +9,38 @@
 // listed above the shots; while the preview plays, the player is muted over them and the tone
 // plays instead.
 import {
-  audioCover, audioSpans, covered, cursorFor, handTrack, keptIds, newPlan, REDACT_SOUNDS, REDACT_STYLES, setBox, setEnd, speakerName, suggestNames, trackBox, trackLayers, tracksOf, withSpeakers,
-  type AudioSpan, type Box, type RedactionCursor, type RedactKind, type RedactPlan, type RedactSound, type RedactStyle, type Region, type SceneItem, type Track, type VideoDoc,
+  type AudioSpan,
+  audioCover,
+  audioSpans,
+  type Box,
+  covered,
+  cursorFor,
+  handTrack,
+  keptIds,
+  newPlan,
+  REDACT_SOUNDS,
+  REDACT_STYLES,
+  type RedactionCursor,
+  type RedactKind,
+  type RedactPlan,
+  type RedactSound,
+  type RedactStyle,
+  type Region,
+  type SceneItem,
+  setBox,
+  setEnd,
+  speakerName,
+  suggestNames,
+  type Track,
+  trackBox,
+  trackLayers,
+  tracksOf,
+  type VideoDoc,
+  withSpeakers,
 } from '../doc/index.ts';
 import { coverer } from '../redact';
+import { type Entry, speakerEdits } from './library';
 import { esc } from './render';
-import { speakerEdits, type Entry } from './library';
 
 export interface ReviewHost {
   video: HTMLVideoElement;
@@ -54,7 +80,14 @@ const noun = (kind: RedactKind, n = 1) => {
   return n === 1 ? one : `${one}s`;
 };
 /** Box colors by layer: faces white, plates cyan, a pipeline's layers after them (hand boxes are amber). */
-const KIND_COLORS: [string, string][] = [['#ffffff', 'white'], ['#67e8f9', 'cyan'], ['#c084fc', 'violet'], ['#a3e635', 'lime'], ['#f472b6', 'pink'], ['#fb923c', 'orange']];
+const KIND_COLORS: [string, string][] = [
+  ['#ffffff', 'white'],
+  ['#67e8f9', 'cyan'],
+  ['#c084fc', 'violet'],
+  ['#a3e635', 'lime'],
+  ['#f472b6', 'pink'],
+  ['#fb923c', 'orange'],
+];
 
 const fmtT = (s: number, frac = false) => {
   const m = Math.floor(s / 60);
@@ -213,7 +246,10 @@ export class Review {
       if (t.id !== 'rv-words') return;
       clearTimeout(this.wordsTimer);
       this.wordsTimer = setTimeout(() => {
-        this.plan.options.words = t.value.split('\n').map((w) => w.trim()).filter(Boolean);
+        this.plan.options.words = t.value
+          .split('\n')
+          .map((w) => w.trim())
+          .filter(Boolean);
         this.wordsChanged();
       }, 400);
     });
@@ -770,14 +806,19 @@ export class Review {
     const o = this.plan.options;
     const t = this.doc.layers.transcript;
     const sp = this.doc.layers.speakers?.items ?? [];
-    const who = sp.length > 1
-      ? `<p class="rv-speakers"><span class="muted">Everything one person says:</span> ${sp.map((s) => `<label><input type="checkbox" data-bleep-speaker="${esc(speakerName(s))}"${o.speakers.includes(speakerName(s)) ? ' checked' : ''}> ${esc(speakerName(s))}</label>`).join(' ')}</p>`
-      : '';
+    const who =
+      sp.length > 1
+        ? `<p class="rv-speakers"><span class="muted">Everything one person says:</span> ${sp.map((s) => `<label><input type="checkbox" data-bleep-speaker="${esc(speakerName(s))}"${o.speakers.includes(speakerName(s)) ? ' checked' : ''}> ${esc(speakerName(s))}</label>`).join(' ')}</p>`
+        : '';
     if (!t) return `${who}<p class="muted">No transcript: analyze this video with <b>Transcript</b> on to bleep spoken words.</p>`;
     if (!t.items.length) return '<p class="muted">Nobody speaks in this video, so there is nothing to bleep.</p>';
     const listed = new Set(o.words.map((w) => w.toLowerCase()));
-    const names = suggestNames(this.doc).filter((s) => !listed.has(s.word.toLowerCase())).slice(0, 16);
-    const need = this.hasWords ? '' : `<p class="rv-warn">This transcript was made without word times, which bleeping needs. <button data-act="find-words">Transcribe again with word times</button> (about a third of the video's length; the review reopens when it is done).</p>`;
+    const names = suggestNames(this.doc)
+      .filter((s) => !listed.has(s.word.toLowerCase()))
+      .slice(0, 16);
+    const need = this.hasWords
+      ? ''
+      : `<p class="rv-warn">This transcript was made without word times, which bleeping needs. <button data-act="find-words">Transcribe again with word times</button> (about a third of the video's length; the review reopens when it is done).</p>`;
     return `${need}${who}
       <label class="rv-words-label" for="rv-words">Words and phrases to bleep, one per line. Plurals, possessives, -ed and -ing count too; <code>*</code> matches any letters (<code>fuck*</code>); in "quotes", only that word.</label>
       <textarea id="rv-words" rows="3" spellcheck="false" placeholder="Okafor&#10;Daniel Reyes">${esc(o.words.join('\n'))}</textarea>
@@ -796,10 +837,16 @@ export class Review {
     const secs = this.bleeps.reduce((n, [a, b]) => n + b - a, 0);
     const verb = o.sound === 'bleep' ? 'bleeped' : 'silenced';
     const turns = this.spans.filter((s) => s.speaker).length;
-    const spoken = turns ? `<p class="muted">${turns} turns of ${esc(o.speakers.join(', '))} ${verb} (${secs.toFixed(1)} s in all). Turns are found automatically: some speech where people talk over each other is missed, so listen to the copy.</p>` : '';
-    const head = spoken + (!o.words.length && !o.profanity ? ''
-      : !matches.length ? `<p class="muted">None of these words is in the transcript. Names are often spelled differently there: search the transcript, or pick from the names above.</p>`
-        : `<p class="muted">${matches.length - kept} ${verb} (${secs.toFixed(1)} s)${kept ? ` · ${kept} left audible` : ''}. Word times are approximate, so a little before and after each word is covered; play one to check it.</p>`);
+    const spoken = turns
+      ? `<p class="muted">${turns} turns of ${esc(o.speakers.join(', '))} ${verb} (${secs.toFixed(1)} s in all). Turns are found automatically: some speech where people talk over each other is missed, so listen to the copy.</p>`
+      : '';
+    const head =
+      spoken +
+      (!o.words.length && !o.profanity
+        ? ''
+        : !matches.length
+          ? `<p class="muted">None of these words is in the transcript. Names are often spelled differently there: search the transcript, or pick from the names above.</p>`
+          : `<p class="muted">${matches.length - kept} ${verb} (${secs.toFixed(1)} s)${kept ? ` · ${kept} left audible` : ''}. Word times are approximate, so a little before and after each word is covered; play one to check it.</p>`);
     const rows = this.spans.slice(0, this.wordsListed).map((s, i) => {
       if (!s.key) return '';
       const say = s.term === s.text || !s.term ? '' : ` <span class="muted">${esc(s.term === 'profanity' ? 'strong language' : s.term)}</span>`;
@@ -876,7 +923,8 @@ export class Review {
       .join('');
     const key = this.selected;
     const sel = key !== undefined ? this.byId.get(key) : undefined;
-    const selHtml = !sel ? ''
+    const selHtml = !sel
+      ? ''
       : isHand(key!)
         ? `<b>Added by hand</b>, ${span(sel)} (${secs(sel)}). If it moves, pause where it has moved and drag a new box: the box follows. <span class="btns"><button data-act="show">Show</button><button data-act="start">Starts here</button><button data-act="end">Ends here</button><button data-act="delete">Delete</button></span>`
         : `<b>${title(key!)}</b>, ${span(sel)} (${secs(sel)}): ${this.isKept(key!) ? 'left visible' : 'blurred'}. <span class="btns"><button data-act="show">Show</button><button data-act="keep">${this.isKept(key!) ? 'Blur it' : 'Leave visible'}</button></span>`;
@@ -888,7 +936,14 @@ export class Review {
       : '';
     this.h.panel.innerHTML = `<div class="rv-head">
         <h1>Review ${this.what()}</h1>
-        <p>Boxes on the video are what the copy covers${kinds.length > 1 ? ` (${kinds.slice(1).map((k) => `${noun(k, 2)} in ${this.color(k)[1]}`).join(', ')})` : ''}. <b>Click a box</b> to leave it visible (click it again to cover it), e.g. a sign taken for a plate. <b>Drag a box</b> over anything the detector missed. Dashed boxes are held a moment before and after something is seen, for faces turning away.</p>
+        <p>Boxes on the video are what the copy covers${
+          kinds.length > 1
+            ? ` (${kinds
+                .slice(1)
+                .map((k) => `${noun(k, 2)} in ${this.color(k)[1]}`)
+                .join(', ')})`
+            : ''
+        }. <b>Click a box</b> to leave it visible (click it again to cover it), e.g. a sign taken for a plate. <b>Drag a box</b> over anything the detector missed. Dashed boxes are held a moment before and after something is seen, for faces turning away.</p>
         <p class="muted keys">Space plays · ← → step a frame (Shift: 10) · [ ] previous / next shot · Esc deselects · Delete removes a box added by hand</p>
         <p class="muted">${found.map(({ k, n }) => `${n} ${noun(k, n)}`).join(' and ')} found · ${kept} left visible · ${p.added.length} added by hand · ${esc(this.h.keptWhere(e))}</p>
       </div>
@@ -897,7 +952,7 @@ export class Review {
           ${toggles}<button data-act="redact" class="primary">Blur ${what}…</button><button data-act="done">Done</button></div>
         <div class="rv-sel"${sel ? '' : ' hidden'}>${selHtml}</div>
       </div>
-      <details class="rv-audio"${this.doc.layers.transcript?.items.length ? ' open' : ''}><summary>Spoken words${(this.doc.layers.speakers?.items.length ?? 0) > 1 ? " and speakers" : ""}</summary>
+      <details class="rv-audio"${this.doc.layers.transcript?.items.length ? ' open' : ''}><summary>Spoken words${(this.doc.layers.speakers?.items.length ?? 0) > 1 ? ' and speakers' : ''}</summary>
         ${this.wordsForm()}<div class="rv-matches"></div></details>
       <ol class="rv-shots">${shots || `<li class="muted">No ${what} were found. Drag a box over anything to cover it.</li>`}</ol>
       ${shotsWithout ? `<p class="muted rv-foot">${shotsWithout} shot${shotsWithout === 1 ? '' : 's'} without ${what} not listed.</p>` : ''}`;

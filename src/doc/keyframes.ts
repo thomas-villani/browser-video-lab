@@ -44,7 +44,14 @@ export function selectKeyframes(scenes: SceneItem[], speech: SpeechItem[], durat
   // Fill-ins: evenly spaced inside every stretch of a shot longer than maxGap.
   const out: typeof cands = [...kept];
   for (const s of scenes) {
-    const pts = [s.t0, ...kept.filter((k) => k.t >= s.t0 && k.t < s.t1).map((k) => k.t).sort((x, y) => x - y), s.t1];
+    const pts = [
+      s.t0,
+      ...kept
+        .filter((k) => k.t >= s.t0 && k.t < s.t1)
+        .map((k) => k.t)
+        .sort((x, y) => x - y),
+      s.t1,
+    ];
     for (let i = 1; i < pts.length; i++) {
       const gap = pts[i] - pts[i - 1];
       const n = Math.ceil(gap / c.maxGap) - 1;

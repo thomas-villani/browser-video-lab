@@ -47,7 +47,13 @@ const covers = (b: Box, g: Box) => inter(g, b) / (g[2] * g[3]) >= 0.5;
 const iou = (x: Box, y: Box) => inter(x, y) / (x[2] * x[3] + y[2] * y[3] - inter(x, y) || 1);
 const padBox = ([x, y, w, h]: Box, p: number): Box => [x - w * p, y - h * p, w * (1 + 2 * p), h * (1 + 2 * p)];
 
-const BUCKETS: [string, number, number][] = [['all', 0, Infinity], ['<20px', 0, 20], ['20-40px', 20, 40], ['40-80px', 40, 80], ['>=80px', 80, Infinity]];
+const BUCKETS: [string, number, number][] = [
+  ['all', 0, Infinity],
+  ['<20px', 0, 20],
+  ['20-40px', 20, 40],
+  ['40-80px', 40, 80],
+  ['>=80px', 80, Infinity],
+];
 
 /** Predictions per labeled frame from one source. */
 type Source = { name: string; boxes: (clip: string, frame: number) => Box[] | undefined };
@@ -57,7 +63,10 @@ const dumps = new Map<string, Map<number, number[][]>>();
 const dense = (clip: string) => {
   if (!dumps.has(clip)) {
     const file = `results/${clip}.dets.json`;
-    dumps.set(clip, existsSync(file) ? new Map(JSON.parse(readFileSync(file, 'utf8')).frameDetections.map((fd: { frame: number; boxes: number[][] }) => [fd.frame, fd.boxes])) : new Map());
+    dumps.set(
+      clip,
+      existsSync(file) ? new Map(JSON.parse(readFileSync(file, 'utf8')).frameDetections.map((fd: { frame: number; boxes: number[][] }) => [fd.frame, fd.boxes])) : new Map(),
+    );
   }
   return dumps.get(clip)!;
 };
@@ -70,8 +79,17 @@ if (existsSync('public/label/retina.json')) {
 }
 for (const file of (a.pred ?? '').split(',').filter(Boolean)) {
   const run = JSON.parse(readFileSync(file, 'utf8'));
-  const clip = run.video?.url?.split('/').pop()?.replace(/\.[^.]+$/, '');
-  sources.push({ name: file.split('/').pop()!.replace(/\.json$/, ''), boxes: (c, f) => (c === clip ? run.boxes[f] : undefined) });
+  const clip = run.video?.url
+    ?.split('/')
+    .pop()
+    ?.replace(/\.[^.]+$/, '');
+  sources.push({
+    name: file
+      .split('/')
+      .pop()!
+      .replace(/\.json$/, ''),
+    boxes: (c, f) => (c === clip ? run.boxes[f] : undefined),
+  });
 }
 
 const pad = Number(a.pad);
@@ -106,7 +124,12 @@ for (const src of sources) {
       if (!frames || (!faces && bucket !== 'all')) continue;
       const r = (v: number) => Math.round(v * 1000) / 10;
       const row = {
-        source: src.name, clip, bucket, frames, faces, missed,
+        source: src.name,
+        clip,
+        bucket,
+        frames,
+        faces,
+        missed,
         missRate: r(faces ? missed / faces : 0),
         ...(bucket === 'all' && { preds, precision: r(preds ? correct / preds : 1) }),
       };
@@ -117,5 +140,7 @@ for (const src of sources) {
 }
 console.error(`${'source'.padEnd(40)}${'clip'.padEnd(15)}${'bucket'.padEnd(9)}${['faces', 'miss %', 'prec %'].map((c) => c.padStart(8)).join('')}`);
 for (const r of rows) {
-  console.error(`${r.source.slice(0, 39).padEnd(40)}${r.clip.padEnd(15)}${r.bucket.padEnd(9)}${[r.faces, r.missRate, 'precision' in r ? r.precision : ''].map((c) => String(c).padStart(8)).join('')}`);
+  console.error(
+    `${r.source.slice(0, 39).padEnd(40)}${r.clip.padEnd(15)}${r.bucket.padEnd(9)}${[r.faces, r.missRate, 'precision' in r ? r.precision : ''].map((c) => String(c).padStart(8)).join('')}`,
+  );
 }

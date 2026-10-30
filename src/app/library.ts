@@ -4,7 +4,7 @@
 // Dropped files keep their docs in memory (downloadable); a dropped .videodoc.json is matched
 // to its video by name. A face review is <video>.redact.json, next to the video likewise, and
 // speaker names and corrections <video>.speakers.json.
-import { checkEdits, checkPlan, formatDoc, formatPlan, formatEdits, parseDoc, type KeyframeItem, type RedactPlan, type SpeakerEdits, type VideoDoc } from '../doc/index.ts';
+import { checkEdits, checkPlan, formatDoc, formatEdits, formatPlan, type KeyframeItem, parseDoc, type RedactPlan, type SpeakerEdits, type VideoDoc } from '../doc/index.ts';
 
 type DirHandle = FileSystemDirectoryHandle & { values(): AsyncIterable<FileSystemDirectoryHandle | FileSystemFileHandle> };
 
@@ -123,7 +123,17 @@ export async function fromFiles(files: File[]): Promise<Entry[]> {
     .filter((f) => VIDEO_EXT.test(f.name))
     .map((f) => {
       const doc = docs.get(f.name);
-      return { id: nextId++, path: f.name, name: f.name, file: async () => f, doc, planFile: plans.get(f.name), speakersRaw: speakers.get(f.name), status: doc ? 'ready' : 'new', images: new Map() } as Entry;
+      return {
+        id: nextId++,
+        path: f.name,
+        name: f.name,
+        file: async () => f,
+        doc,
+        planFile: plans.get(f.name),
+        speakersRaw: speakers.get(f.name),
+        status: doc ? 'ready' : 'new',
+        images: new Map(),
+      } as Entry;
     });
 }
 
@@ -279,7 +289,10 @@ export interface RedactTarget {
 export async function redactTarget(e: Entry): Promise<RedactTarget | undefined> {
   const name = `${e.name.replace(/\.[^.]+$/, '')}.redacted.mp4`;
   if (e.dir) {
-    const existed = await e.dir.getFileHandle(name).then(() => true, () => false);
+    const existed = await e.dir.getFileHandle(name).then(
+      () => true,
+      () => false,
+    );
     return {
       name,
       file: await e.dir.getFileHandle(name, { create: true }),

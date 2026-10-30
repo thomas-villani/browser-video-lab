@@ -5,7 +5,13 @@ import type { VideoDoc, Word } from './schema.ts';
 
 /** One spoken token: a transcript word, or part of a hyphenated one ("well-known" is two
  *  tokens sharing the word's times). `key` names the word: "<item>.<word>". */
-interface Token { norm: string; key: string; t0: number; t1: number; text: string }
+interface Token {
+  norm: string;
+  key: string;
+  t0: number;
+  t1: number;
+  text: string;
+}
 
 /** A list entry that matched: the words it covers, by the key of the first one. */
 export interface WordMatch {
@@ -53,7 +59,12 @@ function tokens(doc: VideoDoc): Token[] {
 function wordTest(p: string, exact: boolean): (w: string) => boolean {
   if (exact) return (w) => w === p;
   if (p.includes('*')) {
-    const re = new RegExp(`^${p.split('*').map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join("[a-z0-9']*")}$`);
+    const re = new RegExp(
+      `^${p
+        .split('*')
+        .map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
+        .join("[a-z0-9']*")}$`,
+    );
     return (w) => re.test(w) || re.test(w.replace(/'s$/, ''));
   }
   const forms = new Set([p, `${p}s`, `${p}es`, `${p}'s`, `${p}s'`, `${p}ed`, `${p}d`, `${p}ing`, `${p}er`, `${p}ers`]);
@@ -68,7 +79,11 @@ function wordTest(p: string, exact: boolean): (w: string) => boolean {
  *  quotes, words match exactly (`"spic"` matches "spic" only, not "spiced"). */
 function compile(term: string): ((w: string) => boolean)[] {
   const exact = /^\s*".*"\s*$/.test(term);
-  return term.split(/[\s\-\u2013\u2014/]+/).map(normWord).filter(Boolean).map((p) => wordTest(p, exact));
+  return term
+    .split(/[\s\-\u2013\u2014/]+/)
+    .map(normWord)
+    .filter(Boolean)
+    .map((p) => wordTest(p, exact));
 }
 
 /**
@@ -87,7 +102,15 @@ export function findWords(doc: VideoDoc, terms: { term: string; label?: string }
       if (!tests.every((t, k) => t(toks[i + k].norm))) continue;
       const run = toks.slice(i, i + tests.length);
       const words = run.filter((t, k) => k === 0 || t.key !== run[k - 1].key);
-      found.push({ key: run[0].key, keys: words.map((t) => t.key), text: words.map((t) => t.text).join(' '), term: label ?? term, t0: run[0].t0, t1: run[run.length - 1].t1, order });
+      found.push({
+        key: run[0].key,
+        keys: words.map((t) => t.key),
+        text: words.map((t) => t.text).join(' '),
+        term: label ?? term,
+        t0: run[0].t0,
+        t1: run[run.length - 1].t1,
+        order,
+      });
     }
   }
   // Longest first (then the first term listed), so a match inside one already taken is dropped.
@@ -119,14 +142,75 @@ export function mergeTimes(spans: [number, number][]): [number, number][] {
  * senses (cock, dick, ass alone). Wildcards follow wordTest.
  */
 export const PROFANITY: string[] = [
-  '*fuck*', '*shit*', 'asshole*', 'arsehole*', 'jackass', 'dumbass*',
-  'son of a bitch', 'bitch*', 'bastard*', 'cunt*', 'twat*', 'wank*', 'piss',
-  'dickhead*', 'cocksucker*', 'goddamn*', 'goddam',
-  'nigger*', 'nigga*', 'faggot*', 'fag', 'retard', 'kike*', '"spic"', '"spics"', 'tranny', 'trannies',
+  '*fuck*',
+  '*shit*',
+  'asshole*',
+  'arsehole*',
+  'jackass',
+  'dumbass*',
+  'son of a bitch',
+  'bitch*',
+  'bastard*',
+  'cunt*',
+  'twat*',
+  'wank*',
+  'piss',
+  'dickhead*',
+  'cocksucker*',
+  'goddamn*',
+  'goddam',
+  'nigger*',
+  'nigga*',
+  'faggot*',
+  'fag',
+  'retard',
+  'kike*',
+  '"spic"',
+  '"spics"',
+  'tranny',
+  'trannies',
 ];
 
 /** Capitalized words that are not names. */
-const NOT_NAMES = new Set(['i', "i'm", "i'll", "i've", "i'd", 'ok', 'okay', 'mr', 'mrs', 'ms', 'dr', 'god', 'oh', 'yes', 'no', 'hey', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday', 'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december', 'english', 'american']);
+const NOT_NAMES = new Set([
+  'i',
+  "i'm",
+  "i'll",
+  "i've",
+  "i'd",
+  'ok',
+  'okay',
+  'mr',
+  'mrs',
+  'ms',
+  'dr',
+  'god',
+  'oh',
+  'yes',
+  'no',
+  'hey',
+  'monday',
+  'tuesday',
+  'wednesday',
+  'thursday',
+  'friday',
+  'saturday',
+  'sunday',
+  'january',
+  'february',
+  'march',
+  'april',
+  'may',
+  'june',
+  'july',
+  'august',
+  'september',
+  'october',
+  'november',
+  'december',
+  'english',
+  'american',
+]);
 
 /**
  * Words the transcript writes capitalized in mid-sentence and never in lowercase, by how often:
@@ -153,5 +237,8 @@ export function suggestNames(doc: VideoDoc, min = 2): { word: string; count: num
       caps.set(norm, c);
     }
   }
-  return [...caps].filter(([n, c]) => c.count >= min && !lower.has(n)).map(([, c]) => c).sort((a, b) => b.count - a.count || a.word.localeCompare(b.word));
+  return [...caps]
+    .filter(([n, c]) => c.count >= min && !lower.has(n))
+    .map(([, c]) => c)
+    .sort((a, b) => b.count - a.count || a.word.localeCompare(b.word));
 }

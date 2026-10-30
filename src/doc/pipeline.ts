@@ -10,8 +10,8 @@
 //     "models": { "coco": { "url": "/models/rfdetr_nano.onnx", "decoder": "detr", "labels": [...] } },
 //     "tracks": { "vehicles": { "model": "rfdetr", "labels": "car,truck,bus,motorcycle" } }
 //   }
-import { type ModelError, MODELS, resolveModel, type ModelConfig } from './models.ts';
-import { parseSettings, PlanError, PRODUCERS, type ConfigValue, type Overrides, type PlanContext, type ProducerSpec, type Producers } from './plan.ts';
+import { MODELS, type ModelConfig, type ModelError, resolveModel } from './models.ts';
+import { type ConfigValue, type Overrides, type PlanContext, PlanError, PRODUCERS, type ProducerSpec, type Producers, parseSettings } from './plan.ts';
 import { LAYER_NAME_RE, LAYER_NAMES } from './schema.ts';
 
 export const PIPELINE_SCHEMA = 'videodoc-pipeline/0';
@@ -43,9 +43,9 @@ export interface Pipeline {
 export const TRACK_DEFAULTS: Record<string, ConfigValue> = { model: '', labels: '', maxStride: 8, minIou: 0.3, minScore: 0.4, lowScore: 0.2, maxShift: 1, maxGap: 6 };
 
 export const TRACK_HELP: Record<string, string> = {
-  model: 'detector model (built-in or from the pipeline\'s models)',
+  model: "detector model (built-in or from the pipeline's models)",
   labels: 'keep only these labels, comma-separated; empty = all the model finds',
-  maxStride: 'coarsest spacing between detected frames (must divide the other track layers\')',
+  maxStride: "coarsest spacing between detected frames (must divide the other track layers')",
   minIou: 'overlap for two detections to count as the same object',
   minScore: 'detection score threshold',
   lowScore: 'an object seen at minScore on one side of an interval still matches this weak a detection on the other',
@@ -112,7 +112,10 @@ export const parsePipeline = (text: string, where = 'pipeline') => {
 export function pipelineContext(p?: Pipeline): Required<Pick<PlanContext, 'producers' | 'models'>> & { settings: Overrides } {
   const producers: Producers = { ...PRODUCERS };
   for (const [name, t] of Object.entries(p?.tracks ?? {})) producers[name] = trackProducer(name, t);
-  const settings = parseSettings(Object.entries(p?.settings ?? {}).map(([k, v]) => `${k}=${v}`), producers);
+  const settings = parseSettings(
+    Object.entries(p?.settings ?? {}).map(([k, v]) => `${k}=${v}`),
+    producers,
+  );
   return { producers, models: { ...p?.models }, settings };
 }
 

@@ -1,23 +1,20 @@
 // The app's renderer: the Markdown agents read, as HTML with seek targets. Run: npm test
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { highlight, newDoc, toMarkdown, withLayers, type Layer } from '../src/doc/index.ts';
-import { analysisSteps, estimate, markdownToHtml, secs, stepOf, suggestions, trackCost } from '../src/app/render.ts';
 import { decoderOf, readPreset } from '../src/app/presets.ts';
+import { analysisSteps, estimate, markdownToHtml, secs, stepOf, suggestions, trackCost } from '../src/app/render.ts';
+import { highlight, type Layer, newDoc, toMarkdown, withLayers } from '../src/doc/index.ts';
 
 const layer = <T>(items: T[]) => ({ producer: { configHash: 'h', config: {} }, items }) as unknown as Layer<T>;
-const doc = withLayers(
-  newDoc({ name: 'a <b>.mp4', fingerprint: 'v0:1:x', size: 1, duration: 70, width: 640, height: 360, fps: 25, frames: 1750, video: { codec: 'avc1' } }),
-  {
-    speech: layer([{ t0: 0, t1: 70 }]),
-    transcript: layer([{ t0: 61, t1: 65, text: 'The zoning board approved it.' }]),
-    scenes: layer([
-      { t0: 0, t1: 1, f0: 0, f1: 24, score: 0 },
-      { t0: 1, t1: 70, f0: 25, f1: 1749, score: 0.5 },
-    ]),
-    keyframes: layer([{ t: 1.5, frame: 37, scene: 1, why: 'scene' }]),
-  },
-);
+const doc = withLayers(newDoc({ name: 'a <b>.mp4', fingerprint: 'v0:1:x', size: 1, duration: 70, width: 640, height: 360, fps: 25, frames: 1750, video: { codec: 'avc1' } }), {
+  speech: layer([{ t0: 0, t1: 70 }]),
+  transcript: layer([{ t0: 61, t1: 65, text: 'The zoning board approved it.' }]),
+  scenes: layer([
+    { t0: 0, t1: 1, f0: 0, f1: 24, score: 0 },
+    { t0: 1, t1: 70, f0: 25, f1: 1749, score: 0.5 },
+  ]),
+  keyframes: layer([{ t: 1.5, frame: 37, scene: 1, why: 'scene' }]),
+});
 
 test('render: header, compact empty shots, timed paragraphs, keyframes, escaping', () => {
   const html = markdownToHtml(toMarkdown(doc, { image: (k) => `kf:${k.frame}` }), (f) => (f === 37 ? 'blob:x' : undefined));
@@ -28,7 +25,11 @@ test('render: header, compact empty shots, timed paragraphs, keyframes, escaping
   assert.match(html, /<figure class="kf" data-t="1" data-frame="37"><img src="blob:x"/);
   assert.match(html, /<p class="said" data-t="61"><button class="ts" data-t="61">01:01<\/button> The zoning board approved it\.<\/p>/);
   // Search terms show as <mark>.
-  const marked = markdownToHtml(toMarkdown(doc), () => undefined, (t) => highlight(t, new Set(['zon', 'board'])));
+  const marked = markdownToHtml(
+    toMarkdown(doc),
+    () => undefined,
+    (t) => highlight(t, new Set(['zon', 'board'])),
+  );
   assert.match(marked, /The <mark>zoning<\/mark> <mark>board<\/mark> approved/);
   assert.equal(secs('1:01:23'), 3683);
 });
@@ -77,6 +78,12 @@ test('presets: local model files become object URLs; missing ones say how to sup
   assert.equal(p.pipeline.models!.logos.url, './models/logos.onnx', 'the preset keeps its paths, for saving');
   assert.equal(decoderOf(p.pipeline, 'vehicles'), 'detr', 'built-in models are known');
   assert.equal(decoderOf(p.pipeline, 'logos'), 'yolo');
-  await assert.rejects(readPreset(text, 'dashcam.json', async () => undefined, 'pick them'), /model file \.\/models\/logos\.onnx not found; pick them/);
-  await assert.rejects(readPreset('{"schema": "x"', 'bad.json', async () => undefined, ''), /bad\.json: not JSON/);
+  await assert.rejects(
+    readPreset(text, 'dashcam.json', async () => undefined, 'pick them'),
+    /model file \.\/models\/logos\.onnx not found; pick them/,
+  );
+  await assert.rejects(
+    readPreset('{"schema": "x"', 'bad.json', async () => undefined, ''),
+    /bad\.json: not JSON/,
+  );
 });

@@ -1,8 +1,9 @@
 // The compute page the CLI drives (analyze.html). It exposes window.videodoc and does nothing
 // on its own; the driver calls compute()/check() with page.evaluate and receives progress
 // through window.__videodocProgress (if the driver exposed it).
-import type { PlannedLayer, Layers, RedactOptions, Track, VideoDoc } from './doc/index.ts';
+
 import { computeLayers, frameImages, type Progress } from './analyze';
+import type { Layers, PlannedLayer, RedactOptions, Track, VideoDoc } from './doc/index.ts';
 import { redact } from './redact';
 import { decodeAudio } from './runtime/audio';
 import { Diarizer } from './runtime/diarize';

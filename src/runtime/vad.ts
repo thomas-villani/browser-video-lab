@@ -1,9 +1,9 @@
 // Voice activity detection with Silero VAD v5 (MIT, ~2 MB) on onnxruntime-web's wasm backend:
 // 32 ms windows at 16 kHz, recurrent state carried across windows.
 import * as ort from 'onnxruntime-web/webgpu';
-import { DEFAULT_VAD, speechSpans, type Span, type VadOptions } from '../transcript';
-import type { Pcm } from './audio';
+import { DEFAULT_VAD, type Span, speechSpans, type VadOptions } from '../transcript';
 import { asset } from './asset';
+import type { Pcm } from './audio';
 
 ort.env.wasm.wasmPaths = asset('/ort/');
 

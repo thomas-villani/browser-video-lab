@@ -7,10 +7,10 @@ import { copyFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } fr
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { TestContext } from 'node:test';
-import { check, ROOT, warmBrowser, type Context } from '../../cli/lib.ts';
-import { parseDoc, type VideoDoc } from '../../src/doc/index.ts';
+import { type Context, check, ROOT, warmBrowser } from '../../cli/lib.ts';
 // @ts-expect-error untyped JS
-import { fixturePath, FIXTURES } from '../../scripts/fixtures.mjs';
+import { FIXTURES, fixturePath } from '../../scripts/fixtures.mjs';
+import { parseDoc, type VideoDoc } from '../../src/doc/index.ts';
 
 export const VERBOSE = Boolean(process.env.VIDEODOC_TEST_VERBOSE);
 const UPDATE = Boolean(process.env.UPDATE_BASELINE);

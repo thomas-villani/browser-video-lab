@@ -1,9 +1,9 @@
 // Speech-to-text with Whisper via transformers.js (its own ONNX Runtime build, WebGPU).
 // Models load from public/models/<repo>/ (fetch with scripts/fetch-model.mjs), never remotely.
-import { env, pipeline, type AutomaticSpeechRecognitionPipeline } from '@huggingface/transformers';
+import { type AutomaticSpeechRecognitionPipeline, env, pipeline } from '@huggingface/transformers';
 import { dropRepeats, type Span } from '../transcript';
-import type { Pcm } from './audio';
 import { asset } from './asset';
+import type { Pcm } from './audio';
 
 env.allowRemoteModels = false;
 env.allowLocalModels = true; // off by default in browsers

@@ -12,15 +12,21 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { ROOT } from '../cli/lib.ts';
-import { diarize, type WindowSeg } from '../src/audio/diarize.ts';
 import { der, parseRttm } from '../src/audio/der.ts';
+import { diarize, type WindowSeg } from '../src/audio/diarize.ts';
 import { PRODUCERS } from '../src/doc/index.ts';
 // @ts-expect-error untyped JS
 import { AMI, MEETINGS } from './fetch-ami.mjs';
 
 const { values: a } = parseArgs({ options: { parts: { type: 'string', default: '2,3,4' }, step: { type: 'string', default: String(PRODUCERS.speakers.defaults.step) } } });
 
-interface Voice { meeting: string; part: number; who: string; voice: Float32Array; seconds: number }
+interface Voice {
+  meeting: string;
+  part: number;
+  who: string;
+  voice: Float32Array;
+  seconds: number;
+}
 const dist = (x: Float32Array, y: Float32Array) => 1 - x.reduce((s, v, i) => s + v * y[i], 0);
 const out: Record<string, unknown> = {};
 for (const parts of a.parts.split(',').map(Number)) {
@@ -30,7 +36,10 @@ for (const parts of a.parts.split(',').map(Number)) {
     if (!existsSync(cache)) throw new Error(`${cache} missing: node scripts/eval-speakers.ts --meetings ${m} --step ${a.step}`);
     const inputs = JSON.parse(readFileSync(cache, 'utf8')) as { t0: number; windows: { start: number; act: string }[]; embeddings: (number[] | null)[][] };
     const ref = parseRttm(readFileSync(join(ROOT, AMI, `${m}.rttm`), 'utf8'));
-    const [, , u0, u1] = readFileSync(join(ROOT, AMI, `${m}.uem`), 'utf8').trim().split(/\s+/).map(Number);
+    const [, , u0, u1] = readFileSync(join(ROOT, AMI, `${m}.uem`), 'utf8')
+      .trim()
+      .split(/\s+/)
+      .map(Number);
     const len = (u1 - u0) / parts;
     for (let p = 0; p < parts; p++) {
       const [p0, p1] = [u0 + p * len, u0 + (p + 1) * len];
@@ -67,12 +76,21 @@ for (const parts of a.parts.split(',').map(Number)) {
     otherAccepted: +(other.filter((d) => d < t).length / other.length).toFixed(3),
     otherMeetingAccepted: +(otherMeeting.filter((d) => d < t).length / Math.max(1, otherMeeting.length)).toFixed(3),
   }));
-  const minutes = +(MEETINGS.reduce((n: number, m: string) => {
-    const [, , u0, u1] = readFileSync(join(ROOT, AMI, `${m}.uem`), 'utf8').trim().split(/\s+/).map(Number);
-    return n + (u1 - u0) / 60;
-  }, 0) / MEETINGS.length / parts).toFixed(1);
+  const minutes = +(
+    MEETINGS.reduce((n: number, m: string) => {
+      const [, , u0, u1] = readFileSync(join(ROOT, AMI, `${m}.uem`), 'utf8')
+        .trim()
+        .split(/\s+/)
+        .map(Number);
+      return n + (u1 - u0) / 60;
+    }, 0) /
+    MEETINGS.length /
+    parts
+  ).toFixed(1);
   const row = {
-    parts, minutesPerPart: minutes, voices: voices.length,
+    parts,
+    minutesPerPart: minutes,
+    voices: voices.length,
     same: { n: same.length, min: q(same, 0), median: q(same, 0.5), p90: q(same, 0.9), max: q(same, 1) },
     other: { n: other.length, min: q(other, 0), p10: q(other, 0.1), median: q(other, 0.5) },
     otherMeeting: { n: otherMeeting.length, min: q(otherMeeting, 0), median: q(otherMeeting, 0.5) },

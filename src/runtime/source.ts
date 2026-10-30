@@ -1,5 +1,5 @@
 // Sequential frame access with frame indices, over mediabunny.
-import { ALL_FORMATS, BlobSource, Input, UrlSource, VideoSampleSink, type InputVideoTrack } from 'mediabunny';
+import { ALL_FORMATS, BlobSource, Input, type InputVideoTrack, UrlSource, VideoSampleSink } from 'mediabunny';
 
 /** A video by URL (range requests) or as a File/Blob. */
 export type MediaInput = string | Blob;
@@ -31,7 +31,7 @@ export async function probe(input: MediaInput): Promise<Probe> {
     height: video.displayHeight,
     fps: Math.round(stats.averagePacketRate * 1000) / 1000,
     frames: stats.packetCount,
-    video: { codec: await video.getCodecParameterString() ?? video.codec ?? 'unknown' },
+    video: { codec: (await video.getCodecParameterString()) ?? video.codec ?? 'unknown' },
     ...(audio && { audio: { codec: (await audio.getCodecParameterString()) ?? audio.codec ?? 'unknown', sampleRate: audio.sampleRate, channels: audio.numberOfChannels } }),
   };
 }

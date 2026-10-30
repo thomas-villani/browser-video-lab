@@ -9,9 +9,10 @@ import type { KeyframeItem, TranscriptItem, VideoDoc } from './schema.ts';
 import { findSpeaker, speakerAt, speakerName, whoSaid } from './speakers.ts';
 
 const STOP = new Set(
-  ('a an and are as at be been but by can did do does for from had has have he her his i if in into is it its me my no not of on or our ' +
-    'she so than that the their them then there these they this to too up us was we were what when where which who will with would you your')
-    .split(' '),
+  (
+    'a an and are as at be been but by can did do does for from had has have he her his i if in into is it its me my no not of on or our ' +
+    'she so than that the their them then there these they this to too up us was we were what when where which who will with would you your'
+  ).split(' '),
 );
 
 /** Crude English stemming, applied alike to queries and passages ("cuts" ~ "cut", "taxes" ~ "tax"). */
@@ -30,7 +31,10 @@ const words = (s: string) => s.toLowerCase().match(/[\p{L}\p{N}]+(?:['’][\p{L}
 
 /** Index terms of a text: lowercased words, stopwords dropped, stemmed. */
 export function terms(s: string): string[] {
-  return words(s).map((w) => w.replace('’', "'")).filter((w) => !STOP.has(w)).map(stem);
+  return words(s)
+    .map((w) => w.replace('’', "'"))
+    .filter((w) => !STOP.has(w))
+    .map(stem);
 }
 
 export interface Passage {
@@ -49,7 +53,10 @@ export function passages(items: TranscriptItem[], doc: number, window: number): 
   for (let i = 0; i < items.length; i++) {
     let j = i;
     while (j + 1 < items.length && items[j + 1].t1 - items[i].t0 <= window) j++;
-    const text = items.slice(i, j + 1).map((x) => x.text.trim()).join(' ');
+    const text = items
+      .slice(i, j + 1)
+      .map((x) => x.text.trim())
+      .join(' ');
     if (text) out.push({ doc, t0: items[i].t0, t1: items[j].t1, i0: i, i1: j, text });
   }
   return out;
@@ -128,7 +135,12 @@ export function search(docs: VideoDoc[], query: string, o: SearchOptions = {}): 
   const df = new Map<string, number>(q.map((t) => [t, 0]));
   for (const t of toks) for (const w of new Set(t)) if (df.has(w)) df.set(w, df.get(w)! + 1);
   const idf = (t: string) => Math.log(1 + (all.length - df.get(t)! + 0.5) / (df.get(t)! + 0.5));
-  const phrase = q.length > 1 ? words(query).filter((w) => !STOP.has(w)).join(' ') : '';
+  const phrase =
+    q.length > 1
+      ? words(query)
+          .filter((w) => !STOP.has(w))
+          .join(' ')
+      : '';
 
   const scored: { p: Passage; score: number; matched: string[] }[] = [];
   all.forEach((p, i) => {
@@ -137,7 +149,14 @@ export function search(docs: VideoDoc[], query: string, o: SearchOptions = {}): 
     if (!tf.size) return;
     let score = 0;
     for (const [t, f] of tf) score += (idf(t) * f * (k1 + 1)) / (f + k1 * (1 - b + (b * toks[i].length) / avg));
-    if (phrase && words(p.text).filter((w) => !STOP.has(w)).join(' ').includes(phrase)) score *= 1.5;
+    if (
+      phrase &&
+      words(p.text)
+        .filter((w) => !STOP.has(w))
+        .join(' ')
+        .includes(phrase)
+    )
+      score *= 1.5;
     scored.push({ p, score, matched: [...tf.keys()] });
   });
   scored.sort((x, y) => y.score - x.score || x.p.doc - y.p.doc || x.p.t0 - y.p.t0);
@@ -156,8 +175,15 @@ export function search(docs: VideoDoc[], query: string, o: SearchOptions = {}): 
     const who = id !== undefined ? spk!.find((x) => x.id === id) : undefined;
     const { src } = cutDown[s.p.doc];
     hits.push({
-      ...s.p, i0: src[s.p.i0], i1: src[s.p.i1], score: Math.round(s.score * 1000) / 1000, at, matched: s.matched, snippet: highlight(s.p.text, new Set(s.matched)),
-      ...(keyframe !== undefined && { keyframe }), ...(who && { speaker: speakerName(who), speakerId: who.id }),
+      ...s.p,
+      i0: src[s.p.i0],
+      i1: src[s.p.i1],
+      score: Math.round(s.score * 1000) / 1000,
+      at,
+      matched: s.matched,
+      snippet: highlight(s.p.text, new Set(s.matched)),
+      ...(keyframe !== undefined && { keyframe }),
+      ...(who && { speaker: speakerName(who), speakerId: who.id }),
     });
   }
   return hits;

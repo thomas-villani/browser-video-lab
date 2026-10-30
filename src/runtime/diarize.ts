@@ -3,11 +3,12 @@
 // (WebGPU), from Kaldi-style fbank features of the frames where that speaker talks alone. The
 // clustering that turns these into speakers is pure: src/audio/diarize.ts. Models load from
 // public/models/<repo>/onnx/ (scripts/fetch-model.mjs).
-import * as ort from 'onnxruntime-web/webgpu';
+
 import { WeSpeakerFeatureExtractor } from '@huggingface/transformers';
-import { decodePowerset, embeddingMask, SEG, windowStarts, type WindowSeg } from '../audio/diarize.ts';
-import type { Pcm } from './audio';
+import * as ort from 'onnxruntime-web/webgpu';
+import { decodePowerset, embeddingMask, SEG, type WindowSeg, windowStarts } from '../audio/diarize.ts';
 import { asset } from './asset';
+import type { Pcm } from './audio';
 
 ort.env.wasm.wasmPaths = asset('/ort/');
 

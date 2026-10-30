@@ -10,12 +10,25 @@ import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequestSchema, type CallToolResult, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { LAYER_NAMES, PlanError, PRODUCERS, REDACT_DEFAULTS, REDACT_KINDS, REDACT_SOUNDS, REDACT_STYLES, VERSION } from '../src/doc/index.ts';
 import {
-  analyze, check, DEFAULT_IMAGE_SIZE, DEFAULT_LAYERS, info, layers, MARKDOWN_LAYERS, markdown, redact, search, speakers, UsageError, warmBrowser,
+  analyze,
+  type Context,
+  check,
+  DEFAULT_IMAGE_SIZE,
+  DEFAULT_LAYERS,
+  info,
+  layers,
+  MARKDOWN_LAYERS,
+  markdown,
+  type Progress,
+  redact,
   type SpeakersOptions,
-  type Context, type Progress,
+  search,
+  speakers,
+  UsageError,
+  warmBrowser,
 } from './lib.ts';
 
 // stdout carries the protocol: anything else that prints (vite, libraries) goes to stderr.
@@ -35,7 +48,7 @@ const browser = warmBrowser({ browser: a.browser!, headed: a.headed! }, Number(p
 const settingsList = LAYER_NAMES.flatMap((n) => Object.entries(PRODUCERS[n].defaults).map(([k, v]) => `${n}.${k}=${v}`)).join(', ');
 const layerList = LAYER_NAMES.map((n) => `${n}: ${PRODUCERS[n].description}${PRODUCERS[n].needs.length ? ` Needs ${PRODUCERS[n].needs.join(', ')}.` : ''}`).join('\n');
 
-const VIDEO = { type: 'string', description: 'Path to a local video file (absolute, or relative to the server\'s working directory).' };
+const VIDEO = { type: 'string', description: "Path to a local video file (absolute, or relative to the server's working directory)." };
 const LAYERS = {
   type: 'array',
   items: { type: 'string' },
@@ -43,7 +56,8 @@ const LAYERS = {
 };
 const PIPELINE = {
   type: 'string',
-  description: 'Path to a pipeline preset (JSON, videodoc-pipeline/0): its layers (when layers is not given), settings (set wins), models and track layers, e.g. a "vehicles" layer from a COCO detector. The layers tool lists its layers and settings.',
+  description:
+    'Path to a pipeline preset (JSON, videodoc-pipeline/0): its layers (when layers is not given), settings (set wins), models and track layers, e.g. a "vehicles" layer from a COCO detector. The layers tool lists its layers and settings.',
 };
 const SET = {
   type: 'array',
@@ -67,7 +81,11 @@ const TOOLS = [
         video: VIDEO,
         layers: { ...LAYERS, description: `Extra layers to include, e.g. ["faces"] for face counts per shot. ${LAYERS.description}` },
         images: { type: 'boolean', description: `Extract keyframe JPEGs (${DEFAULT_IMAGE_SIZE} px, into <video>.keyframes/) and link them by absolute path.` },
-        embedImages: { type: 'integer', minimum: 0, description: 'Also return up to this many keyframes as image content, evenly spread over the video (implies images). Default 0.' },
+        embedImages: {
+          type: 'integer',
+          minimum: 0,
+          description: 'Also return up to this many keyframes as image content, evenly spread over the video (implies images). Default 0.',
+        },
         imageSize: { type: 'integer', minimum: 16, description: `Long side of extracted keyframes, px (default ${DEFAULT_IMAGE_SIZE}; existing files are reused).` },
         out: { type: 'string', description: 'Also write the Markdown to this path (image links relative to it).' },
         from: { type: ['string', 'number'], description: 'Only render from this time: seconds, "mm:ss" or "h:mm:ss" (e.g. a search hit\'s start minus a minute).' },
@@ -118,16 +136,17 @@ const TOOLS = [
           items: {
             type: 'object',
             properties: {
-              t0: { type: ['number', 'string'] }, t1: { type: ['number', 'string'] },
+              t0: { type: ['number', 'string'] },
+              t1: { type: ['number', 'string'] },
               to: { type: 'string', description: 'Who says it: a speaker, or a new name (adds a speaker the analysis missed).' },
-              from: { type: 'string', description: 'Only this speaker\'s speech moves (default: all speech in t0-t1 becomes to\'s).' },
+              from: { type: 'string', description: "Only this speaker's speech moves (default: all speech in t0-t1 becomes to's)." },
             },
             required: ['t0', 't1', 'to'],
           },
           description: 'Speech given to the wrong speaker: times in seconds, "mm:ss" or "h:mm:ss".',
         },
         unmove: { type: 'array', items: { type: 'integer' }, description: 'Moves to undo, by index (as listed).' },
-        voices: { type: 'array', items: { type: 'string' }, description: 'Folders whose speakers files name voices, for suggestions (the video\'s folder is always searched).' },
+        voices: { type: 'array', items: { type: 'string' }, description: "Folders whose speakers files name voices, for suggestions (the video's folder is always searched)." },
         reset: { type: 'boolean', description: 'Delete the speakers file first (all edits).' },
       },
       required: ['video'],
@@ -141,7 +160,14 @@ const TOOLS = [
       `Default layers: ${DEFAULT_LAYERS.join(', ')}. Cached layers are reused, so repeating a call is cheap.`,
     inputSchema: {
       type: 'object',
-      properties: { video: { ...VIDEO, description: `${VIDEO.description} A folder analyzes every video in it.` }, layers: LAYERS, pipeline: PIPELINE, set: SET, force: FORCE, dryRun: DRY_RUN },
+      properties: {
+        video: { ...VIDEO, description: `${VIDEO.description} A folder analyzes every video in it.` },
+        layers: LAYERS,
+        pipeline: PIPELINE,
+        set: SET,
+        force: FORCE,
+        dryRun: DRY_RUN,
+      },
       required: ['video'],
     },
   },
@@ -163,19 +189,46 @@ const TOOLS = [
         out: { type: 'string', description: 'Output MP4 path (default: <name>.redacted.mp4 next to the video).' },
         style: { type: 'string', enum: REDACT_STYLES, description: `How faces are covered (default ${REDACT_DEFAULTS.style}; fill leaves nothing to undo).` },
         margin: { type: 'number', minimum: 0, maximum: 2, description: `Grow each face box by this fraction on every side (default ${REDACT_DEFAULTS.margin}).` },
-        hold: { type: 'number', minimum: 0, maximum: 10, description: `Seconds to keep covering before and after each face track, within its shot (default ${REDACT_DEFAULTS.hold}).` },
+        hold: {
+          type: 'number',
+          minimum: 0,
+          maximum: 10,
+          description: `Seconds to keep covering before and after each face track, within its shot (default ${REDACT_DEFAULTS.hold}).`,
+        },
         keep: { type: 'array', items: { type: 'integer', minimum: 1 }, description: "Face track ids to leave visible (replaces the review's)." },
-        keepPlates: { type: 'array', items: { type: 'integer', minimum: 1 }, description: "Plate track ids to leave visible, e.g. a sign taken for a plate (replaces the review's)." },
-        cover: { type: 'array', items: { type: 'string' }, description: `Track layers to cover: ${REDACT_KINDS.join(', ')} or a pipeline's (default faces and plates; [] copies the video and redacts audio only).` },
-        keepTracks: { type: 'object', additionalProperties: { type: 'array', items: { type: 'integer', minimum: 1 } }, description: 'A pipeline\'s track layers: ids to leave visible, by layer, e.g. {"vehicles": [3]}.' },
+        keepPlates: {
+          type: 'array',
+          items: { type: 'integer', minimum: 1 },
+          description: "Plate track ids to leave visible, e.g. a sign taken for a plate (replaces the review's).",
+        },
+        cover: {
+          type: 'array',
+          items: { type: 'string' },
+          description: `Track layers to cover: ${REDACT_KINDS.join(', ')} or a pipeline's (default faces and plates; [] copies the video and redacts audio only).`,
+        },
+        keepTracks: {
+          type: 'object',
+          additionalProperties: { type: 'array', items: { type: 'integer', minimum: 1 } },
+          description: 'A pipeline\'s track layers: ids to leave visible, by layer, e.g. {"vehicles": [3]}.',
+        },
         pipeline: PIPELINE,
-        words: { type: 'array', items: { type: 'string' }, description: 'Words and phrases to bleep (names, places, numbers). Plain words also match plurals, possessives, -ed and -ing; * is a wildcard; a "quoted" entry matches exactly. Replaces the review\'s.' },
+        words: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Words and phrases to bleep (names, places, numbers). Plain words also match plurals, possessives, -ed and -ing; * is a wildcard; a "quoted" entry matches exactly. Replaces the review\'s.',
+        },
         profanity: { type: 'boolean', description: 'Also bleep the built-in strong-language list (default false).' },
         sound: { type: 'string', enum: REDACT_SOUNDS, description: `bleep (a 1 kHz tone) or mute (default ${REDACT_DEFAULTS.sound}).` },
         lead: { type: 'number', minimum: 0, maximum: 5, description: `Seconds covered before each word (default ${REDACT_DEFAULTS.lead}; word times run late).` },
         tail: { type: 'number', minimum: 0, maximum: 5, description: `Seconds covered after each word (default ${REDACT_DEFAULTS.tail}).` },
         keepWords: { type: 'array', items: { type: 'string' }, description: 'Matches to leave audible, by word key from the log, e.g. "12.3".' },
-        speakers: { type: 'array', items: { type: 'string' }, description: 'Speakers to bleep everything they say (names given with the speakers tool, or "Speaker 2"); analyzes the speakers layer if missing. Replaces the review\'s.' },
+        speakers: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Speakers to bleep everything they say (names given with the speakers tool, or "Speaker 2"); analyzes the speakers layer if missing. Replaces the review\'s.',
+        },
         plan: { type: 'boolean', description: 'false: ignore <video>.redact.json (default true).' },
         set: SET,
         force: FORCE,
@@ -290,7 +343,11 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra): Promise<Call
       case 'search': {
         if (typeof args.query !== 'string') throw new UsageError('query is required');
         if (!Array.isArray(args.paths) || !args.paths.length) throw new UsageError('paths is required: video files or folders to search');
-        return { content: [{ type: 'text', text: json(search(ctx, args.query, args.paths as string[], { top: args.top as number | undefined, speaker: args.speaker as string | undefined })) }] };
+        return {
+          content: [
+            { type: 'text', text: json(search(ctx, args.query, args.paths as string[], { top: args.top as number | undefined, speaker: args.speaker as string | undefined })) },
+          ],
+        };
       }
       case 'speakers':
         return { content: [{ type: 'text', text: json(speakers(ctx, video(), args as SpeakersOptions)) }] };
@@ -303,12 +360,25 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra): Promise<Call
               type: 'text',
               text: json(
                 await redact(ctx, video(), {
-                  set: common.set, force: common.force, dryRun: common.dryRun, pipeline: common.pipeline, keepTracks: args.keepTracks as Record<string, number[]> | undefined,
-                  out: args.out as string | undefined, style: args.style as string | undefined,
-                  margin: args.margin as number | undefined, hold: args.hold as number | undefined, keep: args.keep as number[] | undefined,
-                  keepPlates: args.keepPlates as number[] | undefined, cover: args.cover as string[] | undefined, plan: args.plan as boolean | undefined,
-                  words: args.words as string[] | undefined, profanity: args.profanity as boolean | undefined, sound: args.sound as string | undefined,
-                  lead: args.lead as number | undefined, tail: args.tail as number | undefined, keepWords: args.keepWords as string[] | undefined,
+                  set: common.set,
+                  force: common.force,
+                  dryRun: common.dryRun,
+                  pipeline: common.pipeline,
+                  keepTracks: args.keepTracks as Record<string, number[]> | undefined,
+                  out: args.out as string | undefined,
+                  style: args.style as string | undefined,
+                  margin: args.margin as number | undefined,
+                  hold: args.hold as number | undefined,
+                  keep: args.keep as number[] | undefined,
+                  keepPlates: args.keepPlates as number[] | undefined,
+                  cover: args.cover as string[] | undefined,
+                  plan: args.plan as boolean | undefined,
+                  words: args.words as string[] | undefined,
+                  profanity: args.profanity as boolean | undefined,
+                  sound: args.sound as string | undefined,
+                  lead: args.lead as number | undefined,
+                  tail: args.tail as number | undefined,
+                  keepWords: args.keepWords as string[] | undefined,
                   speakers: args.speakers as string[] | undefined,
                 }),
               ),
