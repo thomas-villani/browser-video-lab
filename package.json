@@ -35,7 +35,7 @@
     "@huggingface/transformers": "^4.3.1",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "mediabunny": "^1.62.1",
-    "onnxruntime-web": "^1.30.0"
+    "onnxruntime-web": "^1.31.1"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.4",
